@@ -37,5 +37,10 @@
     "url": "https://github.com/webdevtodayjason/onelane/archive/refs/tags/v0.1.0.tar.gz",
     "sha256": "32d62db80bd789206753a418f341604304d69a0bfc8c1823f5f3e4ace9af2ab9",
     "size": 168709
+  },
+  "media": {},
+  "links": {
+    "repo": "https://github.com/webdevtodayjason/onelane",
+    "homepage": "https://github.com/webdevtodayjason/onelane"
   }
 }

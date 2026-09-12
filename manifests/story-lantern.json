@@ -46,5 +46,10 @@
     "url": "https://github.com/webdevtodayjason/story-lantern/archive/refs/tags/v0.1.0.tar.gz",
     "sha256": "94be154239515236baf8bc8b3f0163ffd6c36cb8e68eae928eee85e1cd3a8541",
     "size": 3676365
+  },
+  "media": {},
+  "links": {
+    "repo": "https://github.com/webdevtodayjason/story-lantern",
+    "homepage": "https://github.com/webdevtodayjason/story-lantern"
   }
 }

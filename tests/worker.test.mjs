@@ -308,3 +308,182 @@ test('bounded streaming response cancels as soon as its cap is exceeded', async 
 test('release URLs reject credential-bearing and local origins', () => {
   for (const url of ['file:///etc/passwd', 'http://example.org/a', 'https://user:pass@example.org/a', 'https://127.1/a', 'https://[::1]/a', 'https://localhost/a', 'https://host.internal/a']) assert.throws(() => releaseURL(url));
 });
+
+test('maker defaults, proof-derived stable handle, private farm and escaped public page', async () => {
+  const f = fixture(), first = await f.email();
+  assert.equal(first.user.handle, null); assert.equal(first.user.bio, ''); assert.equal(first.user.avatarKey, null);
+  assert.equal((await f.call('/farm/')).headers.get('Location'), '/seeds/');
+  assert.equal((await f.call('/seeds/mine/')).headers.get('Location'), '/farm/');
+  assert.equal((await f.call('/makers/unknown/')).status, 404);
+  await f.proof(first.cookie);
+  const user = (await (await f.call('/api/me', undefined, first.cookie)).json()).user;
+  assert.match(user.handle, /^aster-fern-[a-f0-9]{4}$/);
+  assert.equal((await f.call('/farm/', undefined, first.cookie)).headers.get('Cache-Control'), 'private, no-store');
+  assert.equal((await f.call('/api/maker', { bio: '<script>bad</script>', links: { website: 'https://example.org/' }, handle: 'stolen' }, first.cookie)).status, 200);
+  assert.equal((await f.call('/api/maker', { bio: 'x'.repeat(601), links: {} }, first.cookie)).status, 400);
+  assert.equal((await f.call('/api/maker', { bio: '', links: { website: 'javascript:alert(1)' } }, first.cookie)).status, 400);
+  f.env.ASSETS.fetch = async () => new Response(JSON.stringify([
+    { id: 'merged-seed', name: 'A <seed>', pitch: 'In the field', author: { tiinyverse: PROFILE } },
+    { id: 'other-seed', name: 'Other', author: { tiinyverse: 'other' } },
+  ]));
+  const page = await f.call('/makers/' + user.handle + '/'); assert.equal(page.status, 200);
+  const html = await page.text(); assert.ok(html.includes('&lt;script&gt;')); assert.ok(!html.includes('<script>bad'));
+  assert.ok(html.includes('/apps/merged-seed/')); assert.ok(!html.includes('other-seed'));
+  assert.equal((await (await f.call('/api/me', undefined, first.cookie)).json()).user.handle, user.handle);
+});
+
+test('media uses sniffed types, caps bodies, enforces owner deletion and origin, serves safely', async () => {
+  const f = fixture(), first = await f.email(), second = await f.email('other@example.org');
+  const current = createApp({ proofRoutes, seedRoutes, fetcher: f.fetcher, now: () => Date.parse('2026-09-12T12:00:00Z') });
+  const send = (path, method, body, session = first.cookie, origin = ORIGIN) => current(new Request(ORIGIN + path, {
+    method, body, headers: { Cookie: session, Origin: origin, 'Content-Type': 'image/png' },
+  }), f.env);
+  const png = Uint8Array.from([137,80,78,71,13,10,26,10,0]);
+  assert.equal((await send('/api/media', 'POST', png)).status, 403);
+  await f.proof(first.cookie);
+  assert.equal((await send('/api/media', 'POST', '<svg></svg>')).status, 415);
+  assert.equal((await send('/api/media', 'POST', new Uint8Array(2 * 1024 * 1024 + 1))).status, 413);
+  const uploaded = await send('/api/media', 'POST', png); assert.equal(uploaded.status, 201);
+  const { key, url } = await uploaded.json(); assert.ok(key.startsWith('media/' + first.user.id + '/'));
+  const served = await worker.fetch(new Request(url), f.env);
+  assert.equal(served.headers.get('Content-Type'), 'image/png'); assert.equal(served.headers.get('X-Content-Type-Options'), 'nosniff');
+  assert.match(served.headers.get('Cache-Control'), /31536000/); assert.deepEqual(new Uint8Array(await served.arrayBuffer()), png);
+  assert.equal((await f.call('/api/maker', { bio: '', links: {}, avatarKey: key }, first.cookie)).status, 200);
+  assert.equal((await f.call('/api/maker', { bio: '', links: {}, avatarKey: key }, second.cookie)).status, 400);
+  assert.equal((await send('/api/' + key, 'DELETE', undefined, second.cookie)).status, 403);
+  assert.equal((await send('/api/' + key, 'DELETE', undefined, first.cookie, 'https://evil.example')).status, 403);
+  assert.equal((await send('/api/' + key, 'DELETE')).status, 200);
+  assert.equal((await worker.fetch(new Request(url), f.env)).status, 404);
+  assert.equal((await (await f.call('/api/me', undefined, first.cookie)).json()).user.avatarKey, null);
+});
+
+test('seed media and links survive the bot PR; shared schema caps gallery and rejects unsafe/video URLs', async () => {
+  const f = fixture(), first = await f.email(); await f.proof(first.cookie);
+  const media = { icon: 'https://tiinyapp.farm/media/maker/face.png', header: 'https://example.org/header.webp', gallery: ['https://example.org/gallery.jpg'] };
+  const response = await f.call('/api/seeds', seedForm({ media: JSON.stringify(media), video: 'https://youtu.be/abcdefghijk', repo: 'https://example.org/source', homepage: 'https://example.org/' }), first.cookie);
+  assert.equal(response.status, 201); assert.deepEqual(f.manifests[0].media, media);
+  assert.deepEqual(f.manifests[0].links, { repo: 'https://example.org/source', video: 'https://youtu.be/abcdefghijk', homepage: 'https://example.org/' });
+  const base = f.manifests[0];
+  const valid = structuredClone(base); delete valid.homepage; checkManifest(valid);
+  const invalid = [
+    { media: { gallery: Array.from({ length: 9 }, (_, i) => `https://example.org/${i}.png`) } },
+    { media: { icon: 'http://example.org/image.png' } }, { media: { icon: 'javascript:alert(1)' } },
+    { media: { icon: 'https://user:pass@example.org/x.png' } },
+    { links: { video: 'https://youtube.com.evil.example/watch?v=abcdefghijk' } },
+    { links: { video: 'https://youtube.com/watch?v=short' } },
+    { links: { repo: 'http://example.org/source' } },
+  ];
+  for (const changes of invalid) {
+    const manifest = { ...base, ...changes }; assert.throws(() => checkManifest(manifest));
+    const python = spawnSync('python3', ['-c', 'import json,sys,runpy; runpy.run_path("scripts/check-manifest.py")["check_manifest"](json.load(sys.stdin))'], { input: JSON.stringify(manifest), encoding: 'utf8' });
+    assert.notEqual(python.status, 0, JSON.stringify(changes));
+  }
+  const python = spawnSync('python3', ['-c', 'import json,sys,runpy; runpy.run_path("scripts/check-manifest.py")["check_manifest"](json.load(sys.stdin))'], { input: JSON.stringify(valid), encoding: 'utf8' });
+  assert.equal(python.status, 0, python.stderr);
+});
+
+test('YouTube URLs allow shared watch query ordering and timestamp fragments', async () => {
+  const f = fixture(), first = await f.email(); await f.proof(first.cookie);
+  await f.call('/api/seeds', seedForm(), first.cookie);
+  for (const video of ['https://www.youtube.com/watch?feature=shared&v=abcdefghijk', 'https://youtu.be/abcdefghijk#t=30s', 'https://youtube.com/watch?v=abcdefghijk&t=30s']) {
+    const manifest = { ...f.manifests[0], links: { video } }; checkManifest(manifest);
+    const python = spawnSync('python3', ['-c', 'import json,sys,runpy; runpy.run_path("scripts/check-manifest.py")["check_manifest"](json.load(sys.stdin))'], { input: JSON.stringify(manifest), encoding: 'utf8' });
+    assert.equal(python.status, 0, python.stderr);
+  }
+  assert.throws(() => checkManifest({ ...f.manifests[0], links: { video: 'https://youtube.com/watch?v=wrong&v=abcdefghijk' } }));
+});
+
+function socialFixture(f) {
+  f.env.ASSETS.fetch = async request => new URL(request.url).pathname === '/manifests/little-library.json'
+    ? new Response(JSON.stringify({ id: 'little-library' })) : new Response('Not found', { status: 404 });
+}
+test('social: public counts, account thumb toggle, verified comments, limits and safe author projection', async () => {
+  const f = fixture(); socialFixture(f);
+  const endpoint = '/api/seeds/little-library';
+  assert.deepEqual(await (await f.call(endpoint + '/social')).json(), { thumbs: 0, mine: false, comments: [] });
+  assert.equal((await f.call('/api/seeds/not-here/social')).status, 404);
+  assert.equal((await f.call(endpoint + '/thumb', {})).status, 401);
+  const first = await f.email();
+  assert.equal((await f.call(endpoint + '/comments', { text: 'Hi' }, first.cookie)).status, 403);
+  let social = await (await f.call(endpoint + '/thumb', {}, first.cookie)).json();
+  assert.equal(social.thumbs, 1); assert.equal(social.mine, true);
+  social = await (await f.call(endpoint + '/thumb', {}, first.cookie)).json(); assert.equal(social.thumbs, 0); assert.equal(social.mine, false);
+  await f.proof(first.cookie);
+  for (const text of ['', ' ', 'x'.repeat(1001), 123]) assert.equal((await f.call(endpoint + '/comments', { text }, first.cookie)).status, 400);
+  const result = await f.call(endpoint + '/comments', { text: '<img src=x onerror=alert(1)>' }, first.cookie);
+  assert.equal(result.status, 201);
+  social = await result.json();
+  assert.equal(social.comments[0].text, '<img src=x onerror=alert(1)>');
+  assert.equal(social.comments[0].author.name, 'Aster & Fern');
+  assert.match(social.comments[0].author.handle, /^aster-fern-[a-f0-9]{4}$/);
+  assert.equal(social.comments[0].canDelete, true);
+  assert.ok(!JSON.stringify(social).includes(first.user.email)); assert.ok(!JSON.stringify(social).includes(first.user.id));
+  const publicView = await (await f.call(endpoint + '/social')).json();
+  assert.equal(publicView.comments[0].canDelete, false);
+  for (let i = 1; i < 5; i++) assert.equal((await f.call(endpoint + '/comments', { text: 'Another seed thought' }, first.cookie)).status, 201);
+  assert.equal((await f.call(endpoint + '/comments', { text: 'Too soon' }, first.cookie)).status, 429);
+  f.advance(3600001);
+  assert.equal((await f.call(endpoint + '/comments', { text: 'A fresh hour' }, first.cookie)).status, 201);
+});
+
+test('social deletion: author and listed admin only; deleted comments still count against rate limit', async () => {
+  const f = fixture(); socialFixture(f);
+  const first = await f.email(), other = await f.email('other@example.org'); await f.proof(first.cookie);
+  const endpoint = '/api/seeds/little-library';
+  let comment;
+  for (let i = 0; i < 5; i++) {
+    const response = await f.call(endpoint + '/comments', { text: 'A thought' }, first.cookie);
+    comment = (await response.json()).comments.at(-1);
+  }
+  const app = createApp({ now: () => Date.parse('2026-09-12T12:00:00Z') });
+  const remove = (id, session, origin = ORIGIN) => app(new Request(ORIGIN + endpoint + '/comments/' + id, {
+    method: 'DELETE', headers: { Cookie: session, Origin: origin },
+  }), f.env);
+  assert.equal((await remove(comment.id, other.cookie)).status, 403);
+  assert.equal((await remove(comment.id, first.cookie, 'https://evil.example')).status, 403);
+  assert.equal((await remove(comment.id, first.cookie)).status, 200);
+  assert.equal((await f.call(endpoint + '/comments', { text: 'Deletion does not reset the rate' }, first.cookie)).status, 429);
+  const remaining = (await (await f.call(endpoint + '/social')).json()).comments[0];
+  f.env.FARM_ADMINS = ' someone-else, ' + other.user.id + ' ';
+  assert.equal((await (await f.call(endpoint + '/social', undefined, other.cookie)).json()).comments[0].canDelete, true);
+  assert.equal((await remove(remaining.id, other.cookie)).status, 200);
+  assert.equal((await remove(remaining.id, other.cookie)).status, 404);
+});
+
+test('coordinator serializes concurrent thumbs/comments and mirrors social records', async () => {
+  const f = fixture(); socialFixture(f);
+  const first = await f.email(), second = await f.email('other@example.org'); await f.proof(first.cookie);
+  const storage = new Store(), mirror = new Store(), pending = [];
+  for (const [key, value] of f.store.values) {
+    const record = JSON.parse(value); if (key.startsWith('session:')) record.expires = Date.now() + 600000;
+    await storage.put(key, record);
+  }
+  const coordinator = new FarmCoordinator({ storage, waitUntil: promise => pending.push(promise) }, { ...f.env, FARM: mirror });
+  const endpoint = ORIGIN + '/api/seeds/little-library';
+  const post = (path, cookie, data = {}) => coordinator.fetch(new Request(endpoint + path, {
+    method: 'POST', headers: { Origin: ORIGIN, Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  }));
+  const responses = await Promise.all([post('/thumb', first.cookie), post('/thumb', second.cookie)]);
+  assert.deepEqual(responses.map(r => r.status), [200, 200]);
+  assert.deepEqual((await storage.get('social:little-library')).thumbs.sort(), [first.user.id, second.user.id].sort());
+  await Promise.all([post('/thumb', first.cookie), post('/thumb', first.cookie)]);
+  assert.equal((await storage.get('social:little-library')).thumbs.length, 2);
+  const comments = await Promise.all(Array.from({ length: 6 }, (_, i) => post('/comments', first.cookie, { text: 'Thought ' + i })));
+  assert.deepEqual(comments.map(r => r.status), [201, 201, 201, 201, 201, 429]);
+  await Promise.all(pending);
+  const durable = await storage.get('social:little-library');
+  assert.equal(durable.comments.length, 5); assert.equal(new Set(durable.comments.map(c => c.id)).size, 5);
+  assert.deepEqual(await mirror.get('social:little-library', 'json'), durable);
+});
+
+test('private seed cards include live social counts and only published page links', async () => {
+  const f = fixture(), first = await f.email(); await f.proof(first.cookie);
+  await f.call('/api/seeds', seedForm(), first.cookie);
+  let seeds = (await (await f.call('/api/seeds/mine', undefined, first.cookie)).json()).seeds;
+  assert.equal(seeds[0].url, undefined);
+  socialFixture(f);
+  await f.call('/api/seeds/little-library/thumb', {}, first.cookie);
+  await f.call('/api/seeds/little-library/comments', { text: 'Growing well' }, first.cookie);
+  seeds = (await (await f.call('/api/seeds/mine', undefined, first.cookie)).json()).seeds;
+  assert.equal(seeds[0].url, '/apps/little-library/'); assert.equal(seeds[0].thumbs, 1); assert.equal(seeds[0].comments, 1);
+});

@@ -52,5 +52,14 @@
     "size": 433818
   },
   "health": "/api/health",
-  "selfcheck": true
+  "selfcheck": true,
+  "media": {
+    "icon": "https://tiinyapp.farm/assets/titanium-icon.png",
+    "header": "https://tiinyapp.farm/assets/titanium-header.webp",
+    "gallery": []
+  },
+  "links": {
+    "repo": "https://github.com/Titanium-Devops/titanium-bot-lite",
+    "homepage": "https://titanium.bot"
+  }
 }

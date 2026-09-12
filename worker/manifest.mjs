@@ -21,10 +21,12 @@ export function validate(value, rule = schema, path = '$') {
     }
   }
   if (type === 'array') {
+    if (value.length > (rule.maxItems ?? Infinity)) bad('too many items');
     if (rule.uniqueItems && new Set(value.map(item => JSON.stringify(item))).size !== value.length) bad('duplicate items');
     value.forEach((item, index) => validate(item, rule.items || {}, `${path}[${index}]`));
   }
   if (type === 'string') {
+    if ([...value].length > (rule.maxLength ?? Infinity)) bad('too long');
     if ([...value].length < (rule.minLength || 0)) bad('must not be empty');
     if (rule.pattern && !new RegExp(rule.pattern).test(value)) bad('invalid format');
     if (rule.format === 'uri') { try { const url = new URL(value); if (!['http:', 'https:', 'file:'].includes(url.protocol) || /\s/.test(value)) bad('invalid URL'); } catch { bad('invalid URL'); } }
@@ -34,6 +36,10 @@ export function validate(value, rule = schema, path = '$') {
 }
 export function checkManifest(manifest) {
   validate(manifest);
+  if (manifest.links?.video) {
+    const url = new URL(manifest.links.video);
+    if (url.hostname !== 'youtu.be' && (url.searchParams.getAll('v').length !== 1 || !/^[A-Za-z0-9_-]{11}$/.test(url.searchParams.get('v')))) fail(400, 'Use one YouTube video ID.');
+  }
   if (manifest.release.sha256 === 'pending') fail(400, 'A published release checksum is required.');
   if (manifest.selfcheck && manifest.entry === null) fail(400, 'A selfcheck needs a runnable entry.');
   if (manifest.health && !manifest.requires.ports.length) fail(400, 'A health check needs a declared port.');

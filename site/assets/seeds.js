@@ -1,3 +1,4 @@
+import { refreshSession } from './session.js';
 const byId = id => document.getElementById(id);
 const status = message => { byId('farm-status').textContent = message; };
 let currentUser = null;
@@ -48,12 +49,13 @@ function challenge(value) {
   if (value) { byId('bio-code').textContent = value.code; byId('bio-expiry').textContent = 'Expires ' + new Date(value.expires).toLocaleString(); }
 }
 async function refreshAccount(step, focus = false) {
-  const { user } = await api('/api/me'); currentUser = user;
+  const user = await refreshSession(); currentUser = user;
   if (!byId('account-state')) return;
   const proof = user?.tiinyverse;
   byId('account-state').textContent = user ? `Signed in${user.email ? ' as ' + user.email : ' with GitHub @' + user.github.login}.` : 'Start here. No password to remember.';
   byId('account-state').classList.toggle('done', !!user);
   byId('logout').hidden = !user;
+  byId('account-farm').hidden = !user;
   byId('github-signin').hidden = !!user?.github;
   byId('github-signin').textContent = user ? 'Link GitHub to this account' : 'Sign in with GitHub';
   byId('email-start').hidden = !!user?.email;
@@ -96,29 +98,28 @@ onSubmit('seed-form', async () => {
   form.set('permissions', [...byId('permissions').selectedOptions].map(option => option.value).join(','));
   if (!!byId('releaseUrl').value.trim() === !!byId('archive').files.length) throw new Error('Choose either a release URL or one tar.gz upload.');
   if (byId('archive').files[0]?.size > 50 * 1024 * 1024) throw new Error('Choose an archive no larger than 50 MB.');
+  const gallery = [...byId('seed-gallery').files];
+  if (gallery.length > 8) throw new Error('Choose up to eight gallery images.');
+  const groups = { icon: [...byId('seed-icon').files], header: [...byId('seed-header').files], gallery };
+  for (const file of Object.values(groups).flat()) {
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 2 * 1024 * 1024) throw new Error('Choose PNG, JPEG or WebP images no larger than 2 MiB each.');
+  }
+  const media = {};
+  for (const [kind, files] of Object.entries(groups)) {
+    const urls = [];
+    for (const file of files) {
+      status('Uploading your seed images…');
+      const response = await fetch('/api/media', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': file.type }, body: file });
+      const uploaded = await response.json();
+      if (!response.ok) throw new Error(uploaded.error || 'Could not upload your seed image.');
+      urls.push(uploaded.url);
+    }
+    if (urls.length) media[kind] = kind === 'gallery' ? urls : urls[0];
+  }
+  form.set('media', JSON.stringify(media));
+  status('Sending your seed to the farmhands…');
   const result = await api('/api/seeds', form);
   if (result.warning) { status(result.warning); return; }
   window.location.assign(result.statusUrl);
 });
-async function refreshSeeds() {
-  await refreshAccount();
-  byId('my-seeds').replaceChildren();
-  if (!currentUser) { status('Sign in on the seeds page to see your submissions.'); return; }
-  const { seeds } = await api('/api/seeds/mine');
-  for (const seed of seeds) {
-    const card = document.createElement('article'); card.className = 'plot';
-    const title = document.createElement('h2'); title.textContent = seed.name;
-    const state = document.createElement('p'); state.textContent = `v${seed.version} · ${seed.state}`;
-    const list = document.createElement('ul');
-    for (const check of seed.checks) { const row = document.createElement('li'); row.textContent = `${check.name}: ${check.status}`; list.append(row); }
-    const review = document.createElement('p'); review.textContent = seed.reviews.length ? 'Review: ' + seed.reviews.join(', ').toLowerCase().replaceAll('_', ' ') : 'No maintainer review yet.';
-    const note = document.createElement('p'); note.textContent = seed.unavailable ? 'Live checks are temporarily unavailable. Refresh to try again.' : seed.checks.length ? 'Checks above are the latest reported by CI.' : 'Checks have not reported yet.';
-    card.append(title, state, list, review, note);
-    if (seed.labelPending) { const label = document.createElement('p'); label.textContent = 'Site label pending. Resubmit the same seed form to retry without creating another review.'; card.append(label); }
-    byId('my-seeds').append(card);
-  }
-  status(seeds.length ? 'Your seeds are up to date.' : 'No seeds yet. Your first plot is waiting.');
-}
-byId('refresh-seeds')?.addEventListener('click', event => working(event.currentTarget, refreshSeeds));
-if (byId('my-seeds')) refreshSeeds().catch(error => status(error.message));
-else refreshAccount().catch(error => status(error.message));
+refreshAccount().catch(error => status(error.message));

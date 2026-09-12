@@ -12,7 +12,6 @@
     "version",
     "author",
     "license",
-    "homepage",
     "screenshots",
     "release",
     "entry",
@@ -237,6 +236,44 @@
     "selfcheck": {
       "type": "boolean",
       "description": "If true, CI runs the entry with --selfcheck appended, offline, with a 120 second limit. Requires a runnable entry."
+    },
+    "media": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "icon": {
+          "$ref": "#/$defs/httpsUrl"
+        },
+        "header": {
+          "$ref": "#/$defs/httpsUrl"
+        },
+        "gallery": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/httpsUrl"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "links": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repo": {
+          "$ref": "#/$defs/httpsUrl"
+        },
+        "homepage": {
+          "$ref": "#/$defs/httpsUrl"
+        },
+        "video": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://(?:(?:www\\.)?youtube\\.com/watch\\?(?:[^#\\s&]+&)*v=[A-Za-z0-9_-]{11}(?:&[^#\\s]*)?|youtu\\.be/[A-Za-z0-9_-]{11}(?:\\?[^#\\s]*)?)(?:#[^\\s]*)?(?![\\s\\S])",
+          "maxLength": 2048
+        }
+      }
     }
   },
   "$defs": {
@@ -244,6 +281,12 @@
       "type": "string",
       "format": "uri",
       "pattern": "^https?://"
+    },
+    "httpsUrl": {
+      "type": "string",
+      "format": "uri",
+      "maxLength": 2048,
+      "pattern": "^https://[^\\s/@]+(?:/[^\\s]*)?(?![\\s\\S])"
     }
   }
 }

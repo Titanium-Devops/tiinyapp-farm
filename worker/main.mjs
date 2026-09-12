@@ -1,3 +1,4 @@
+import { mediaPattern } from './makers.mjs';
 import { createApp, json } from './index.mjs';
 import { proofRoutes } from './proof.mjs';
 import { seedRoutes } from './seeds.mjs';
@@ -26,7 +27,7 @@ export class FarmCoordinator {
     };
     // Read-only lookups must not sit behind a large upload or GitHub PR request.
     // In particular, CI's ten-second owner lookup remains responsive.
-    if (request.method === 'GET' && ['/api/owners', '/api/me', '/api/seeds/mine'].includes(new URL(request.url).pathname)) return execute();
+    if (request.method === 'GET' && ['/api/owners'].includes(new URL(request.url).pathname)) return execute();
     const operation = this.tail.then(execute);
     this.tail = operation.catch(() => {});
     return operation;
@@ -35,8 +36,20 @@ export class FarmCoordinator {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname.startsWith('/api/')) {
+    if (url.pathname.startsWith('/api/') || /^\/(farm|makers|seeds\/mine)(?:\/|$)/.test(url.pathname)) {
       return env.FARM_COORDINATOR.get(env.FARM_COORDINATOR.idFromName('farm')).fetch(request);
+    }
+    if (url.pathname.startsWith('/media/')) {
+      if (!['GET', 'HEAD'].includes(request.method)) return json({ error: 'Use GET or HEAD for images.' }, 405);
+      const key = url.pathname.slice(1);
+      if (!mediaPattern.test(key)) return json({ error: 'Image not found.' }, 404);
+      const object = await env.SEEDS.get(key);
+      if (!object) return json({ error: 'Image not found.' }, 404);
+      const contentType = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp' }[key.split('.').pop()];
+      return new Response(request.method === 'HEAD' ? null : object.body, { headers: {
+        'Content-Type': contentType, 'Content-Length': String(object.size),
+        'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff',
+      } });
     }
     if (url.pathname.startsWith('/seeds-files/')) {
       if (!['GET', 'HEAD'].includes(request.method)) return json({ error: 'Use GET or HEAD for seed files.' }, 405);

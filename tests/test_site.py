@@ -89,7 +89,7 @@ class SiteTests(unittest.TestCase):
                 self.assertIn('Not verified by the farmhands.', visible)
 
     def test_required_pages_and_byte_identical_manifests(self):
-        for path in ('index.html', 'plant/index.html', 'seeds/index.html', 'seeds/mine/index.html', 'manifests/index.html', 'sitemap.xml', 'robots.txt', '404.html'):
+        for path in ('index.html', 'plant/index.html', 'seeds/index.html', 'seeds/mine/index.html', 'farm/index.html', 'catalog.json', 'manifests/index.html', 'sitemap.xml', 'robots.txt', '404.html'):
             self.assertTrue((self.output / path).is_file(), path)
         for path in (ROOT / 'manifests').glob('*.json'):
             self.assertEqual(path.read_bytes(), (self.output / 'manifests' / path.name).read_bytes())
@@ -119,10 +119,17 @@ class SiteTests(unittest.TestCase):
             self.assertNotIn('tiny' + 'app', text.lower())
             self.assertNotIn('data:image', text)
             scripts = [attrs for tag, attrs in doc.tags if tag == 'script']
-            if path.relative_to(self.output).as_posix() in ('seeds/index.html', 'seeds/mine/index.html'):
-                self.assertEqual(scripts, [{'type': 'module', 'src': '/assets/seeds.js'}])
-            else:
-                self.assertEqual(scripts, [])
+            expected = []
+            if path.relative_to(self.output).as_posix() == 'seeds/index.html':
+                expected.append({'type': 'module', 'src': '/assets/seeds.js'})
+            elif path.relative_to(self.output).as_posix().startswith('apps/'):
+                expected.append({'type': 'module', 'src': '/assets/seed-media.js'})
+                expected.append({'type': 'module', 'src': '/assets/social.js'})
+            elif path.relative_to(self.output).as_posix() == 'farm/index.html':
+                expected.append({'type': 'module', 'src': '/assets/farm.js'})
+            expected.append({'type': 'module', 'src': '/assets/session.js'})
+            self.assertEqual(scripts, expected)
+            self.assertIn('data-farm-nav', text)
             for reference in ('/brand/tiiny-logo.svg', '/brand/titanium-bot-logo.svg', 'https://titanium.bot', 'https://tiiny.ai'):
                 self.assertIn(reference, doc.references)
             self.assertIn('Brought to you by Titanium Bot', text)
@@ -187,7 +194,7 @@ class SiteTests(unittest.TestCase):
     def test_sitemap_and_field_documentation(self):
         tree = ET.parse(self.output / 'sitemap.xml')
         urls = {element.text for element in tree.iter('{http://www.sitemaps.org/schemas/sitemap/0.9}loc')}
-        expected = {'https://tiinyapp.farm' + path for path in ('/', '/plant/', '/seeds/', '/seeds/mine/', '/manifests/')}
+        expected = {'https://tiinyapp.farm' + path for path in ('/', '/plant/', '/seeds/', '/manifests/')}
         expected.update('https://tiinyapp.farm/apps/' + app['id'] + '/' for app in self.apps)
         self.assertEqual(urls, expected)
         self.assertIn('Sitemap: https://tiinyapp.farm/sitemap.xml', (self.output / 'robots.txt').read_text())
@@ -215,7 +222,7 @@ class SiteTests(unittest.TestCase):
         self.assertEqual(config['name'], 'tiinyapp-farm')
         self.assertEqual(config['main'], 'worker/main.mjs')
         self.assertEqual(config['assets']['binding'], 'ASSETS')
-        self.assertEqual(config['assets']['run_worker_first'], ['/api/*', '/seeds-files/*'])
+        self.assertTrue(set(['/api/*', '/seeds-files/*', '/farm/*', '/makers/*', '/media/*', '/seeds/mine/*']).issubset(config['assets']['run_worker_first']))
         self.assertEqual(config['kv_namespaces'][0]['binding'], 'FARM')
         self.assertEqual(config['r2_buckets'][0], {'binding': 'SEEDS', 'bucket_name': 'farm-seeds'})
         self.assertEqual(config['durable_objects']['bindings'][0]['class_name'], 'FarmCoordinator')
@@ -250,6 +257,94 @@ class SiteTests(unittest.TestCase):
         for field in ('description', 'archive', 'permissions'):
             self.assertIn(f'<div class="seed-field seed-wide"><label for="{field}">', html)
         self.assertIn('<details class="seed-wide">', html)
+
+    def test_social_strip_has_accessible_controls_and_auth_invitation(self):
+        for app in self.apps:
+            doc = Document((self.output / 'apps' / app['id'] / 'index.html').read_text())
+            self.assertTrue({'social-heading', 'social-status', 'seed-thumb', 'thumb-count',
+                             'social-signin', 'seed-comments', 'comment-form', 'comment-text'}.issubset(doc.ids))
+            controls = {attrs.get('id'): attrs for tag, attrs in doc.tags if attrs.get('id')}
+            self.assertEqual(controls['seed-thumb']['aria-pressed'], 'false')
+            self.assertIn('disabled', controls['seed-thumb'])
+            self.assertIn('hidden', controls['comment-form'])
+            self.assertEqual(controls['comment-text']['maxlength'], '1000')
+            self.assertEqual(controls['social-status']['aria-live'], 'polite')
+            self.assertIn('/seeds/', doc.references)
+            self.assertTrue(any(attrs.get('data-seed-social') == app['id'] for tag, attrs in doc.tags))
+
+    def test_comment_rendering_keeps_untrusted_text_in_text_nodes(self):
+        script = r'''import assert from 'node:assert/strict';
+class Element {
+  children = [];
+  listeners = {};
+  constructor(tag) { this.tag = tag; }
+  set innerHTML(value) { throw new Error('HTML insertion is forbidden'); }
+  append(...children) { this.children.push(...children); }
+  addEventListener(name, fn) { this.listeners[name] = fn; }
+}
+globalThis.document = { createElement: tag => new Element(tag), querySelector: () => null, querySelectorAll: () => [] };
+globalThis.fetch = async () => ({ ok: true, json: async () => ({ user: null }) });
+const { commentCard } = await import(process.argv[1]);
+const text = '<img src=x onerror=alert(1)> & welcome';
+let removed;
+const card = commentCard({ id: 'c1', text, at: 1726140000000, canDelete: true,
+  author: { handle: 'a/b', name: '<script>bad()</script>', avatar: '/media/maker/avatar.png' } }, id => { removed = id; });
+assert.equal(card.children[1].textContent, text);
+assert.equal(card.children[0].children[1].textContent, '<script>bad()</script>');
+assert.equal(card.children[0].children[1].href, '/makers/a%2Fb/');
+assert.equal(card.children[0].children[0].src, '/media/maker/avatar.png');
+card.children[2].listeners.click();
+assert.equal(removed, 'c1');
+const anonymous = commentCard({ text: 'hello', at: 'invalid', author: { avatar: 'javascript:evil()' }, canDelete: false }, () => {});
+assert.equal(anonymous.children.length, 2);
+assert.equal(anonymous.children[0].children.length, 1);
+assert.equal(anonymous.children[0].children[0].tag, 'span');
+'''
+        result = subprocess.run(['node', '--input-type=module', '-e', script,
+                                 (ROOT / 'site/assets/social.js').as_uri()], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_seed_faces_and_legacy_links(self):
+        app = copy.deepcopy(self.apps[0])
+        app['media'] = {'icon': 'https://example.org/icon.png', 'header': 'https://example.org/header.webp',
+                        'gallery': ['https://example.org/gallery.jpg']}
+        app['links'] = {'repo': 'https://example.org/source', 'homepage': 'https://example.org/home',
+                        'video': 'https://youtu.be/dQw4w9WgXcQ'}
+        doc = Document(SITE['app_page'](app, TODAY))
+        for url in (*app['media'].values(),):
+            if isinstance(url, str):
+                self.assertIn(url, doc.references)
+        self.assertIn(app['media']['gallery'][0], doc.references)
+        self.assertIn(app['links']['repo'], doc.references)
+        self.assertIn(app['links']['homepage'], doc.references)
+        self.assertTrue(any(tag == 'dialog' for tag, attrs in doc.tags))
+        self.assertFalse(any(tag == 'iframe' for tag, attrs in doc.tags))
+        self.assertTrue(any(attrs.get('data-youtube-id') == 'dQw4w9WgXcQ' for tag, attrs in doc.tags))
+        self.assertFalse(any('youtube-nocookie' in url for url in doc.references))
+        self.assertIn(app['media']['icon'], Document(SITE['plot'](app, TODAY)).references)
+        app['links']['video'] = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+        self.assertIn('data-youtube-id="dQw4w9WgXcQ"', SITE['app_page'](app, TODAY))
+        app.pop('links')
+        legacy = Document(SITE['app_page'](app, TODAY))
+        self.assertIn(app['homepage'], legacy.references)
+        self.assertIn(app['repo'], legacy.references)
+        form = Document((self.output / 'seeds/index.html').read_text())
+        self.assertTrue({'seed-icon', 'seed-header', 'seed-gallery', 'repo', 'video'}.issubset(form.ids))
+        gallery = next(attrs for tag, attrs in form.tags if attrs.get('id') == 'seed-gallery')
+        self.assertIn('multiple', gallery)
+
+    def test_private_farm_shell_and_catalog(self):
+        html = (self.output / 'farm/index.html').read_text()
+        doc = Document(html)
+        self.assertTrue({'maker-name', 'maker-avatar', 'maker-bio', 'maker-links', 'maker-form',
+                         'bio', 'avatar', 'github', 'website', 'youtube', 'my-seeds', 'refresh-seeds'}.issubset(doc.ids))
+        inputs = {attrs['id']: attrs for tag, attrs in doc.tags if tag in ('input', 'textarea')}
+        self.assertEqual(inputs['bio']['maxlength'], '600')
+        self.assertEqual(inputs['avatar']['accept'], 'image/png,image/jpeg,image/webp')
+        legacy = Document((self.output / 'seeds/mine/index.html').read_text())
+        self.assertIn({'http-equiv': 'refresh', 'content': '0;url=/farm/'}, [attrs for tag, attrs in legacy.tags if tag == 'meta'])
+        self.assertEqual(json.loads((self.output / 'catalog.json').read_text()), self.apps)
+        self.assertIn('id="account-farm" href="/farm/" hidden', (self.output / 'seeds/index.html').read_text())
 
     def test_seed_tabs_control_three_panels_with_only_first_visible(self):
         doc = Document((self.output / 'seeds/index.html').read_text())

@@ -1,3 +1,5 @@
+import { socialRoutes } from './social.mjs';
+import { makerDefaults, ensureMaker, makerRoutes } from './makers.mjs';
 const ORIGIN = 'https://tiinyapp.farm';
 const COOKIE = '__Host-farm';
 const DAY = 86400000;
@@ -98,11 +100,12 @@ export function createApp({ fetcher = fetch, now = () => Date.now(), seedRoutes 
         if (property === 'email' || user.github.id !== value.id) fail(409, 'This account already has a different sign-in linked.');
       }
       user[property] = value;
+      makerDefaults(user);
       await put('user:' + id, user); await put(index, id);
       return user;
     }
     try {
-      if (request.method === 'POST' && request.headers.get('Origin') !== ORIGIN) fail(403, 'Please submit this form from tiinyapp.farm.');
+      if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method) && request.headers.get('Origin') !== ORIGIN) fail(403, 'Please submit this form from tiinyapp.farm.');
       if (path === '/api/auth/start' && request.method === 'POST') {
         const input = await bodyJSON(request);
         const email = typeof input?.email === 'string' ? input.email.trim().toLowerCase() : '';
@@ -180,10 +183,11 @@ export function createApp({ fetcher = fetch, now = () => Date.now(), seedRoutes 
         const current = await session(); if (current) await del('session:' + current.id);
         return json({ signedOut: true }, 200, { 'Set-Cookie': cookie(COOKIE, '', 0) });
       }
-      if (path === '/api/me' && request.method === 'GET') return json({ user: (await session())?.user || null });
+      const currentUser = async () => { const user = (await session())?.user; return user ? ensureMaker(user, get, put, random) : null; };
+      if (path === '/api/me' && request.method === 'GET') return json({ user: await currentUser() });
       const context = { request, env, url, path, get, put, del, now, fetcher, bodyJSON, random,
-        requireUser: async () => { const user = (await session())?.user; if (!user) fail(401, 'Sign in to your farm account first.'); return user; } };
-      return await proofRoutes(context) || await seedRoutes(context) || json({ error: 'This farm route does not exist.' }, 404);
+        currentUser, requireUser: async () => { const user = await currentUser(); if (!user) fail(401, 'Sign in to your farm account first.'); return user; } };
+      return await socialRoutes(context) || await makerRoutes(context) || await proofRoutes(context) || await seedRoutes(context) || json({ error: 'This farm route does not exist.' }, 404);
     } catch (error) {
       return json({ error: error instanceof HttpError ? error.message : 'The farm could not finish that request. Please try again.' }, error.status || 502);
     }

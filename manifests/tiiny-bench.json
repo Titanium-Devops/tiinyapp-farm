@@ -42,5 +42,10 @@
   ],
   "verified": false,
   "addedAt": "2026-09-12",
-  "updatedAt": "2026-09-12"
+  "updatedAt": "2026-09-12",
+  "media": {},
+  "links": {
+    "repo": "https://github.com/webdevtodayjason/tiiny-bench",
+    "homepage": "https://github.com/webdevtodayjason/tiiny-bench"
+  }
 }

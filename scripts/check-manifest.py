@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 import re
 import sys
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs
 
 SCHEMA = Path(__file__).resolve().parents[1] / "docs" / "manifest.schema.json"
 
@@ -59,11 +59,15 @@ def validate(value, rule, root, path="$", allow_pending=False):
             if key in props:
                 validate(item, props[key], root, f"{path}.{key}", allow_pending)
     if isinstance(value, list):
+        if len(value) > rule.get("maxItems", len(value)):
+            raise ValueError(f"{path}: too many items")
         if rule.get("uniqueItems") and len({json.dumps(x, sort_keys=True) for x in value}) != len(value):
             raise ValueError(f"{path}: duplicate items")
         for index, item in enumerate(value):
             validate(item, rule.get("items", {}), root, f"{path}[{index}]", allow_pending)
     if isinstance(value, str):
+        if len(value) > rule.get("maxLength", len(value)):
+            raise ValueError(f"{path}: too long")
         if len(value) < rule.get("minLength", 0):
             raise ValueError(f"{path}: must not be empty")
         if "pattern" in rule and re.search(rule["pattern"], value) is None:
@@ -90,6 +94,11 @@ def validate(value, rule, root, path="$", allow_pending=False):
 def check_manifest(manifest, allow_pending=False):
     schema = json.loads(SCHEMA.read_text())
     validate(manifest, schema, schema, allow_pending=allow_pending)
+    if manifest.get("links", {}).get("video"):
+        video = urlsplit(manifest["links"]["video"])
+        ids = parse_qs(video.query, keep_blank_values=True).get("v", [])
+        if video.hostname != "youtu.be" and (len(ids) != 1 or not re.fullmatch(r"[A-Za-z0-9_-]{11}", ids[0])):
+            raise ValueError("$.links.video: use one YouTube video ID")
     if manifest.get("selfcheck") and manifest["entry"] is None:
         raise ValueError("$.selfcheck: needs a runnable entry")
     if "health" in manifest and not manifest["requires"]["ports"]:
@@ -102,15 +111,16 @@ def check_manifest(manifest, allow_pending=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("file", type=Path)
+    parser.add_argument("file", type=Path, nargs="+")
     parser.add_argument("--allow-pending", action="store_true")
     args = parser.parse_args()
     try:
-        check_manifest(json.loads(args.file.read_text()), args.allow_pending)
+        for path in args.file:
+            check_manifest(json.loads(path.read_text()), args.allow_pending)
+            print(f"Valid: {path}")
     except (OSError, ValueError) as exc:
         print(f"Invalid manifest: {exc}", file=sys.stderr)
         return 1
-    print(f"Valid: {args.file}")
     return 0
 
 

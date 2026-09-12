@@ -13,7 +13,11 @@ export function releaseURL(value) {
 export function buildManifest(input, user, release, now) {
   const list = key => typeof input[key] === 'string' ? input[key].split(',').map(s => s.trim()).filter(Boolean) : [];
   const today = new Date(now).toISOString().slice(0, 10);
+  let media;
+  if (input.media) { try { media = JSON.parse(input.media); } catch { fail(400, 'Send valid image details.'); } }
+  const links = Object.fromEntries(['repo', 'video', 'homepage'].filter(key => input[key]).map(key => [key, input[key]]));
   const manifest = {
+    ...(media === undefined ? {} : { media }), links,
     id: input.id, name: input.name, pitch: input.pitch, description: input.description, version: input.version,
     author: { name: user.tiinyverse.name, url: user.tiinyverse.profileUrl, tiinyverse: user.tiinyverse.profileUrl },
     license: input.license, homepage: input.homepage || input.repo || user.tiinyverse.profileUrl,
@@ -62,6 +66,12 @@ export async function seedRoutes(ctx) {
           item.labelPending = seed.state === 'label pending';
         } catch { item.unavailable = true; }
       }
+      const social = await get('social:' + seed.id);
+      item.thumbs = social?.thumbs?.length || 0; item.comments = social?.comments?.length || 0;
+      try {
+        const published = await env.ASSETS.fetch(new Request(ORIGIN + '/manifests/' + seed.id + '.json'));
+        if (published.ok && (await published.json()).id === seed.id) item.url = '/apps/' + seed.id + '/';
+      } catch { /* A pending seed has no static catalog page yet. */ }
       seeds.push(item);
     }
     return json({ seeds });

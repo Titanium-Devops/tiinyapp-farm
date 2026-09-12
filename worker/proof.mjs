@@ -1,3 +1,4 @@
+import { ensureMaker } from './makers.mjs';
 import { fail, json, remote } from './index.mjs';
 export function profileId(value) {
   if (typeof value !== 'string' || !/^https:\/\/www\.tiinyverse\.com\/users\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) || !value.startsWith('https://www.tiinyverse.com/users/')) {
@@ -56,6 +57,7 @@ export async function proofRoutes(ctx) {
     if (!new RegExp('(?<![a-zA-Z0-9_-])' + challenge.code + '(?![a-zA-Z0-9_-])').test(html)) fail(422, 'The bio code is not on your profile yet. Add it and try Verify again.');
     user.tiinyverse = { profileUrl: challenge.profileUrl, name: displayName(html), verifiedAt: new Date(now()).toISOString() };
     delete user.tiinyverseChallenge;
+    await ensureMaker(user, get, put, random);
     await put('user:' + user.id, user); await put('tvowner:' + id, user.id);
     return json({ tiinyverse: user.tiinyverse });
   }
