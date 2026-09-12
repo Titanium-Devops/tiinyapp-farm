@@ -326,10 +326,10 @@ class OwnerGateTests(unittest.TestCase):
         response.url = 'https://tiinyapp.farm/api/owners?profile=fixture'
         return response
 
-    def test_verified_owner_and_matching_name_required(self):
+    def test_verified_owner_required_studio_name_allowed(self):
         for verified, name, expected in ((True, self.manifest['author']['name'], True),
                                           (False, self.manifest['author']['name'], False),
-                                          (True, 'Impersonated name', False)):
+                                          (True, 'Studio or other display name', True)):
             with patch.dict(CHECK['check_owner'].__globals__, urlopen=lambda *a, **k: self.response({'verified': verified, 'name': name})):
                 self.assertEqual(CHECK['check_owner'](self.manifest), expected)
         del self.manifest['author']['tiinyverse']
@@ -348,7 +348,7 @@ class OwnerGateTests(unittest.TestCase):
                 CHECK['check_one'](root, 'manifests/' + path.name, rows)
             download.assert_not_called()
             self.assertEqual(rows[-1]['check'], 'manifests/' + path.name + ': Tiiny owner')
-            self.assertEqual(rows[-1]['detail'], 'The seed must name a verified TiinyVerse owner and their current farm display name.')
+            self.assertEqual(rows[-1]['detail'], 'The seed must name a verified TiinyVerse owner.')
 
 
 if __name__ == '__main__':

@@ -405,7 +405,7 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         html = (self.output / 'seeds/index.html').read_text()
         for field in ('description', 'archive', 'permissions'):
             self.assertIn(f'<div class="seed-field seed-wide"><label for="{field}">', html)
-        self.assertIn('<details class="seed-wide">', html)
+        self.assertIn('<details class="seed-wide" open>', html)
 
     def test_social_strip_has_accessible_controls_and_auth_invitation(self):
         for app in self.apps:

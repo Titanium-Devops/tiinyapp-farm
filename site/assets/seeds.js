@@ -70,7 +70,9 @@ async function working(control, action) {
   const button = control.tagName === 'BUTTON' ? control : control.querySelector('button[type=submit]');
   if (button) button.disabled = true;
   status('One moment, tending to that…');
-  try { await action(); } catch (error) { status(error.message || 'Connection interrupted. Please try again.'); }
+  const under = control.id === 'seed-form' ? byId('seed-error') : null;
+  if (under) { under.hidden = true; under.textContent = ''; }
+  try { await action(); } catch (error) { const text = error.message || 'Connection interrupted. Please try again.'; status(text); if (under) { under.textContent = text; under.hidden = false; markField(text); under.scrollIntoView({ block: 'nearest' }); } }
   finally { if (button) button.disabled = false; }
 }
 function onSubmit(id, handler) {
@@ -161,6 +163,29 @@ onSubmit('seed-form', async () => {
   status('Sending your seed to the farmhands…');
   const result = await api(updateId ? '/api/seeds/' + encodeURIComponent(updateId) : '/api/seeds', form, updateId ? 'PUT' : 'POST');
   if (result.warning) { status(result.warning); return; }
+  try { localStorage.removeItem(DRAFT); } catch {}
   window.location.assign(result.statusUrl);
 });
 refreshAccount().catch(error => status(error.message));
+
+// The server names the field in its message ("tags: must not be empty", "A null entry requires the library tag").
+const FIELD_WORDS = { entry: 'command', tags: 'tags', version: 'version', license: 'license', id: 'id', name: 'name', description: 'description', release: 'releaseUrl', ports: 'ports', python: 'python' };
+function markField(text) {
+  for (const input of document.querySelectorAll('#seed-form [aria-invalid]')) input.removeAttribute('aria-invalid');
+  const word = Object.keys(FIELD_WORDS).find(key => new RegExp('\\b' + key + '\\b', 'i').test(text));
+  const input = word && byId(FIELD_WORDS[word]);
+  if (input) { input.setAttribute('aria-invalid', 'true'); input.focus({ preventScroll: true }); }
+}
+// A draft of the seed form survives reloads and failed sends. ponytail: localStorage, one key, no expiry.
+const DRAFT = 'farm-seed-draft';
+const draftForm = byId('seed-form');
+if (draftForm) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DRAFT) || '{}');
+    for (const [name, value] of Object.entries(saved)) { const el = draftForm.elements[name]; if (el && el.type !== 'file' && !el.value) el.value = value; }
+  } catch {}
+  draftForm.addEventListener('input', () => {
+    const data = {}; for (const el of draftForm.elements) if (el.name && el.type !== 'file' && el.type !== 'submit') data[el.name] = el.value;
+    try { localStorage.setItem(DRAFT, JSON.stringify(data)); } catch {}
+  });
+}

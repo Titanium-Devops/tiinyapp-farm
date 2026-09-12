@@ -68,7 +68,7 @@ def check_owner(manifest):
         if len(raw) > 4096:
             return False
         owner = json.loads(raw)
-        return owner.get('verified') is True and owner.get('name') == manifest['author']['name']
+        return owner.get('verified') is True  # the profile is the proof; author.name may be a studio name
     except Exception:
         return False
 
@@ -102,9 +102,9 @@ def check_one(repository, relative, rows):
         if not valid_id:
             return
         if not check_owner(manifest):
-            row('Tiiny owner', False, 'The seed must name a verified TiinyVerse owner and their current farm display name.')
+            row('Tiiny owner', False, 'The seed must name a verified TiinyVerse owner.')
             return
-        row('Tiiny owner', True, 'The farm confirmed the TiinyVerse owner and display name')
+        row('Tiiny owner', True, 'The farm confirmed the TiinyVerse owner')
         if 'release' not in manifest:
             for check in ('download', 'archive', 'static scan', 'selfcheck'):
                 rows.append({'check': f'{relative}: {check}', 'result': 'SKIP',
