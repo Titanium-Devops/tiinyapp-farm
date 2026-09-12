@@ -8,14 +8,18 @@ fetch with the display name and the bio text ("No bio yet.") in the HTML. So con
 TiinyVerse account can be proved by a code placed in the bio, and that control implies a bound
 serial. Jason's rule: only people with a TiinyVerse account may bring seeds.
 
-Jason's rule, 2026-09-12 06:27: a farmer's identity is their TiinyVerse account, not GitHub. Nobody
-needs a GitHub account to bring a seed. GitHub is optional, only as one place a release can live.
+Jason's rule, 2026-09-12 06:29: a farm account is made with EITHER an email code OR Sign in with
+GitHub; both are first-class and one account may have both linked. Proof of a Tiiny is the
+TiinyVerse bio code in every case. GitHub is never required to bring a seed.
 
 Build, in this order, all on the existing Cloudflare Worker (static assets stay; add routes under
 /api/ with a KV namespace named FARM and an R2 bucket named farm-seeds; plain Worker JavaScript,
 no framework):
 
-1. Farm account by email, no password: POST /api/auth/start {email} sends a six-digit code with
+1. Farm account, two doors into one account model (user:<id> {email?, github?{login,id,name,avatar}, createdAt}):
+   (a) Sign in with GitHub: /api/auth/github (OAuth, scope read:user only), /api/auth/github/callback
+   (exchange the code, never store the GitHub token, CSRF state), secrets GITHUB_CLIENT_ID and
+   GITHUB_CLIENT_SECRET; (b) by email, no password: POST /api/auth/start {email} sends a six-digit code with
    Resend (secret RESEND_API_KEY, from "Titanium Bot <farm@tiinyapp.farm>"; the orchestrator sets
    the domain up), valid 10 minutes, rate-limited 3 per hour per address; POST /api/auth/verify
    {email, code} sets a signed HttpOnly session cookie (30 days) and stores user:<id>
