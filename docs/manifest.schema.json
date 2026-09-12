@@ -219,6 +219,10 @@
       "type": "boolean",
       "description": "Only a human maintainer sets true in a follow-up commit after CI and manual review."
     },
+    "featured": {
+      "type": "boolean",
+      "description": "Optional maintainer-curated placement in the home page Featured section."
+    },
     "addedAt": {
       "type": "string",
       "format": "date"
@@ -241,16 +245,16 @@
       "additionalProperties": false,
       "properties": {
         "icon": {
-          "$ref": "#/$defs/httpsUrl"
+          "$ref": "#/$defs/imageUrl"
         },
         "header": {
-          "$ref": "#/$defs/httpsUrl"
+          "$ref": "#/$defs/imageUrl"
         },
         "gallery": {
           "type": "array",
           "maxItems": 8,
           "items": {
-            "$ref": "#/$defs/httpsUrl"
+            "$ref": "#/$defs/imageUrl"
           },
           "uniqueItems": true
         }
@@ -286,6 +290,18 @@
       "format": "uri",
       "maxLength": 2048,
       "pattern": "^https://[^\\s/@]+(?:/[^\\s]*)?(?![\\s\\S])"
+    },
+    "imageUrl": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/httpsUrl"
+        },
+        {
+          "type": "string",
+          "maxLength": 2048,
+          "pattern": "^/(?:assets|media)/[A-Za-z0-9_./-]+(?![\\s\\S])"
+        }
+      ]
     }
   }
 }

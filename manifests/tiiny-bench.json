@@ -42,9 +42,13 @@
     "diagnostics"
   ],
   "verified": false,
+  "featured": true,
   "addedAt": "2026-09-12",
   "updatedAt": "2026-09-12",
-  "media": {},
+  "media": {
+    "icon": "/assets/art/tiiny-bench-icon.png",
+    "header": "/assets/art/tiiny-bench-header.webp"
+  },
   "links": {
     "repo": "https://github.com/webdevtodayjason/tiiny-bench",
     "homepage": "https://github.com/webdevtodayjason/tiiny-bench"

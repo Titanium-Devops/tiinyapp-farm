@@ -20,6 +20,20 @@ PERMISSIONS = {
     "network": "Network: can make network connections.",
     "device": "Device: can send requests to your Tiiny.",
 }
+CATEGORIES = {
+    "developer-tools": "Developer tools",
+    "coordination": "Developer tools",
+    "benchmark": "Developer tools",
+    "measurement": "Developer tools",
+    "library": "Libraries",
+    "stories": "Family",
+    "family": "Family",
+    "audio": "Audio",
+    "assistant": "Assistants",
+    "chat": "Assistants",
+    "voice": "Assistants",
+}
+CATEGORY_ORDER = ["Assistants", "Family", "Audio", "Developer tools", "Libraries"]
 FIELDS = {
     "id": "The unique lowercase app name used in commands and the manifest filename.",
     "name": "The name shown in the catalog.",
@@ -39,6 +53,7 @@ FIELDS = {
     "permissions": "Declared access: microphone, files, network and device. An empty list no permissions declared.",
     "tags": "Short labels that help people find the app.",
     "verified": "Keep false when submitting. A maintainer sets true in a follow-up commit after CI and manual review.",
+    "featured": "Optional maintainer-curated placement in the home page Featured section.",
     "addedAt": "The day the app joined the catalog, YYYY-MM-DD. New lasts less than 30 days.",
     "updatedAt": "The most recent manifest update, YYYY-MM-DD.",
     "selfcheck": "Optional boolean. When true, CI appends --selfcheck to the entry and requires exit 0 offline within 120 seconds.",
@@ -58,6 +73,52 @@ def command(value):
     return f'<pre><code>{e(value)}</code></pre>'
 
 
+ICONS = {
+    "search": '<path d="M3 10a7 7 0 1 0 14 0a7 7 0 1 0-14 0m18 11l-6-6"/>',
+    "copy": '<path d="M7 9.667A2.667 2.667 0 0 1 9.667 7h8.666A2.667 2.667 0 0 1 21 9.667v8.666A2.667 2.667 0 0 1 18.333 21H9.667A2.667 2.667 0 0 1 7 18.333z"/><path d="M4.012 16.737A2 2 0 0 1 3 15V5c0-1.1.9-2 2-2h10c.75 0 1.158.385 1.5 1"/>',
+}
+
+
+def icon(name):
+    """Inline the checked-in Tabler paths with the locked size and stroke."""
+    return (f'<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" '
+            f'stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" '
+            f'stroke-width="1.75">{ICONS[name]}</svg>')
+
+
+def categories(app):
+    present = {CATEGORIES[tag] for tag in app["tags"] if tag in CATEGORIES}
+    return [name for name in CATEGORY_ORDER if name in present]
+
+
+def permission_label(value):
+    return "Your Tiiny" if value == "device" else value.capitalize()
+
+
+def needs(app):
+    models = app["requires"]["device"]["models"]
+    return "needs " + ", ".join(models) if models else "no named models"
+
+
+def category_tag(app):
+    names = categories(app)
+    return names[0] if names else "Developer tools"
+
+
+def copy_command(value):
+    return (f'<div class="cmd"><span>{e(value)}</span><button type="button" data-copy '
+            f'aria-label="Copy command">{icon("copy")}</button></div>')
+
+
+def search_text(app):
+    return " ".join([app["name"], app["pitch"], app["author"]["name"], *app["tags"], *categories(app)]).lower()
+
+
+def first_two_sentences(value):
+    sentences = re.split(r'(?<=[.!?])\s+', value.strip())
+    return " ".join(sentences[:2])
+
+
 def badges(app, today):
     result = []
     if "release" not in app:
@@ -71,13 +132,15 @@ def badges(app, today):
     return '<div class="badges">' + "".join(result) + '</div>'
 
 
-def page(title, body, path):
-    lede = re.search(r'<p class="(?:lede|sub)">(.*?)</p>', body, re.S) or re.search(r'<p>(.*?)</p>', body, re.S)
+def page(title, body, path, scripts=()):
+    lede = re.search(r'<p class="(?:lede|sub|pitch)">(.*?)</p>', body, re.S) or re.search(r'<p>(.*?)</p>', body, re.S)
     description = unescape(re.sub(r'<[^>]+>', '', lede.group(1))) if lede else title
     card = path + 'card.png' if path.startswith('/apps/') else '/brand/og-image.png'
     dimensions = '<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">' if path.startswith('/apps/') else ''
-    active = 'install' if path == '/install/' else 'submit' if path == '/submit/' else 'apps' if path == '/' or path.startswith(('/apps/', '/makers/')) else ''
-    navigation = ''.join(f'<a href="{url}"' + (' class="on" aria-current="page"' if key == active else '') + f'>{label}</a>' for key, url, label in [('apps', '/', 'Apps'), ('install', '/install/', 'Install'), ('submit', '/submit/', 'Submit an app')])
+    active = ('install' if path == '/install/' else 'submit' if path == '/submit/' else
+              'catalog' if path == '/catalog/' else 'apps' if path == '/' or path.startswith(('/apps/', '/makers/')) else '')
+    navigation = ''.join(f'<a href="{url}"' + (' class="on" aria-current="page"' if key == active else '') + f'>{label}</a>' for key, url, label in [('apps', '/', 'Apps'), ('catalog', '/catalog/', 'Catalog'), ('install', '/install/', 'Install'), ('submit', '/submit/', 'Submit an app')])
+    page_scripts = ''.join(f'<script type="module" src="{e(src)}"></script>' for src in scripts)
     return f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -95,15 +158,14 @@ def page(title, body, path):
 <link rel="icon" href="/brand/favicon-192.png" sizes="192x192" type="image/png">
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
 <link rel="manifest" href="/site.webmanifest">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,800&amp;family=Nunito:wght@400;600;700&amp;display=swap">
 <link rel="stylesheet" href="/assets/site.css"></head>
-<body><a class="skip" href="#main">Skip to content</a><div class="wrap">
-<header><a class="brand" href="/"><img class="brand-mark" src="/brand/icon-512.png" width="36" height="36" alt=""><span>tiinyapp.farm</span></a>
-<nav aria-label="Main navigation">{navigation}<a class="me" data-farm-nav href="/submit/#account-panel">Sign in</a></nav></header>
+<body><a class="skip" href="#main">Skip to content</a>
+<header><div class="wrap"><a class="brand" href="/"><img class="brand-mark" src="/brand/tiinyapp-farm-square-logo.png" width="34" height="34" alt=""><span>tiinyapp.farm</span></a>
+<nav aria-label="Main navigation">{navigation}<a class="me" data-farm-nav href="/submit/#account-panel">Sign in</a></nav></div></header>
 <main id="main">{body}</main>
-<footer><div class="marks"><a class="pill" href="https://titanium.bot"><img src="/brand/titanium-bot-logo.svg" width="120" height="30" alt="Titanium Bot"><span>Brought to you by Titanium Bot</span></a>
-<a class="pill" href="https://tiiny.ai">Built for <img src="/brand/tiiny-logo.svg" width="80" height="28" alt="Tiiny"></a></div><span>Made by Titanium Computing</span><a href="/docs/SUBMIT.md">Contributor guide</a><a href="/docs/manifest.schema.json">Manifest schema</a></footer>
-</div><script type="module" src="/assets/session.js"></script></body></html>'''
+<footer><div class="wrap"><div class="marks"><a class="pill" href="https://titanium.bot"><img src="/brand/titanium-bot-logo.svg" width="120" height="30" alt="Titanium Bot"><span>Brought to you by Titanium Bot</span></a>
+<a class="pill" href="https://tiiny.ai">Built for <img src="/brand/tiiny-logo.svg" width="80" height="28" alt="Tiiny"></a></div><span>Made by Titanium Computing</span><a href="/docs/SUBMIT.md">Contributor guide</a><a href="/docs/manifest.schema.json">Manifest schema</a></div></footer>
+{page_scripts}<script type="module" src="/assets/session.js"></script></body></html>'''
 
 
 def steps():
@@ -128,7 +190,9 @@ def seed_icon(app):
 
 def seed_media(app):
     media = app.get("media", {})
-    header = f'<img class="seed-header" src="{e(media["header"])}" alt="{e(app["name"])} header">' if media.get("header") else ''
+    header = (f'<div class="band" role="img" aria-label="{e(app["name"])} header" '
+              f'style="background-image:url(&quot;{e(media["header"])}&quot;)"></div>'
+              if media.get("header") else '')
     gallery = ''.join(f'<a class="gallery-thumb" href="{e(url)}" data-gallery-image><img src="{e(url)}" alt="{e(app["name"])} gallery image {i}" loading="lazy"></a>' for i, url in enumerate(media.get("gallery", []), 1))
     if gallery:
         gallery = '<section><h2>Screenshots</h2><div class="seed-gallery">' + gallery + '</div><dialog id="gallery-dialog" aria-label="Full-size app image"><form method="dialog"><button class="btn hay">Close image</button></form><img id="gallery-image" alt=""></dialog></section>'
@@ -156,6 +220,52 @@ def plot(app, today, makers=()):
 <div class="perms">{permissions}</div><div class="plant">{planting}</div></article>'''
 
 
+def editorial_item(app):
+    media = app.get("media", {})
+    art = (f'<div class="art" style="background-image:url(&quot;{e(media["header"])}&quot;)"></div>'
+           if media.get("header") else '<div class="art"></div>')
+    chips = ''.join(f'<span class="chip">{e(permission_label(value))}</span>' for value in app["permissions"])
+    chips += f'<span class="chip">v{e(app["version"])}</span>'
+    return f'''<article class="item">{art}<div class="text"><span class="cat-tag">{e(category_tag(app))}</span>
+<h3 class="name"><a href="/apps/{e(app['id'])}/">{e(app['name'])}</a></h3><p class="pitch">{e(app['pitch'])}</p>
+<p class="desc">{e(first_two_sentences(app['description']))}</p><div class="chips">{chips}</div>
+<div class="foot"><a class="btn hay" href="/apps/{e(app['id'])}/">Install</a>{copy_command('farm install ' + app['id'])}</div></div></article>'''
+
+
+def ledger_row(app):
+    media = app.get("media", {})
+    icon_image = (f'<img src="{e(media["icon"])}" width="56" height="56" alt="">'
+                  if media.get("icon") else '<span class="row-icon" aria-hidden="true"></span>')
+    chips = f'<span class="chip">{e(needs(app))}</span>'
+    chips += ''.join(f'<span class="chip">{e(permission_label(value))}</span>' for value in app["permissions"])
+    return f'''<article class="row" data-catalog-search="{e(search_text(app))}">{icon_image}<div><span class="cat-tag">{e(category_tag(app))}</span>
+<h3 class="name"><a href="/apps/{e(app['id'])}/">{e(app['name'])}</a></h3><p class="pitch">{e(app['pitch'])}</p><div class="chips">{chips}</div></div>
+<span class="v">v{e(app['version'])}</span><a class="btn hay" href="/apps/{e(app['id'])}/">Install</a></article>'''
+
+
+def home_page(apps):
+    featured = [app for app in apps if app.get("featured")][:6]
+    hero = '''<section class="hero"><img src="/assets/hero.jpg" width="1600" height="1066" alt="A fantasy farm at dusk with glowing apps in rows and Titan tending the field."><div class="copy"><h1>Little apps, <em>grown for your Tiiny.</em></h1><p class="lede">Community-made apps that run beside your Pocket Lab on your own computer. Choose an app to see its requirements and install commands.</p><div class="row"><a class="btn hay" href="#all-apps">Browse apps</a><a class="btn ghost" href="/install/">Install an app</a></div></div></section>'''
+    featured_section = f'''<section class="feat wrap"><div class="sechead"><h2>Featured</h2><p>Picked by the maintainers</p></div>
+<div class="v3"><div class="list">{''.join(editorial_item(app) for app in featured)}</div></div></section>'''
+    ledger = f'''<section class="ledger wrap" id="all-apps"><div class="sechead"><h2>All apps</h2><p><a href="/catalog/">Browse the catalog with filters</a></p></div>
+<div class="toolbar"><label class="search">{icon('search')}<span class="visually-hidden">Search apps</span><input id="q-home" type="search" placeholder="Search apps, makers, tags" autocomplete="off"></label><span class="count" id="count-home">{len(apps)} of {len(apps)}</span></div>
+<div class="v2"><div class="rows" id="rows-home">{''.join(ledger_row(app) for app in apps)}</div><p class="empty" id="empty-home" hidden>No app matches. Try fewer words.</p></div></section>'''
+    invitation = '''<section class="seeds wrap"><div><h2>Submit an app</h2><p>Submit an app for automated checks and maintainer review.</p></div><a class="btn hay" href="/submit/">Share your app</a></section>'''
+    return hero + featured_section + ledger + invitation
+
+
+def catalog_page(apps):
+    available = [name for name in CATEGORY_ORDER if any(name in categories(app) for app in apps)]
+    category_buttons = ''.join(
+        f'<button class="cat" type="button" data-cat="{e("" if name == "All" else name)}" aria-pressed="{str(name == "All").lower()}">{e(name)}</button>'
+        for name in ['All', *available])
+    return f'''<section class="catalog wrap"><h1>Catalog</h1><p class="lede">Every app on the farm. Each page shows what it needs and what it asks for before you install.</p>
+<div class="toolbar"><label class="search">{icon('search')}<span class="visually-hidden">Search apps</span><input id="q-catalog" type="search" placeholder="Search apps, makers, tags" autocomplete="off"></label><span class="count" id="count-catalog" aria-live="polite"></span></div>
+<div class="cats" id="catalog-categories" role="group" aria-label="Categories">{category_buttons}</div>
+<div class="v1 catalog-grid"><div class="grid" id="catalog-grid"></div><p class="empty" id="empty-catalog" hidden>Nothing in that category yet. <a href="/submit/">Submit an app</a>.</p></div></section>'''
+
+
 def social_strip(app):
     return f'''<section class="seed-social" data-seed-social="{e(app['id'])}" aria-labelledby="social-heading"><h2 id="social-heading">Comments</h2>
 <p id="social-status" role="status" aria-live="polite">Loading comments and thumbs up…</p>
@@ -166,7 +276,7 @@ def social_strip(app):
 
 
 def app_page(app, today, makers=()):
-    header, visual_media = seed_media(app)
+    band, visual_media = seed_media(app)
     links = app.get('links', {})
     repo = links.get('repo') or app.get('repo')
     homepage = links.get('homepage') or app.get('homepage')
@@ -174,19 +284,21 @@ def app_page(app, today, makers=()):
     release = app.get('release')
     maker = next((m for m in makers if m.get('tiinyverse') and m['tiinyverse'] == app['author'].get('tiinyverse')), None)
     maker_url = '/makers/' + maker['handle'] + '/' if maker else app['author']['url']
-    avatar = f'<img class="av" src="{e(maker["avatar"])}" alt="" width="36" height="36">' if maker and maker.get('avatar') else ''
-    owner = '<span class="chip">Verified Tiiny owner</span>' if app['author'].get('tiinyverse') else ''
-    review = 'Reviewed by a maintainer' if app['verified'] else 'Not reviewed by a maintainer'
+    avatar = f'<img src="{e(maker["avatar"])}" alt="" width="36" height="36">' if maker and maker.get('avatar') else ''
+    owner = '<span class="chip ok">Verified Tiiny owner</span>' if app['author'].get('tiinyverse') else ''
+    review = 'Reviewed' if app['verified'] else 'Not reviewed yet'
+    media = app.get('media', {})
+    app_icon = (f'<img src="{e(media["icon"])}" width="72" height="72" alt="">'
+                if media.get('icon') else '')
     if release:
-        commands = 'farm install ' + app['id']
-        if app['entry'] is not None:
-            commands += '\nfarm start ' + app['id']
+        commands = f'farm install {app["id"]} && farm start {app["id"]}'
         local = f'Then open <code>http://localhost:{e(req["ports"][0])}</code>. ' if req['ports'] and app['entry'] is not None else ''
-        install = '<h2>Install</h2>' + command(commands) + f'<p class="small">{local}New here? <a href="/install/">Install the farm CLI first.</a></p>'
+        install = '<h2>Install</h2>' + copy_command(commands) + f'<p class="sub install-note">{local}New here? <a href="/install/">Install the farm CLI first.</a></p>'
         if app['entry'] is None:
             install += '<p>This is a library. There is no app to start. Use it from your own application.</p>'
-        release_details = f'<dl><dt>Version</dt><dd>{e(app["version"])}</dd><dt>Size</dt><dd>{release["size"]} bytes</dd><dt>SHA-256</dt><dd class="checksum">{e(release["sha256"])}</dd><dt>Source</dt><dd>{link(repo or release["url"], "Source repository" if repo else "Release archive")}</dd></dl>'
-        release_details += '<p>' + link(release['url'], 'Download release') + '</p>'
+        size_mb = f'{release["size"] / 1_000_000:.1f} MB'
+        short_sha = release['sha256'] if release['sha256'] == 'pending' else release['sha256'][:12] + '…'
+        release_details = f'<dl><dt>Version</dt><dd>{e(app["version"])}</dd><dt>Size</dt><dd>{e(size_mb)}</dd><dt>SHA-256</dt><dd class="mono" title="{e(release["sha256"])}">{e(short_sha)}</dd><dt>Source</dt><dd>{link(repo or release["url"], "GitHub" if repo else "Release archive")}</dd></dl>'
         if release['sha256'] == 'pending':
             install += '<p class="note">The checksum is pending. This release cannot be installed yet.</p>'
     else:
@@ -198,16 +310,17 @@ def app_page(app, today, makers=()):
         images += '<section><h2>Screenshots</h2><div class="seed-gallery">' + screenshots + '</div></section>'
     if not images:
         images = '<h2>Screenshots</h2><p class="fine">No screenshots yet.</p>'
-    permissions = ''.join(f'<span class="chip">{e("Your Tiiny" if permission == "device" else permission.capitalize())}</span>' for permission in app['permissions']) or '<span class="chip">None declared</span>'
-    return f'''<section class="page app-page">{header}<div class="apphead">{seed_icon(app)}<div><h1>{e(app['name'])}</h1><div class="v">v{e(app['version'])} · {e(app['license'])} · {review}</div></div></div>
-<p class="sub">{e(app['pitch'])}</p>
+    permissions = ''.join(f'<span class="chip">{e(permission_label(permission))}</span>' for permission in app['permissions']) or '<span class="chip">None declared</span>'
+    python = e(req.get('python', 'Not specified')) + (' or newer' if req.get('python') else '')
+    return f'''<section class="app wrap">{band}<div class="head">{app_icon}<div><h1>{e(app['name'])}</h1><div class="sub">v{e(app['version'])} · {e(app['license'])} · {review} · Grown by {link(maker_url, app['author']['name'])}</div></div></div>
+<p class="pitch">{e(app['pitch'])}</p>
 <a hidden data-seed-update="{e(app['id'])}" href="/submit/?update={e(app['id'])}">Update this app</a>
-<div class="two"><div>{install}<h2>What it does</h2><p>{e(app['description'])}</p>{'<p>' + link(homepage, 'Home page') + '</p>' if homepage else ''}{images}{social_strip(app)}</div><aside>
-<div class="card2"><h2>Needs</h2><dl><dt>Python</dt><dd>{e(req.get('python', 'Not specified'))}</dd><dt>Port</dt><dd>{e(', '.join(map(str, req['ports'])) or 'None')}</dd><dt>Models</dt><dd>{e(', '.join(req['device']['models']) or 'None specified')}</dd><dt>Uses</dt><dd><div class="chips">{permissions}</div></dd></dl></div>
-<div class="card2"><h2>Release</h2>{release_details}</div>
-<div class="card2"><h2>Maker</h2><div class="maker">{avatar}<div><b>{link(maker_url, app['author']['name'])}</b><br>{owner}</div></div></div>
-<div class="row"><button id="seed-thumb" class="btn ghost" type="button" aria-pressed="false" disabled>Thumbs up · <span id="thumb-count">0</span></button><button type="button" class="btn ghost" data-share data-share-title="{e(app['name'])}" data-share-text="{e(app['pitch'])}">Share</button></div><span data-share-status role="status" aria-live="polite"></span>
-</aside></div></section><script type="module" src="/assets/share.js"></script><script type="module" src="/assets/seed-media.js"></script><script type="module" src="/assets/social.js"></script>'''
+<div class="two"><div>{install}<h2>What it does</h2><p class="desc">{e(app['description'])}</p>{'<p>' + link(homepage, 'Home page') + '</p>' if homepage else ''}{images}{social_strip(app)}</div><aside class="rail">
+<div class="card"><h3>Needs</h3><dl><dt>Python</dt><dd>{python}</dd><dt>Port</dt><dd>{e(', '.join(map(str, req['ports'])) or 'None')}</dd><dt>Models</dt><dd>{e(', '.join(req['device']['models']) or 'None')}</dd><dt>NPU</dt><dd>{e(req['device']['npuUnits'])} units</dd><dt>Uses</dt><dd><div class="chips">{permissions}</div></dd></dl></div>
+<div class="card"><h3>Release</h3>{release_details}</div>
+<div class="card"><h3>Maker</h3><div class="maker">{avatar}<div><b>{link(maker_url, app['author']['name'])}</b><br>{owner}</div></div></div>
+<div class="rail-actions"><button id="seed-thumb" class="btn ghost" type="button" aria-pressed="false" disabled>Thumbs up · <span id="thumb-count">0</span></button><button type="button" class="btn ghost" data-share data-share-title="{e(app['name'])}" data-share-text="{e(app['pitch'])}">Share</button></div><span data-share-status role="status" aria-live="polite"></span>
+</aside></div></section>'''
 
 
 def seeds():
@@ -262,11 +375,8 @@ def build(source=ROOT, output=None, today=None):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
 
-        hero = '''<section class="hero"><img src="/assets/hero.jpg" width="1600" height="1066" alt="A fantasy farm at dusk with glowing apps in rows and Titan tending the field."><div class="copy"><h1>Little apps, <em>grown for your Tiiny.</em></h1><p class="lede">Community-made apps that run beside your Pocket Lab on your own computer. Choose an app to see its requirements and install commands.</p><div class="row"><a class="btn hay" href="#field">Browse apps</a><a class="btn ghost" href="/install/">Install an app</a></div></div></section>'''
-        field = '<section class="sect" id="field"><h2>Apps</h2><p class="lede">Each app lists its requirements, permissions and release details. Reviewed means a maintainer has run the app and reviewed its source; some apps do not yet have an installable release.</p><div class="field">'
-        field += ''.join(plot(app, today, makers) for _, app in manifests) + '</div></section>'
-        invitation = '<section class="seeds"><div><h2>Submit an app</h2><p>Submit an app for automated checks and maintainer review.</p></div><a class="btn hay" href="/submit/">Share your app</a></section>'
-        pages = {"/": ("App catalog", hero + field + invitation),
+        apps = [app for _, app in manifests]
+        pages = {"/": ("App catalog", home_page(apps)), "/catalog/": ("Catalog", catalog_page(apps)),
                  "/install/": ("Install an app", steps()), "/submit/": ("Submit an app", seeds()), "/account/": ("Your apps", my_farm())}
         listing = '<section class="sect"><h1>App manifests</h1><p>The installer catalog at https://tiinyapp.farm/manifests/.</p><ul>'
         for path, app in manifests:
@@ -287,10 +397,14 @@ def build(source=ROOT, output=None, today=None):
                         avatar=maker.get('avatar'), verified=bool(maker.get('tiinyverse')))
         pages['/manifests/'] = ('App manifests', listing + '</ul></section>')
         for url, (title, body) in pages.items():
-            write(url.lstrip('/') + 'index.html', page(title, body, url))
+            scripts = ('/assets/catalog.js',) if url in ('/', '/catalog/') else (
+                ('/assets/catalog.js', '/assets/share.js', '/assets/seed-media.js', '/assets/social.js')
+                if url.startswith('/apps/') else ())
+            write(url.lstrip('/') + 'index.html', page(title, body, url, scripts))
         write('404.html', page('Page not found', '<section class="sect"><h1>Page not found</h1><p>This page does not exist. ' + link('/', 'Return to the catalog') + '.</p></section>', '/404.html'))
         write('sitemap.xml', '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + ''.join(f'<url><loc>{ORIGIN}{url}</loc></url>' for url in sorted(pages) if url not in ("/account/",)) + '</urlset>\n')
         write('catalog.json', json.dumps([app for _, app in manifests], ensure_ascii=False) + '\n')
+        write('categories.json', json.dumps({'map': CATEGORIES, 'order': CATEGORY_ORDER}, ensure_ascii=False) + '\n')
         write('site.webmanifest', json.dumps({'name': 'tiinyapp.farm', 'short_name': 'tiinyapp.farm',
               'start_url': '/', 'display': 'standalone', 'theme_color': '#090D14', 'background_color': '#090D14',
               'icons': [{'src': '/brand/favicon-192.png', 'sizes': '192x192', 'type': 'image/png'},
@@ -298,11 +412,12 @@ def build(source=ROOT, output=None, today=None):
         shutil.copytree(source / 'brand', dest / 'brand')
         shutil.copytree(source / 'site/fonts', dest / 'fonts')
         write('robots.txt', f'User-agent: *\nAllow: /\nSitemap: {ORIGIN}/sitemap.xml\n')
-        for folder, files in {'assets': ['hero.jpg', 'site.css', 'seeds.js', 'session.js', 'farm.js', 'seed-media.js', 'social.js', 'share.js', 'titanium-icon.png', 'titanium-header.webp'], 'docs': ['manifest.schema.json', 'SUBMIT.md']}.items():
+        for folder, files in {'assets': ['hero.jpg', 'site.css', 'catalog.js', 'seeds.js', 'session.js', 'farm.js', 'seed-media.js', 'social.js', 'share.js', 'titanium-icon.png', 'titanium-header.webp'], 'docs': ['manifest.schema.json', 'SUBMIT.md']}.items():
             for name in files:
                 origin = source / ('site/assets' if folder == 'assets' else folder) / name
                 (dest / folder).mkdir(exist_ok=True)
                 shutil.copyfile(origin, dest / folder / name)
+        shutil.copytree(source / 'site/assets/art', dest / 'assets/art')
         if output.exists():
             shutil.rmtree(output)
         shutil.copytree(dest, output)

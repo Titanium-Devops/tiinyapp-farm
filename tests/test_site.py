@@ -59,32 +59,42 @@ class SiteTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.temp.cleanup()
 
-    def test_every_manifest_has_a_plot_and_complete_page(self):
+    def test_home_uses_featured_editorial_items_and_ledger_rows(self):
         index = (self.output / 'index.html').read_text()
-        self.assertEqual(index.count('<article class="plot">'), len(self.apps))
+        featured = [app for app in self.apps if app.get('featured')][:6]
+        self.assertEqual(index.count('<article class="item">'), len(featured))
+        self.assertEqual(index.count('data-catalog-search='), len(self.apps))
+        self.assertIn('Picked by the maintainers', index)
+        self.assertIn('Browse the catalog with filters', index)
+        self.assertNotIn('<article class="plot">', index)
+        for app in featured:
+            featured_html = index.split('<section class="feat', 1)[1].split('</section>', 1)[0]
+            self.assertIn(app['name'], featured_html)
+        for app in self.apps:
+            self.assertTrue(app.get('featured'))
+
+    def test_every_manifest_has_a_complete_locked_app_page(self):
         for app in self.apps:
             with self.subTest(app=app['id']):
                 doc = Document((self.output / 'apps' / app['id'] / 'index.html').read_text())
                 visible = ' '.join(doc.text)
                 for key in ('name', 'pitch', 'description', 'id', 'version', 'license'):
                     self.assertIn(str(app[key]), visible)
-                for url in (app['homepage'], app['repo'], app['release']['url']):
+                for url in (app['homepage'], app['repo']):
                     self.assertIn(url, doc.references)
-                self.assertIn(app['release']['sha256'], visible)
-                self.assertIn(str(app['release']['size']), visible)
+                self.assertIn(app['release']['sha256'][:12], visible)
+                self.assertIn(f'{app["release"]["size"] / 1_000_000:.1f} MB', visible)
                 self.assertIn('farm install ' + app['id'], visible)
-                if app['entry'] is None:
-                    self.assertNotIn('farm start ' + app['id'], visible)
-                    self.assertIn('no app to start', visible)
-                else:
-                    self.assertIn('farm start ' + app['id'], visible)
+                self.assertIn('farm start ' + app['id'], visible)
                 for permission in app['permissions']:
                     self.assertIn({'microphone': 'Microphone', 'files': 'Files', 'network': 'Network', 'device': 'Your Tiiny'}[permission], visible)
                 for model in app['requires']['device']['models']:
                     self.assertIn(model, visible)
                 for port in app['requires']['ports']:
                     self.assertIn(str(port), visible)
-                self.assertIn('Not reviewed by a maintainer', visible)
+                self.assertIn('Not reviewed yet', visible)
+                self.assertIn('Grown by', visible)
+                self.assertIn('class="rail"', (self.output / 'apps' / app['id'] / 'index.html').read_text())
 
     def test_sprouting_seed_keeps_story_and_social_without_install_or_release(self):
         app = copy.deepcopy(self.apps[0])
@@ -96,7 +106,7 @@ class SiteTests(unittest.TestCase):
             self.assertIn(app['pitch'], ' '.join(Document(html).text))
             self.assertNotIn('farm install', html)
         self.assertIn('No release yet. This app cannot be installed.', page)
-        self.assertIn('<h2>Release</h2><p>No release yet</p>', page)
+        self.assertIn('<h3>Release</h3><p>No release yet</p>', page)
         self.assertNotIn('SHA-256', page)
         self.assertIn('seed-comments', page)
         self.assertIn(app['author']['url'], Document(page).references)
@@ -222,7 +232,7 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_required_pages_and_byte_identical_manifests(self):
-        for path in ('index.html', 'install/index.html', 'submit/index.html', 'account/index.html', 'catalog.json', 'manifests/index.html', 'sitemap.xml', 'robots.txt', '404.html'):
+        for path in ('index.html', 'catalog/index.html', 'install/index.html', 'submit/index.html', 'account/index.html', 'catalog.json', 'categories.json', 'manifests/index.html', 'sitemap.xml', 'robots.txt', '404.html'):
             self.assertTrue((self.output / path).is_file(), path)
         for path in (ROOT / 'manifests').glob('*.json'):
             self.assertEqual(path.read_bytes(), (self.output / 'manifests' / path.name).read_bytes())
@@ -253,13 +263,17 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
             self.assertNotIn('data:image', text)
             scripts = [attrs for tag, attrs in doc.tags if tag == 'script']
             expected = []
-            if path.relative_to(self.output).as_posix() == 'submit/index.html':
+            relative = path.relative_to(self.output).as_posix()
+            if relative in ('index.html', 'catalog/index.html'):
+                expected.append({'type': 'module', 'src': '/assets/catalog.js'})
+            elif relative == 'submit/index.html':
                 expected.append({'type': 'module', 'src': '/assets/seeds.js'})
-            elif path.relative_to(self.output).as_posix().startswith('apps/'):
+            elif relative.startswith('apps/'):
+                expected.append({'type': 'module', 'src': '/assets/catalog.js'})
                 expected.append({'type': 'module', 'src': '/assets/share.js'})
                 expected.append({'type': 'module', 'src': '/assets/seed-media.js'})
                 expected.append({'type': 'module', 'src': '/assets/social.js'})
-            elif path.relative_to(self.output).as_posix() == 'account/index.html':
+            elif relative == 'account/index.html':
                 expected.append({'type': 'module', 'src': '/assets/farm.js'})
             expected.append({'type': 'module', 'src': '/assets/session.js'})
             self.assertEqual(scripts, expected)
@@ -286,7 +300,7 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
             for file in ('favicon.ico', 'favicon-32.png', 'favicon-192.png', 'apple-touch-icon.png'):
                 self.assertIn('/brand/' + file, doc.references)
             self.assertIn('/site.webmanifest', doc.references)
-            self.assertIn('/brand/icon-512.png', doc.references)
+            self.assertIn('/brand/tiinyapp-farm-square-logo.png', doc.references)
         for app in self.apps:
             with Image.open(self.output / 'apps' / app['id'] / 'card.png') as card:
                 self.assertEqual(card.size, (1200, 630))
@@ -372,30 +386,28 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
     def test_sitemap_and_field_documentation(self):
         tree = ET.parse(self.output / 'sitemap.xml')
         urls = {element.text for element in tree.iter('{http://www.sitemaps.org/schemas/sitemap/0.9}loc')}
-        expected = {'https://tiinyapp.farm' + path for path in ('/', '/install/', '/submit/', '/manifests/')}
+        expected = {'https://tiinyapp.farm' + path for path in ('/', '/catalog/', '/install/', '/submit/', '/manifests/')}
         expected.update('https://tiinyapp.farm/apps/' + app['id'] + '/' for app in self.apps)
         self.assertEqual(urls, expected)
         self.assertIn('Sitemap: https://tiinyapp.farm/sitemap.xml', (self.output / 'robots.txt').read_text())
         schema = json.loads((ROOT / 'docs/manifest.schema.json').read_text())
         self.assertEqual(set(SITE['FIELDS']), set(schema['properties']))
 
-    def test_mockup_tokens_and_phone_layout_constraints(self):
+    def test_locked_tokens_motion_and_phone_layout_constraints(self):
         css = (self.output / 'assets/site.css').read_text()
-        mockup = (ROOT / 'site/design/mockup-approved.html').read_text()
-        tokens = dict(re.findall(r'(--[a-z]+):(#[A-Fa-f0-9]{6})', mockup))
         actual = dict(re.findall(r'(--[a-z]+):(#[A-Fa-f0-9]{6})', css))
-        self.assertEqual(actual, tokens)
-        self.assertIn('min-height:44px;min-width:44px', css)
+        self.assertEqual(actual, {'--night': '#090D14', '--soil': '#12171F', '--fence': '#1E2732',
+                                  '--hay': '#F2C462', '--cyan': '#00C8F0', '--mint': '#7FE3DC',
+                                  '--ink': '#E8EEF2', '--mute': '#9AA7B4', '--bad': '#F0A08F'})
         self.assertIn('white-space:pre-wrap', css)
         self.assertIn('overflow-wrap:anywhere', css)
-        self.assertIn('minmax(min(250px,100%),1fr)', css)
-        # 390px viewport minus wrap padding = 342; a plot has 304px inside.
-        self.assertEqual(390 - 2 * 24, 342)
-        self.assertEqual(342 - 2 * (18 + 1), 304)
-        self.assertIn('@media(min-width:701px)', css)
-        self.assertRegex(css, r'\.two\{[^}]*grid-template-columns:minmax\(0,1fr\) 300px')
-        self.assertRegex(css, r'@media\(max-width:760px\)\{\.two\{grid-template-columns:1fr')
-        self.assertRegex(css, r'\.page\{[^}]*max-width:880px')
+        self.assertIn('minmax(min(300px,100%),1fr)', css)
+        self.assertIn('animation:rise .3s ease-out forwards', css)
+        self.assertIn('transition:background .15s ease-out,transform .15s ease-out', css)
+        self.assertIn('@media(prefers-reduced-motion:reduce)', css)
+        self.assertRegex(css, r'\.app \.two\{[^}]*grid-template-columns:minmax\(0,1fr\) 300px')
+        self.assertRegex(css, r'@media\(max-width:760px\).*\.app \.two\{grid-template-columns:1fr')
+        self.assertRegex(css, r'\.page\{[^}]*max-width:720px')
         self.assertRegex(css, r'\.stp \.n\{[^}]*width:32px;height:32px')
 
     def test_deploy_configuration(self):
@@ -403,7 +415,7 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         self.assertEqual(config['name'], 'tiinyapp-farm')
         self.assertEqual(config['main'], 'worker/main.mjs')
         self.assertEqual(config['assets']['binding'], 'ASSETS')
-        self.assertTrue(set(['/api/*', '/seeds-files/*', '/farm/*', '/makers/*', '/media/*', '/seeds/mine/*']).issubset(config['assets']['run_worker_first']))
+        self.assertTrue(set(['/api/*', '/seeds-files/*', '/farm/*', '/makers/*', '/media/*', '/seeds/*']).issubset(config['assets']['run_worker_first']))
         self.assertEqual(config['kv_namespaces'][0]['binding'], 'FARM')
         self.assertEqual(config['r2_buckets'][0], {'binding': 'SEEDS', 'bucket_name': 'farm-seeds'})
         self.assertEqual(config['durable_objects']['bindings'][0]['class_name'], 'FarmCoordinator')
@@ -573,7 +585,7 @@ assert.equal(anonymous.children[0].children[0].tag, 'span');
             main_headings = re.findall(r'<h2[^>]*>(.*?)</h2>', main)
             self.assertEqual(main_headings[:2], ['Install', 'What it does'])
             self.assertIn('Comments', main_headings)
-            self.assertEqual(re.findall(r'<h2[^>]*>(.*?)</h2>', rail)[:3], ['Needs', 'Release', 'Maker'])
+            self.assertEqual(re.findall(r'<h3[^>]*>(.*?)</h3>', rail)[:3], ['Needs', 'Release', 'Maker'])
             self.assertIn('id="seed-thumb"', rail)
             self.assertIn('data-share', rail)
             for port in app['requires']['ports']:
@@ -584,18 +596,43 @@ assert.equal(anonymous.children[0].children[0].tag, 'span');
 
     def test_navigation_links_and_current_page(self):
         for path, active in [('index.html', '/'), ('install/index.html', '/install/'),
-                             ('submit/index.html', '/submit/'),
+                             ('catalog/index.html', '/catalog/'), ('submit/index.html', '/submit/'),
                              ('apps/' + self.apps[0]['id'] + '/index.html', '/')]:
             html = (self.output / path).read_text()
             nav = re.search(r'<nav\b[^>]*>(.*?)</nav>', html, re.S).group(1)
             doc = Document(nav)
             anchors = [attrs for tag, attrs in doc.tags if tag == 'a']
-            self.assertEqual([attrs['href'] for attrs in anchors[:3]], ['/', '/install/', '/submit/'])
+            self.assertEqual([attrs['href'] for attrs in anchors[:4]], ['/', '/catalog/', '/install/', '/submit/'])
             current = [attrs for attrs in anchors if attrs.get('aria-current') == 'page']
             self.assertEqual([attrs['href'] for attrs in current], [active])
             self.assertIn('on', current[0].get('class', '').split())
             self.assertIn('Sign in', ''.join(doc.text))
             self.assertIn('/submit/', doc.references)
+
+    def test_catalog_categories_and_safe_text_module(self):
+        html = (self.output / 'catalog/index.html').read_text()
+        doc = Document(html)
+        self.assertIn('catalog-categories', doc.ids)
+        chips = [attrs for tag, attrs in doc.tags if tag == 'button' and 'cat' in attrs.get('class', '').split()]
+        self.assertEqual([''.join(Document(re.findall(r'<button[^>]*class="cat"[^>]*>(.*?)</button>', html)[i]).text)
+                          for i in range(len(chips))], ['All', 'Assistants', 'Family', 'Audio', 'Developer tools', 'Libraries'])
+        config = json.loads((self.output / 'categories.json').read_text())
+        self.assertEqual(config['order'], ['Assistants', 'Family', 'Audio', 'Developer tools', 'Libraries'])
+        self.assertEqual(config['map']['benchmark'], 'Developer tools')
+        source = (ROOT / 'site/assets/catalog.js').read_text()
+        self.assertNotIn('innerHTML', source)
+        self.assertNotIn('insertAdjacentHTML', source)
+        script = r'''import assert from 'node:assert/strict';
+const module = await import(process.argv[1]);
+globalThis.document = { createElement: tag => ({ tag, className: '', textContent: '' }) };
+const hostile = '<img src=x onerror=alert(1)> & text';
+const element = module.textElement('p', 'pitch', hostile);
+assert.equal(element.textContent, hostile);
+assert.equal(element.className, 'pitch');
+'''
+        result = subprocess.run(['node', '--input-type=module', '-e', script,
+                                 (ROOT / 'site/assets/catalog.js').as_uri()], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_cli_works_outside_repository(self):
         with tempfile.TemporaryDirectory() as temp:
