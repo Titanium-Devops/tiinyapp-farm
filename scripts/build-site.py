@@ -265,15 +265,7 @@ def seeds():
 <div class="seed-field seed-wide"><label for="archive">Or upload a tar.gz (up to 50 MB)</label><input id="archive" name="archive" type="file" accept=".tar.gz,application/gzip"></div>
 <div class="seed-field seed-wide"><label for="permissions">What it asks for</label><select id="permissions" name="permissionChoices" multiple size="4" aria-describedby="permission-help"><option value="microphone">Microphone</option><option value="files">Files</option><option value="network">Network</option><option value="device">Tiiny device</option></select></div>
 <p class="fine seed-wide" id="permission-help">Choose all access your app uses. Leave empty if it asks for nothing. Use Control or Command to select several.</p>
-<details class="seed-wide" open><summary>What it needs &amp; how it starts</summary><p class="fine">Does it start something? Give the command. A library that other apps import has no command: leave it empty and add the tag <code>library</code>.</p><div class="seed-form-grid">
-<div class="seed-field"><label for="command">Start command (empty for a library)</label><input id="command" name="command" placeholder="python -m my_app"></div>
-<div class="seed-field"><label for="python">Python version (optional)</label><input id="python" name="python" placeholder="3.11" pattern="[0-9]+\.[0-9]+"></div>
-<div class="seed-field"><label for="ports">Local ports, separated by commas</label><input id="ports" name="ports" placeholder="8080"></div>
-<div class="seed-field"><label for="models">Tiiny models, separated by commas</label><input id="models" name="models" placeholder="qwen3:8b"></div>
-<div class="seed-field"><label for="npuUnits">NPU units</label><input id="npuUnits" name="npuUnits" type="number" min="0" step="1" value="0"></div>
-<div class="seed-field"><label for="tags">Tags, separated by commas</label><input id="tags" name="tags" placeholder="library, tools"><p class="fine">Include library if there is no start command.</p></div>
-<div class="seed-field"><label for="health">HTTP health path (optional)</label><input id="health" name="health" placeholder="/health"></div>
-<label class="check-label seed-wide"><input name="selfcheck" type="checkbox" value="true"> Supports an offline --selfcheck</label></div></details>
+<div class="seed-field seed-wide"><label for="command">Start command (optional)</label><input id="command" name="command" placeholder="python -m my_app"><p class="fine">How the farmhand starts it. Leave it empty for a library or a seed that is still sprouting.</p></div>
 <button class="btn hay seed-wide" type="submit">Send to the farmhands</button><p id="seed-error" class="seed-wide card-state error" role="alert" hidden></p></div></fieldset></form>
 <a href="/farm/">My seeds and their checks</a></section></div>
 <section class="seed-notes"><h2>A little care before the field</h2><p>We check the label on the packet, weigh the archive, and make sure the checksum matches. Then we look for unsafe paths, secrets and access the app forgot to declare. If it has a selfcheck, CI runs it offline.</p>

@@ -17,6 +17,12 @@ export function releaseURL(value) {
       !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(url.hostname) || /(^|\.)(localhost|local|internal|test|invalid)$/i.test(url.hostname)) fail(400, 'Use a public HTTPS release URL.');
   return url.href;
 }
+// A seed with no start command is a library, and says so, without the maker knowing the word.
+function tags(input) {
+  const given = typeof input.tags === 'string' ? input.tags.split(',').map(t => t.trim().toLowerCase()).filter(Boolean) : [];
+  const entry = input.command || (input.entry && input.entry !== 'null');
+  return !entry && !given.includes('library') ? [...given, 'library'] : given;
+}
 export function buildManifest(input, user, release, now) {
   const list = key => typeof input[key] === 'string' ? input[key].split(',').map(s => s.trim()).filter(Boolean) : [];
   const today = new Date(now).toISOString().slice(0, 10);
@@ -35,7 +41,7 @@ export function buildManifest(input, user, release, now) {
     entry: input.command ? { command: input.command } : parsed('entry', null),
     requires: { ...(input.python ? { python: input.python } : {}), ports: list('ports').map(Number),
       device: { models: list('models'), npuUnits: Number(input.npuUnits || 0) } },
-    permissions: list('permissions'), tags: list('tags'), verified: false, addedAt: today, updatedAt: today,
+    permissions: list('permissions'), tags: tags(input), verified: false, addedAt: today, updatedAt: today,
     ...(input.selfcheck === 'true' ? { selfcheck: true } : {}), ...(input.health ? { health: input.health } : {}),
   };
   checkManifest(manifest);
@@ -185,7 +191,7 @@ export async function seedRoutes(ctx) {
         if (!location || i === 3) fail(422, 'The release URL redirects too many times.');
         hop = releaseURL(new URL(location, hop).href);
       }
-      if (response.status !== 200) fail(422, 'Use a public HTTPS release URL that answers 200.');
+      if (response.status !== 200) fail(422, `That release link answered ${response.status}, not 200. Open it in a browser first; it must download the tar.gz.`);
       bytes = response.bytes; release = { url: address };
     }
     if (bytes && (bytes.length < 2 || bytes[0] !== 0x1f || bytes[1] !== 0x8b)) fail(400, 'The release must be a gzip archive.');

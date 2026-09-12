@@ -243,7 +243,7 @@ test('seed gate, archive selection, unsafe URL, invalid schema and size limits s
   const first = await f.email(); assert.equal((await f.call('/api/seeds', seedForm(), first.cookie)).status, 403);
   await f.proof(first.cookie);
   assert.equal((await f.call('/api/seeds', seedForm({ upload: true, releaseUrl: 'https://example.org/a' }), first.cookie)).status, 400);
-  for (const changes of [{ id: '../escape' }, { permissions: 'superuser' }, { ports: '70000' }, { tags: '' }, { version: '01.0.0' }, { releaseUrl: 'https://127.0.0.1/x' }]) {
+  for (const changes of [{ id: '../escape' }, { permissions: 'superuser' }, { ports: '70000' }, { version: '01.0.0' }, { releaseUrl: 'https://127.0.0.1/x' }]) {
     assert.equal((await f.call('/api/seeds', seedForm(changes), first.cookie)).status, 400);
   }
   const big = seedForm({ upload: true }); big.set('archive', new Blob([new Uint8Array(50 * 1024 * 1024 + 1)]), 'big.tar.gz');
