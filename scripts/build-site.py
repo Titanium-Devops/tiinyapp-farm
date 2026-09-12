@@ -162,10 +162,10 @@ def seeds():
 <p class="fine">Already signed in? Add the other sign-in here to link it to this account.</p>
 <button id="logout" class="btn ghost" type="button" hidden>Sign out</button></section>
 <section class="seed-card" id="proof-panel" role="tabpanel" aria-labelledby="proof-tab" tabindex="0" hidden><span class="step-number" aria-hidden="true">02</span><h2 id="proof-heading">Prove your Tiiny</h2>
-<p>Your public TiinyVerse profile tells the farm who is planting. Its display name will appear beside your seed.</p>
+<p>Your public TiinyVerse profile tells the farm who is planting. Its display name will appear beside your seed. It works like a DNS TXT record: we give you a short code, you put it in your profile bio, and the farm reads your public profile once to see it.</p>
 <p id="proof-state" class="card-state" role="status">First, sign in to your farm account.</p>
 <form id="tiiny-link"><fieldset id="proof-fields" disabled><legend>Your owner's profile</legend><label for="profileUrl">TiinyVerse profile URL</label><input id="profileUrl" name="profileUrl" type="url" placeholder="https://www.tiinyverse.com/users/…" required><button class="btn hay" type="submit">Get my bio code</button></fieldset></form>
-<div id="bio-challenge" hidden><p>Put this in your TiinyVerse bio, then press Verify.</p><output id="bio-code"></output><p class="fine" id="bio-expiry">Your code lasts 24 hours.</p><button id="tiiny-verify" class="btn hay" type="button">Verify</button></div>
+<div id="bio-challenge" hidden><p>Open your TiinyVerse profile, edit it, and paste this code anywhere in the bio (the description box). Save, then press Verify. Once it verifies you can take the code back out.</p><output id="bio-code"></output><p class="fine" id="bio-expiry">Your code lasts 24 hours.</p><button id="tiiny-verify" class="btn hay" type="button">Verify</button></div>
 <p class="fine">One TiinyVerse profile belongs to one farm account. Sign in to that same account next time.</p></section>
 <section class="seed-card" id="seed-panel" role="tabpanel" aria-labelledby="seed-tab" tabindex="0" hidden><span class="step-number" aria-hidden="true">03</span><h2 id="seed-heading">Plant a seed</h2>
 <p>Tell us what it does and what it needs. The farmhands will check your seed before it joins the field.</p>
