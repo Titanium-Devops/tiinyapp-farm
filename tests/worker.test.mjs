@@ -227,6 +227,52 @@ test('release form produces schema-valid manifest with TiinyVerse name, computed
   const python = spawnSync('python3', ['-c', 'import json,sys,runpy; runpy.run_path("scripts/check-manifest.py")["check_manifest"](json.load(sys.stdin))'], { input: JSON.stringify(manifest), encoding: 'utf8' });
   assert.equal(python.status, 0, python.stderr);
 });
+test('API tokens are revealed once, listed without secrets, capped at five and revocable', async () => {
+  const f = fixture(), signed = await f.email();
+  assert.equal((await f.call('/api/tokens', { name: 'Codex' }, signed.cookie)).status, 403);
+  await f.proof(signed.cookie);
+  const created = await f.call('/api/tokens', { name: ' Codex ' }, signed.cookie);
+  assert.equal(created.status, 201, await created.clone().text());
+  const first = await created.json();
+  assert.match(first.token, /^farm_[a-f0-9]{40}$/);
+  assert.equal(first.name, 'Codex');
+  assert.ok(first.token.startsWith(first.prefix));
+  assert.ok(!JSON.stringify([...f.store.values]).includes(first.token));
+  let listed = await (await f.call('/api/tokens', undefined, signed.cookie)).json();
+  assert.deepEqual(listed.tokens, [{ id: first.id, name: 'Codex', prefix: first.prefix,
+    createdAt: first.createdAt, lastUsedAt: null }]);
+  assert.ok(!JSON.stringify(listed).includes(first.token));
+  for (let i = 1; i < 5; i++) assert.equal((await f.call('/api/tokens', { name: `Assistant ${i}` }, signed.cookie)).status, 201);
+  assert.equal((await f.call('/api/tokens', { name: 'One too many' }, signed.cookie)).status, 409);
+  assert.equal((await f.call('/api/tokens/' + first.id, {}, signed.cookie, {}, 'DELETE')).status, 200);
+  listed = await (await f.call('/api/tokens', undefined, signed.cookie)).json();
+  assert.equal(listed.tokens.length, 4);
+  assert.ok(!listed.tokens.some(token => token.id === first.id));
+  assert.equal((await f.call('/api/tokens', { name: 'Replacement' }, signed.cookie)).status, 201);
+});
+test('Bearer tokens submit apps without Origin, update last use, support media/status and fail after revocation', async () => {
+  const f = fixture(), signed = await f.email(); await f.proof(signed.cookie);
+  const issued = await (await f.call('/api/tokens', { name: 'Farm CLI' }, signed.cookie)).json();
+  const auth = { Authorization: `Bearer ${issued.token}`, Origin: 'https://assistant.example' };
+  const submitted = await f.call('/api/seeds', seedForm(), '', auth);
+  assert.equal(submitted.status, 201, await submitted.clone().text());
+  f.published.set('little-library', f.manifests[0]);
+  const updated = await f.call('/api/seeds/little-library', seedForm({ releaseUrl: '', pitch: 'Edited by an assistant' }), '', auth, 'PUT');
+  assert.equal(updated.status, 201, await updated.clone().text());
+  const mine = await f.call('/api/seeds/mine', undefined, '', { Authorization: auth.Authorization });
+  assert.equal(mine.status, 200, await mine.clone().text());
+  assert.equal((await mine.json()).seeds[0].id, 'little-library');
+  const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const upload = await createApp({ fetcher: f.fetcher, proofRoutes, seedRoutes })(new Request(ORIGIN + '/api/media', {
+    method: 'POST', headers: auth, body: png,
+  }), f.env);
+  assert.equal(upload.status, 201, await upload.clone().text());
+  const listed = await (await f.call('/api/tokens', undefined, signed.cookie)).json();
+  assert.ok(listed.tokens[0].lastUsedAt);
+  assert.equal((await f.call('/api/tokens/' + issued.id, {}, signed.cookie, {}, 'DELETE')).status, 200);
+  const refused = await f.call('/api/seeds', seedForm({ id: 'revoked-library' }), '', auth);
+  assert.equal(refused.status, 401);
+});
 test('upload stores bytes at the required R2 key, serves download, and never trusts a supplied checksum', async () => {
   const f = fixture(), first = await f.email(); await f.proof(first.cookie);
   const response = await f.call('/api/seeds', seedForm({ upload: true, sha256: 'spoofed' }), first.cookie);
@@ -324,7 +370,7 @@ test('release URLs reject credential-bearing and local origins', () => {
 
 test('maker defaults, proof-derived stable handle, private farm and escaped public page', async () => {
   const f = fixture(), first = await f.email();
-  assert.equal(first.user.handle, null); assert.equal(first.user.bio, ''); assert.equal(first.user.avatarKey, null);
+  assert.equal(first.user.handle, null); assert.equal(first.user.bio, ''); assert.equal(first.user.avatarKey, null); assert.equal(first.user.public, true);
   assert.equal((await f.call('/account/')).headers.get('Location'), '/submit/');
   assert.equal((await f.call('/seeds/mine/')).headers.get('Location'), '/account/');
   assert.equal((await f.call('/makers/unknown/')).status, 404);
@@ -343,6 +389,46 @@ test('maker defaults, proof-derived stable handle, private farm and escaped publ
   const html = await page.text(); assert.ok(html.includes('&lt;script&gt;')); assert.ok(!html.includes('<script>bad'));
   assert.ok(html.includes('/apps/merged-seed/')); assert.ok(!html.includes('other-seed'));
   assert.equal((await (await f.call('/api/me', undefined, first.cookie)).json()).user.handle, user.handle);
+});
+
+test('maker visibility saves immediately and private pages and cards require a signed-in session', async () => {
+  const f = fixture(), owner = await f.email(), member = await f.email('member@example.org');
+  await f.proof(owner.cookie);
+  const user = (await (await f.call('/api/me', undefined, owner.cookie)).json()).user;
+  assert.equal((await f.call('/api/maker/visibility', { public: false }, '', {}, 'PUT')).status, 401);
+  assert.equal((await f.call('/api/maker/visibility', { public: 'false' }, owner.cookie, {}, 'PUT')).status, 400);
+  const hidden = await f.call('/api/maker/visibility', { public: false }, owner.cookie, {}, 'PUT');
+  assert.deepEqual(await hidden.json(), { public: false });
+  assert.equal((await (await f.call('/api/me', undefined, owner.cookie)).json()).user.public, false);
+
+  const requests = [], png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  f.env.ASSETS.fetch = async request => {
+    const path = new URL(request.url).pathname; requests.push(path);
+    if (path === '/catalog.json') return Response.json([]);
+    if (path === `/makers/${user.handle}/card.png`) return new Response(png, { headers: { 'Content-Type': 'image/png' } });
+    return new Response('Not found', { status: 404 });
+  };
+
+  const anonymousPage = await f.call(`/makers/${user.handle}/`);
+  assert.equal(anonymousPage.status, 200); assert.match(anonymousPage.headers.get('Content-Type'), /^text\/html/);
+  const gate = await anonymousPage.text();
+  assert.match(gate, /This maker's page is for signed-in members\./); assert.match(gate, /href="\/submit\/">Sign in<\/a>/);
+  const anonymousCard = await f.call(`/makers/${user.handle}/card.png`);
+  assert.equal(anonymousCard.status, 200); assert.match(anonymousCard.headers.get('Content-Type'), /^text\/html/);
+  assert.match(await anonymousCard.text(), /This maker's page is for signed-in members\./);
+  assert.deepEqual(requests, []);
+
+  const memberPage = await f.call(`/makers/${user.handle}/`, undefined, member.cookie);
+  assert.equal(memberPage.status, 200); assert.match(await memberPage.text(), /<h1>Aster &amp; Fern<\/h1>/);
+  const memberCard = await f.call(`/makers/${user.handle}/card.png`, undefined, member.cookie);
+  assert.equal(memberCard.status, 200); assert.equal(memberCard.headers.get('Content-Type'), 'image/png');
+  assert.equal(memberCard.headers.get('Cache-Control'), 'private, no-store'); assert.equal(memberCard.headers.get('Vary'), 'Cookie');
+
+  const shown = await f.call('/api/maker/visibility', { public: true }, owner.cookie, {}, 'PUT');
+  assert.deepEqual(await shown.json(), { public: true });
+  const publicPage = await f.call(`/makers/${user.handle}/`); assert.match(await publicPage.text(), /<h1>Aster &amp; Fern<\/h1>/);
+  const publicCard = await f.call(`/makers/${user.handle}/card.png`);
+  assert.equal(publicCard.headers.get('Content-Type'), 'image/png'); assert.equal(publicCard.headers.get('Cache-Control'), 'public, max-age=300');
 });
 
 test('media uses sniffed types, caps bodies, enforces owner deletion and origin, serves safely', async () => {

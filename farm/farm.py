@@ -9,6 +9,7 @@ import hashlib
 from html.parser import HTMLParser
 from http.client import HTTPException
 import json
+import mimetypes
 import ntpath
 import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -23,17 +24,23 @@ import tarfile
 import tempfile
 import time
 import threading
-from urllib.parse import unquote, urlsplit
-from urllib.request import urlopen, url2pathname
+from urllib.error import HTTPError, URLError
+from urllib.parse import unquote, urljoin, urlsplit
+from urllib.request import Request, urlopen, url2pathname
 import warnings
 
 CATALOG = "https://tiinyapp.farm/manifests/"
+API_ORIGIN = "https://tiinyapp.farm"
 ID = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*\Z")
 VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 START_TIMEOUT = 10.0
 MAX_DOWNLOAD = 512 * 1024 * 1024
 WINDOWS = os.name == "nt"
 MAX_UNPACKED = 2 * 1024 * 1024 * 1024
+MAX_PUBLISH = 50 * 1024 * 1024
+PUBLISH_EXCLUDES = {".git", "node_modules", "__pycache__", ".venv"}
+PUBLISH_FIELDS = {"id", "name", "pitch", "description", "version", "license", "category", "entry", "permissions", "links", "media"}
+PUBLISH_CATEGORIES = {"assistant", "family", "audio", "developer-tools", "library"}
 
 
 class FarmError(Exception):
@@ -231,14 +238,254 @@ class CatalogLinks(HTMLParser):
 
 
 class Farm:
-    def __init__(self, home=None, catalog=None):
+    def __init__(self, home=None, catalog=None, api_origin=None):
         self.home = Path(home) if home is not None else Path.home() / "tiinyapps"
         self.config_home = Path(home) if home is not None else Path.home() / ".tiinyapps"
         self.catalog = str(catalog or os.environ.get("FARM_CATALOG", CATALOG))
+        self.api_origin = str(api_origin or os.environ.get("FARM_API_ORIGIN", API_ORIGIN)).rstrip("/")
         parsed = urlsplit(self.catalog)
         self.local_catalog = (Path(url2pathname(parsed.path)) if parsed.scheme == "file"
                               else Path(self.catalog).expanduser()
                               if not parsed.scheme or (WINDOWS and Path(self.catalog).is_absolute()) else None)
+
+    @staticmethod
+    def valid_token(token):
+        return isinstance(token, str) and re.fullmatch(r"farm_[A-Za-z0-9_-]{40}", token) is not None
+
+    def login(self, token=None):
+        if token is None:
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", getpass.GetPassWarning)
+                token = getpass.getpass("Farm API token (hidden): ").strip()
+        elif isinstance(token, str):
+            token = token.strip()
+        if not self.valid_token(token):
+            raise FarmError("Use the farm_ token shown on your account page.")
+        self.config_home.mkdir(parents=True, exist_ok=True, mode=0o700)
+        atomic_write(self.config_home / "token", token + "\n")
+        print("Farm token saved.")
+
+    def token(self, explicit=None):
+        token = explicit if explicit is not None else os.environ.get("FARM_TOKEN")
+        if token is None:
+            try:
+                path = self.config_home / "token"
+                token = path.read_text(encoding="utf-8").strip()
+                private_mode(path)
+            except FileNotFoundError:
+                raise FarmError("No API token. Run farm login or pass --token.") from None
+        if not self.valid_token(token):
+            raise FarmError("Use a valid farm_ API token.")
+        return token
+
+    def api(self, path, token, method="GET", body=None, content_type=None):
+        headers = {"Authorization": "Bearer " + token, "Accept": "application/json"}
+        if content_type:
+            headers["Content-Type"] = content_type
+        request = Request(self.api_origin + path, data=body, headers=headers, method=method)
+        try:
+            with urlopen(request, timeout=60) as response:
+                raw = response.read(1024 * 1024 + 1)
+                if len(raw) > 1024 * 1024:
+                    raise FarmError("The farm returned an unexpectedly large response.")
+        except HTTPError as error:
+            try:
+                detail = json.loads(error.read(1024 * 1024)).get("error")
+            except (ValueError, AttributeError):
+                detail = None
+            raise FarmError(detail or f"The farm answered HTTP {error.code}.") from None
+        except URLError:
+            raise FarmError("Could not reach tiinyapp.farm.") from None
+        try:
+            return json.loads(raw)
+        except (UnicodeDecodeError, ValueError):
+            raise FarmError("The farm returned an invalid response.") from None
+
+    @staticmethod
+    def multipart(fields, archive, filename):
+        boundary = "farm-" + hashlib.sha256(os.urandom(32)).hexdigest()
+        marker = boundary.encode("ascii")
+        chunks = []
+        for name, value in fields.items():
+            chunks.extend((b"--" + marker + b"\r\n",
+                           f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("ascii"),
+                           str(value).encode("utf-8"), b"\r\n"))
+        chunks.extend((b"--" + marker + b"\r\n",
+                       f'Content-Disposition: form-data; name="archive"; filename="{filename}"\r\n'.encode("ascii"),
+                       b"Content-Type: application/gzip\r\n\r\n", archive, b"\r\n",
+                       b"--" + marker + b"--\r\n"))
+        return b"".join(chunks), "multipart/form-data; boundary=" + boundary
+
+    @staticmethod
+    def prompt_manifest(manifest):
+        prompts = {
+            "id": "App ID: ", "name": "Name: ", "pitch": "One-line summary: ",
+            "description": "What it does: ", "version": "Version (for example 0.1.0): ",
+            "license": "License: ", "category": "Category: ",
+        }
+        for field, prompt in prompts.items():
+            if not manifest.get(field):
+                manifest[field] = input(prompt).strip()
+        if "entry" not in manifest:
+            command = input("Start command (leave blank for a library): ").strip()
+            manifest["entry"] = {"command": command} if command else None
+        if "permissions" not in manifest:
+            value = input("Permissions, comma-separated (optional): ").strip()
+            manifest["permissions"] = [part.strip() for part in value.split(",") if part.strip()]
+        if "links" not in manifest:
+            manifest["links"] = {}
+            for key, label in (("repo", "Repository URL"), ("homepage", "Homepage URL"), ("video", "YouTube URL")):
+                value = input(label + " (optional): ").strip()
+                if value:
+                    manifest["links"][key] = value
+        return manifest
+
+    @staticmethod
+    def pack_project(project, destination, ident, version):
+        project = Path(project).resolve()
+        with tarfile.open(destination, "w:gz") as archive:
+            for path in sorted(project.rglob("*")):
+                relative = path.relative_to(project)
+                if any(part in PUBLISH_EXCLUDES for part in relative.parts):
+                    continue
+                if path.is_symlink():
+                    raise FarmError(f"Project symlinks are refused: {relative}")
+                if path.is_file() and path.stat().st_size > MAX_PUBLISH:
+                    raise FarmError(f"Project file exceeds 50 MB: {relative}")
+                archive.add(path, arcname=relative.as_posix(), recursive=False)
+        if destination.stat().st_size > MAX_PUBLISH:
+            raise FarmError("The packed project exceeds 50 MB.")
+        return f"{ident}-{version}.tar.gz"
+
+    def upload_media(self, manifest, project, token):
+        source = manifest.get("media", {})
+        if source is None:
+            return {}
+        if not isinstance(source, dict):
+            raise FarmError("farm.json media must be an object.")
+        if source.keys() - {"icon", "header", "screenshots"}:
+            raise FarmError("Media may contain icon, header and screenshots only.")
+        aliases = {"icon": "icon", "header": "header", "screenshots": "gallery"}
+        uploaded = {}
+        for supplied, target in aliases.items():
+            if supplied not in source:
+                continue
+            values = source[supplied] if isinstance(source[supplied], list) else [source[supplied]]
+            if target != "gallery" and len(values) != 1:
+                raise FarmError(f"media.{supplied} must name one image file.")
+            if target == "gallery" and (len(values) > 8 or any(not isinstance(value, str) for value in values)
+                                        or len(values) != len(set(values))):
+                raise FarmError("media.screenshots must contain up to eight unique paths.")
+            urls = []
+            for value in values:
+                if not isinstance(value, str):
+                    raise FarmError(f"media.{supplied} must contain file paths.")
+                path = (project / value).resolve()
+                try:
+                    path.relative_to(project.resolve())
+                except ValueError:
+                    raise FarmError(f"Media path leaves the project: {value}") from None
+                if not path.is_file() or path.is_symlink():
+                    raise FarmError(f"Media file not found: {value}")
+                content_type = mimetypes.guess_type(path.name)[0]
+                if content_type not in ("image/png", "image/jpeg", "image/webp"):
+                    raise FarmError(f"Media must be PNG, JPEG or WebP: {value}")
+                if path.stat().st_size > 2 * 1024 * 1024:
+                    raise FarmError(f"Media file exceeds 2 MiB: {value}")
+                result = self.api("/api/media", token, "POST", path.read_bytes(), content_type)
+                url = result.get("url") if isinstance(result, dict) else None
+                if not isinstance(url, str):
+                    raise FarmError("The farm did not return a media URL.")
+                urls.append(url)
+            uploaded[target] = urls if target == "gallery" else urls[0]
+        return uploaded
+
+    def publish(self, project=None, token=None, update=False):
+        project = Path(project or Path.cwd()).resolve()
+        manifest_path = project / "farm.json"
+        manifest = read_json(manifest_path) if manifest_path.exists() else {}
+        if not isinstance(manifest, dict):
+            raise FarmError("farm.json must contain a JSON object.")
+        unknown = manifest.keys() - PUBLISH_FIELDS
+        if unknown:
+            raise FarmError("farm.json has unknown fields: " + ", ".join(sorted(unknown)) + ".")
+        manifest = self.prompt_manifest(manifest)
+        ident = app_id(manifest.get("id"))
+        version = manifest.get("version")
+        if not isinstance(version, str) or not VERSION.fullmatch(version):
+            raise FarmError("Version must be three nonnegative numbers, such as 0.1.0.")
+        for field in ("name", "pitch", "description", "license", "category"):
+            if not isinstance(manifest.get(field), str) or not manifest[field].strip():
+                raise FarmError(f"farm.json needs {field}.")
+        if manifest["category"] not in PUBLISH_CATEGORIES:
+            raise FarmError("Category must be assistant, family, audio, developer-tools or library.")
+        if "\n" in manifest["pitch"] or "\r" in manifest["pitch"] or len(manifest["pitch"]) > 100:
+            raise FarmError("The one-line summary must be one line of 100 characters or fewer.")
+        permissions = manifest.get("permissions")
+        if isinstance(permissions, str):
+            permissions = [part.strip() for part in permissions.split(",") if part.strip()]
+        if not isinstance(permissions, list) or any(p not in ("microphone", "files", "network", "device") for p in permissions):
+            raise FarmError("Permissions must use microphone, files, network or device.")
+        links = manifest.get("links", {})
+        if not isinstance(links, dict) or any(key not in ("repo", "homepage", "video") for key in links):
+            raise FarmError("Links must be an object containing repo, homepage or video.")
+        entry = manifest.get("entry")
+        fields = {"id": ident, "name": manifest["name"], "pitch": manifest["pitch"],
+                  "description": manifest["description"], "version": version,
+                  "license": manifest["license"], "tags": manifest["category"],
+                  "permissions": ",".join(permissions)}
+        if entry is None:
+            fields["entry"] = "null"
+        elif isinstance(entry, str) and entry.strip():
+            fields["command"] = entry
+        elif isinstance(entry, dict) and set(entry) == {"command"} and isinstance(entry["command"], str) and entry["command"].strip():
+            fields["command"] = entry["command"]
+        elif (isinstance(entry, dict) and set(entry) == {"python", "args"}
+              and isinstance(entry["python"], str)
+              and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*", entry["python"])
+              and isinstance(entry["args"], list)
+              and all(isinstance(argument, str) for argument in entry["args"])):
+            fields["entry"] = json.dumps(entry, separators=(",", ":"))
+        else:
+            raise FarmError("Entry must be null, a command, or a Python entry object.")
+        for key, value in links.items():
+            parsed = urlsplit(value) if isinstance(value, str) else None
+            if (not parsed or parsed.scheme != "https" or not parsed.netloc or parsed.username
+                    or parsed.password or any(character.isspace() for character in value)):
+                raise FarmError(f"links.{key} must be an HTTPS URL.")
+            fields[key] = value
+        resolved_token = self.token(token)
+        with tempfile.TemporaryDirectory(prefix="farm-publish-") as temporary:
+            archive_path = Path(temporary) / f"{ident}-{version}.tar.gz"
+            filename = self.pack_project(project, archive_path, ident, version)
+            fields["media"] = json.dumps(self.upload_media(manifest, project, resolved_token), separators=(",", ":"))
+            body, content_type = self.multipart(fields, archive_path.read_bytes(), filename)
+            endpoint = "/api/seeds/" + ident if update else "/api/seeds"
+            result = self.api(endpoint, resolved_token, "PUT" if update else "POST", body, content_type)
+        if result.get("warning"):
+            print(result["warning"])
+        if result.get("prUrl"):
+            print("Pull request: " + result["prUrl"])
+        print("Your apps: " + urljoin(self.api_origin + "/", result.get("statusUrl", "/account/")))
+
+    def submission_status(self, ident, token=None):
+        ident = app_id(ident)
+        result = self.api("/api/seeds/mine", self.token(token))
+        seeds = result.get("seeds") if isinstance(result, dict) else None
+        if not isinstance(seeds, list):
+            raise FarmError("The farm returned invalid app status.")
+        matches = [seed for seed in seeds if isinstance(seed, dict) and seed.get("id") == ident]
+        if not matches:
+            raise FarmError(f"No submission found for {ident}.")
+        seed = matches[-1]
+        print(f"{ident}: {seed.get('state', 'unknown')}")
+        for check in seed.get("checks", []):
+            if isinstance(check, dict):
+                print(f"  {check.get('name', 'Check')}: {check.get('status', 'unknown')}")
+        for review in seed.get("reviews", []):
+            print("  Review: " + str(review).lower().replace("_", " "))
+        if seed.get("unavailable"):
+            print("  Live checks are temporarily unavailable.")
 
     def app_dir(self, ident):
         path = self.home / app_id(ident)
@@ -752,13 +999,25 @@ def main(argv=None):
     device = commands.add_parser("device")
     device.add_argument("--base", help="Device HTTP(S) base URL (or TIINY_BASE)")
     device.add_argument("--key-stdin", action="store_true", help="Read the device API key from stdin (or TIINY_KEY)")
-    for name in ("status", "list"):
-        commands.add_parser(name)
+    commands.add_parser("login")
+    publish = commands.add_parser("publish")
+    publish.add_argument("--token", help="API token (otherwise FARM_TOKEN or ~/.tiinyapps/token)")
+    publish.add_argument("--update", action="store_true", help="Update an existing app")
+    status = commands.add_parser("status")
+    status.add_argument("id", nargs="?", help="Show submission checks for this app")
+    status.add_argument("--token", help="API token (otherwise FARM_TOKEN or ~/.tiinyapps/token)")
+    commands.add_parser("list")
     args = parser.parse_args(argv)
     farm = Farm()
     try:
         if args.command in ("install", "update"):
             farm.install(args.id, yes=args.yes, update=args.command == "update")
+        elif args.command == "login":
+            farm.login()
+        elif args.command == "publish":
+            farm.publish(token=args.token, update=args.update)
+        elif args.command == "status" and args.id:
+            farm.submission_status(args.id, token=args.token)
         elif args.command == "device":
             farm.device(base=args.base, key_stdin=args.key_stdin)
         elif args.command == "remove":

@@ -1,8 +1,11 @@
 import contextlib
 import copy
+from email.parser import BytesParser
+from email.policy import default as email_policy
 import getpass
 import hashlib
 from http.client import BadStatusLine, IncompleteRead
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
 import io
 import json
@@ -12,9 +15,11 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
+from urllib.parse import urlsplit
 
 from farm.farm import Farm, FarmError, main
 
@@ -33,6 +38,93 @@ print("ready", flush=True)
 signal.signal(signal.SIGINT, lambda *_: exit(0))
 while True: time.sleep(0.1)
 '''
+
+
+class FarmAPIHandler(BaseHTTPRequestHandler):
+    requests = None
+
+    def reply(self, payload, status=200):
+        body = json.dumps(payload).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def record(self):
+        body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        self.requests.append((self.command, self.path, dict(self.headers), body))
+        return body
+
+    def do_POST(self):
+        self.record()
+        if self.path == "/api/media":
+            self.reply({"url": f"/media/{len([r for r in self.requests if r[1] == '/api/media'])}.png"}, 201)
+        elif self.path == "/api/seeds":
+            self.reply({"id": "tiny-tool", "prUrl": "https://github.test/pull/9", "statusUrl": "/account/"}, 201)
+        else:
+            self.reply({"error": "not found"}, 404)
+
+    def do_PUT(self):
+        self.record()
+        self.reply({"id": "tiny-tool", "prUrl": "https://github.test/pull/10", "statusUrl": "/account/"})
+
+    def do_GET(self):
+        self.record()
+        if self.path == "/api/seeds/mine":
+            self.reply({"seeds": [{"id": "tiny-tool", "state": "awaiting review",
+                                    "checks": [{"name": "Manifest checks", "status": "success"}],
+                                    "reviews": ["APPROVED"]}]})
+        else:
+            self.reply({"error": "not found"}, 404)
+
+    def log_message(self, *args):
+        pass
+
+
+@contextlib.contextmanager
+def fake_farm_api():
+    requests = []
+    handler = type("BoundFarmAPIHandler", (FarmAPIHandler,), {"requests": requests})
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    except PermissionError:
+        # Some test sandboxes prohibit even loopback binds. Keep the same request-level
+        # fake so archive and HTTP contract coverage remains available there.
+        def open_request(request, timeout=60):
+            path = urlsplit(request.full_url).path
+            method = request.get_method()
+            headers = {key.title(): value for key, value in request.header_items()}
+            requests.append((method, path, headers, request.data or b""))
+            if path == "/api/media":
+                payload = {"url": f"/media/{len([r for r in requests if r[1] == '/api/media'])}.png"}
+            elif path == "/api/seeds/mine":
+                payload = {"seeds": [{"id": "tiny-tool", "state": "awaiting review",
+                                      "checks": [{"name": "Manifest checks", "status": "success"}],
+                                      "reviews": ["APPROVED"]}]}
+            else:
+                payload = {"id": "tiny-tool", "prUrl": "https://github.test/pull/9",
+                           "statusUrl": "/account/"}
+            return io.BytesIO(json.dumps(payload).encode())
+
+        with patch("farm.farm.urlopen", side_effect=open_request):
+            yield "http://farm.test", requests
+        return
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}", requests
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+def multipart_parts(headers, body):
+    message = BytesParser(policy=email_policy).parsebytes(
+        ("Content-Type: " + headers["Content-Type"] + "\r\nMIME-Version: 1.0\r\n\r\n").encode() + body)
+    return {part.get_param("name", header="content-disposition"):
+            (part.get_filename(), part.get_payload(decode=True)) for part in message.iter_parts()}
 
 
 class ManifestTests(unittest.TestCase):
@@ -110,6 +202,96 @@ class ManifestTests(unittest.TestCase):
         self.manifest["description"] = "No release explanation."
         with self.assertRaisesRegex(ValueError, "explain"):
             validator.check_manifest(self.manifest, allow_pending=True)
+
+
+class PublishTests(unittest.TestCase):
+    TOKEN = "farm_" + "a" * 40
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="farm-publish-test-")
+        self.root = Path(self.temporary.name)
+        self.project = self.root / "project"
+        self.project.mkdir()
+        self.project.joinpath("farm.json").write_text(json.dumps({
+            "id": "tiny-tool", "name": "Tiny Tool", "pitch": "Does one useful thing",
+            "description": "A complete description.", "version": "0.1.0", "license": "MIT",
+            "category": "developer-tools", "entry": None, "permissions": ["network"],
+            "links": {"repo": "https://example.org/source"},
+            "media": {"icon": "icon.png", "screenshots": ["screen.jpg"]},
+        }))
+        self.project.joinpath("app.py").write_text("print('hello')\n")
+        self.project.joinpath("icon.png").write_bytes(b"png")
+        self.project.joinpath("screen.jpg").write_bytes(b"jpeg")
+        for excluded in (".git", "node_modules", "__pycache__", ".venv"):
+            folder = self.project / excluded
+            folder.mkdir()
+            folder.joinpath("secret.txt").write_text("excluded")
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def test_login_saves_private_token_and_token_priority(self):
+        farm = Farm(self.root / "config", api_origin="http://example.test")
+        with patch("farm.farm.getpass.getpass", return_value=self.TOKEN):
+            farm.login()
+        token_path = self.root / "config/token"
+        self.assertEqual(token_path.read_text().strip(), self.TOKEN)
+        if os.name != "nt":
+            self.assertEqual(token_path.stat().st_mode & 0o777, 0o600)
+        other = "farm_" + "b" * 40
+        with patch.dict(os.environ, {"FARM_TOKEN": other}):
+            self.assertEqual(farm.token(), other)
+            self.assertEqual(farm.token(self.TOKEN), self.TOKEN)
+
+    def test_publish_rejects_unknown_manifest_fields_and_invalid_shapes(self):
+        farm = Farm(self.root / "config", api_origin="http://example.test")
+        original = json.loads(self.project.joinpath("farm.json").read_text())
+        cases = [dict(original, unexpected=True), dict(original, category="tools"),
+                 dict(original, entry={"python": "bad-module", "args": []}),
+                 dict(original, media={"gallery": ["screen.jpg"]})]
+        for manifest in cases:
+            with self.subTest(manifest=manifest):
+                self.project.joinpath("farm.json").write_text(json.dumps(manifest))
+                with self.assertRaises(FarmError):
+                    farm.publish(self.project, token=self.TOKEN)
+        self.project.joinpath("farm.json").write_text(json.dumps(original))
+
+    def test_publish_uploads_media_and_packs_project(self):
+        output = io.StringIO()
+        with fake_farm_api() as (origin, requests), contextlib.redirect_stdout(output):
+            Farm(self.root / "config", api_origin=origin).publish(self.project, token=self.TOKEN)
+        self.assertEqual([(method, path) for method, path, _, _ in requests],
+                         [("POST", "/api/media"), ("POST", "/api/media"), ("POST", "/api/seeds")])
+        self.assertTrue(all(headers["Authorization"] == "Bearer " + self.TOKEN for _, _, headers, _ in requests))
+        parts = multipart_parts(requests[-1][2], requests[-1][3])
+        self.assertEqual(parts["archive"][0], "tiny-tool-0.1.0.tar.gz")
+        self.assertEqual(parts["tags"][1], b"developer-tools")
+        self.assertEqual(json.loads(parts["media"][1]), {"icon": "/media/1.png", "gallery": ["/media/2.png"]})
+        with tarfile.open(fileobj=io.BytesIO(parts["archive"][1]), mode="r:gz") as archive:
+            names = archive.getnames()
+        self.assertIn("app.py", names)
+        self.assertIn("farm.json", names)
+        self.assertFalse(any(part in name.split("/") for name in names for part in (".git", "node_modules", "__pycache__", ".venv")))
+        self.assertIn("Pull request: https://github.test/pull/9", output.getvalue())
+        self.assertIn("Your apps: " + origin + "/account/", output.getvalue())
+
+    def test_update_and_remote_status(self):
+        output = io.StringIO()
+        with fake_farm_api() as (origin, requests), contextlib.redirect_stdout(output):
+            farm = Farm(self.root / "config", api_origin=origin)
+            farm.publish(self.project, token=self.TOKEN, update=True)
+            farm.submission_status("tiny-tool", token=self.TOKEN)
+        self.assertIn(("PUT", "/api/seeds/tiny-tool"), [(method, path) for method, path, _, _ in requests])
+        self.assertIn(("GET", "/api/seeds/mine"), [(method, path) for method, path, _, _ in requests])
+        self.assertIn("tiny-tool: awaiting review", output.getvalue())
+        self.assertIn("Manifest checks: success", output.getvalue())
+        self.assertIn("Review: approved", output.getvalue())
+
+    def test_publish_refuses_oversize_file_before_network(self):
+        self.project.joinpath("large.bin").write_bytes(b"123456")
+        farm = Farm(self.root / "config", api_origin="http://127.0.0.1:1")
+        with patch("farm.farm.MAX_PUBLISH", 5), self.assertRaisesRegex(FarmError, "exceeds 50 MB"):
+            farm.publish(self.project, token=self.TOKEN)
 
 
 class FarmTests(unittest.TestCase):

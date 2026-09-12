@@ -71,7 +71,7 @@ export async function seedRoutes(ctx) {
     for (const key of keys) {
       const seed = await get('seed:' + key);
       if (!seed || seed.userId !== user.id) continue;
-      const item = { id: seed.id, version: seed.version, name: seed.name, state: seed.state, prUrl: seed.prUrl, checks: [], reviews: [] };
+      const item = { id: seed.id, version: seed.version, name: seed.name, icon: seed.icon, state: seed.state, prUrl: seed.prUrl, checks: [], reviews: [] };
       if (seed.pr) {
         try {
           const pr = await github('/pulls/' + seed.pr);
@@ -107,7 +107,7 @@ export async function seedRoutes(ctx) {
       if (items.length) items.forEach(seed => { seed.canUpdate = true; });
       else {
         const social = await get('social:' + manifest.id);
-        seeds.push({ id: manifest.id, name: manifest.name, version: manifest.version,
+        seeds.push({ id: manifest.id, name: manifest.name, version: manifest.version, icon: manifest.media?.icon,
           state: manifest.release ? 'published' : 'sprouting', url: '/apps/' + manifest.id + '/',
           canUpdate: true, checks: [], reviews: [], thumbs: social?.thumbs?.length || 0, comments: social?.comments?.length || 0 });
       }
@@ -199,7 +199,8 @@ export async function seedRoutes(ctx) {
     manifest = buildManifest(input, user, release, now());
     if (current) manifest.addedAt = current.addedAt;
     const branch = 'farm/' + manifest.id + '-' + crypto.randomUUID();
-    const record = { userId: user.id, id: manifest.id, name: manifest.name, version: manifest.version, branch, state: 'preparing', createdAt: new Date(now()).toISOString() };
+    const record = { userId: user.id, id: manifest.id, name: manifest.name, version: manifest.version,
+      icon: manifest.media?.icon, branch, state: 'preparing', createdAt: new Date(now()).toISOString() };
     await put('seedowner:' + manifest.id, user.id);
     await put('seed:' + key, record);
     const keys = await get('user-seeds:' + user.id) || [];

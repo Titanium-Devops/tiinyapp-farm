@@ -137,7 +137,7 @@ def page(title, body, path, scripts=()):
     description = unescape(re.sub(r'<[^>]+>', '', lede.group(1))) if lede else title
     card = path + 'card.png' if path.startswith('/apps/') else '/brand/og-image.png'
     dimensions = '<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">' if path.startswith('/apps/') else ''
-    active = ('install' if path == '/install/' else 'submit' if path == '/submit/' else
+    active = ('install' if path == '/install/' else 'submit' if path.startswith('/submit/') else
               'catalog' if path == '/catalog/' else 'apps' if path == '/' or path.startswith(('/apps/', '/makers/')) else '')
     navigation = ''.join(f'<a href="{url}"' + (' class="on" aria-current="page"' if key == active else '') + f'>{label}</a>' for key, url, label in [('apps', '/', 'Apps'), ('catalog', '/catalog/', 'Catalog'), ('install', '/install/', 'Install'), ('submit', '/submit/', 'Submit an app')])
     page_scripts = ''.join(f'<script type="module" src="{e(src)}"></script>' for src in scripts)
@@ -328,20 +328,30 @@ def seeds():
 
 
 def my_farm():
-    return '''<section class="page"><h1>Your apps</h1>
-<p class="lede">Edit your public profile and check the review status of your apps.</p>
-<p><a href="/submit/">Submit your app or manage your sign-in</a></p><p id="farm-status" role="status" aria-live="polite">Loading your apps…</p>
-<section class="seed-card" aria-labelledby="maker-name"><div class="maker-heading"><img id="maker-avatar" class="maker-avatar" width="96" height="96" alt="" hidden><div><h2 id="maker-name">Your profile</h2><p id="maker-handle"></p></div></div>
-<p id="maker-bio" class="maker-bio"></p><div id="maker-links" class="row"></div><p><a id="public-maker" hidden>Visit your public maker page</a></p>
-<p id="maker-proof"></p><button id="edit-profile" class="btn ghost" type="button" aria-expanded="false" aria-controls="maker-form">Edit</button><form id="maker-form" hidden><fieldset id="maker-fields" disabled><legend>Edit your profile</legend>
+    return '''<section class="prof"><aside class="card-me" aria-labelledby="maker-name"><img id="maker-avatar" class="maker-avatar" width="96" height="96" src="/brand/tiinyapp-farm-square-logo.png" alt=""><div><h1 id="maker-name">Your profile</h1><p id="maker-handle" class="h"></p></div>
+<p id="maker-proof"><span class="chip ok">Verified Tiiny owner</span></p><p id="maker-bio" class="maker-bio"></p><div id="maker-links" class="chips"></div><p><a id="public-maker" hidden>Visit your public maker page</a></p>
+<button id="edit-profile" class="btn ghost" type="button" aria-expanded="false" aria-controls="maker-form">Edit profile</button><form id="maker-form" hidden><fieldset id="maker-fields" disabled><legend>Edit your profile</legend>
 <label for="bio">Bio</label><textarea id="bio" name="bio" maxlength="600" rows="4" aria-describedby="bio-help"></textarea><p id="bio-help" class="fine">Describe yourself in up to 600 characters.</p>
 <label for="avatar">Your icon</label><input id="avatar" type="file" accept="image/png,image/jpeg,image/webp" aria-describedby="avatar-help"><p id="avatar-help" class="fine">PNG, JPEG or WebP, up to 2 MiB.</p><button id="remove-avatar" class="btn ghost" type="button" hidden>Remove icon</button>
 <label for="github">GitHub link</label><input id="github" name="github" type="url" pattern="https://.*" placeholder="https://…">
 <label for="website">Website link</label><input id="website" name="website" type="url" pattern="https://.*" placeholder="https://…">
 <label for="youtube">YouTube link</label><input id="youtube" name="youtube" type="url" pattern="https://.*" placeholder="https://…">
-<button class="btn hay" type="submit">Save profile</button></fieldset></form></section>
-<section aria-labelledby="my-seeds-heading"><h2 id="my-seeds-heading">Your apps</h2><button id="refresh-seeds" class="btn hay" type="button">Refresh checks</button><div id="my-seeds" class="field"></div></section>
+<button class="btn hay" type="submit">Save profile</button></fieldset></form>
+<div class="vis"><div class="sw"><span>Public profile</span><button id="profile-visibility" class="toggle" type="button" role="switch" aria-checked="true" aria-label="Public profile"></button></div><p id="visibility-text">Anyone can open your maker page and see your apps, bio and links. Your email is never shown.</p></div>
+<div class="vis signed-in"><div class="sw"><span>Signed in with</span><span id="signed-in-with" class="lock"></span></div><p>Both lead here when linked. <button id="account-logout" class="help-link" type="button">Sign out</button></p></div></aside>
+<div class="apps"><h2 id="my-seeds-heading">Your apps</h2><div class="account-tools"><a class="btn hay" href="/submit/">Submit an app</a><button id="refresh-seeds" class="btn ghost" type="button">Refresh checks</button></div><p id="farm-status" role="status" aria-live="polite">Loading your apps…</p><div id="my-seeds" class="mine"></div>
+<p class="small">Published apps can be updated any time. Updates go through the same checks and review.</p>
+<section class="token-card" aria-labelledby="api-tokens-heading"><div class="token-head"><div><h2 id="api-tokens-heading">API tokens</h2><p>Create a token when an AI assistant or <code>farm publish</code> will publish for you.</p></div><button id="create-token" class="btn ghost" type="button">Create a token</button></div>
+<form id="token-form" class="token-form" hidden><label for="token-name">Token name <small>Use a name that says where you will use it.</small></label><div class="row2"><input id="token-name" name="name" type="text" maxlength="80" autocomplete="off" placeholder="Laptop or assistant" required><button class="btn hay" type="submit">Create</button></div></form>
+<div id="token-reveal" class="token-reveal" hidden><p><b>Copy this token now.</b> It is shown only once.</p><div class="cmd"><code id="new-token"></code><button id="copy-token" type="button" aria-label="Copy API token">{icon("copy")}</button></div></div>
+<p id="token-status" class="small" role="status" aria-live="polite">Loading tokens…</p><div id="api-tokens" class="token-list"></div></section></div>
 <noscript><p>JavaScript is needed to load your profile settings and submission status.</p></noscript></section><script type="module" src="/assets/farm.js"></script>'''
+
+
+def agent_guide(text):
+    return f'''<section class="page agent-doc"><h1>Publish to tiinyapp.farm</h1>
+<p class="lede">Plain instructions for AI assistants and people publishing from a project folder.</p>
+<pre class="agent-guide">{e(text)}</pre></section>'''
 
 
 def build(source=ROOT, output=None, today=None):
@@ -376,8 +386,11 @@ def build(source=ROOT, output=None, today=None):
             target.write_text(content, encoding="utf-8")
 
         apps = [app for _, app in manifests]
+        guide = (source / 'docs/agents.txt').read_text(encoding='utf-8')
         pages = {"/": ("App catalog", home_page(apps)), "/catalog/": ("Catalog", catalog_page(apps)),
-                 "/install/": ("Install an app", steps()), "/submit/": ("Submit an app", seeds()), "/account/": ("Your apps", my_farm())}
+                 "/install/": ("Install an app", steps()), "/submit/": ("Submit an app", seeds()),
+                 "/submit/done/": ("App submitted", seeds()), "/account/": ("Your apps", my_farm()),
+                 "/docs/agents/": ("Publish for a person", agent_guide(guide))}
         listing = '<section class="sect"><h1>App manifests</h1><p>The installer catalog at https://tiinyapp.farm/manifests/.</p><ul>'
         for path, app in manifests:
             pages[f"/apps/{app['id']}/"] = (app["name"], app_page(app, today, makers))
@@ -402,9 +415,10 @@ def build(source=ROOT, output=None, today=None):
                 if url.startswith('/apps/') else ())
             write(url.lstrip('/') + 'index.html', page(title, body, url, scripts))
         write('404.html', page('Page not found', '<section class="sect"><h1>Page not found</h1><p>This page does not exist. ' + link('/', 'Return to the catalog') + '.</p></section>', '/404.html'))
-        write('sitemap.xml', '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + ''.join(f'<url><loc>{ORIGIN}{url}</loc></url>' for url in sorted(pages) if url not in ("/account/",)) + '</urlset>\n')
+        write('sitemap.xml', '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + ''.join(f'<url><loc>{ORIGIN}{url}</loc></url>' for url in sorted(pages) if url not in ("/account/", "/submit/done/")) + '</urlset>\n')
         write('catalog.json', json.dumps([app for _, app in manifests], ensure_ascii=False) + '\n')
         write('categories.json', json.dumps({'map': CATEGORIES, 'order': CATEGORY_ORDER}, ensure_ascii=False) + '\n')
+        write('llms.txt', guide)
         write('site.webmanifest', json.dumps({'name': 'tiinyapp.farm', 'short_name': 'tiinyapp.farm',
               'start_url': '/', 'display': 'standalone', 'theme_color': '#090D14', 'background_color': '#090D14',
               'icons': [{'src': '/brand/favicon-192.png', 'sizes': '192x192', 'type': 'image/png'},

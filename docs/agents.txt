@@ -1,0 +1,120 @@
+tiinyapp.farm publishing guide for AI assistants
+================================================
+
+What the farm is
+----------------
+
+tiinyapp.farm is a reviewed catalog of small apps for Tiiny computers. Publishing opens a pull request, runs automated checks, and waits for a human maintainer to review and merge it. It does not put code directly into the catalog.
+
+Authentication rule
+-------------------
+
+Ask the person for their token; never make one up.
+
+They create and copy a token once at https://tiinyapp.farm/account/. Treat it as a secret. Do not print it in logs, commit it, put it in farm.json, or include it in an archive. Send it only to https://tiinyapp.farm in this header:
+
+    Authorization: Bearer farm_...
+
+Preferred path: farm publish
+----------------------------
+
+Run from the project folder:
+
+    python -m pip install tiinyapp-farm
+    farm login
+    farm publish
+
+farm login asks for the token once and saves it in ~/.tiinyapps/token with owner-only permissions. Instead, pass --token for one run or set FARM_TOKEN. Precedence is --token, FARM_TOKEN, then ~/.tiinyapps/token.
+
+farm publish reads farm.json when present and asks for missing required values. It creates <id>-<version>.tar.gz from the current folder, excluding .git, node_modules, __pycache__, and .venv. It refuses any individual file over 50 MB. It uploads local media first, then posts the archive and submission.
+
+For an existing app use `farm publish --update`. To inspect its review and checks later use `farm status <id>`.
+
+farm.json
+---------
+
+This is the complete maker-written shape. Unknown fields are refused.
+
+    {
+      "id": "my-app",
+      "name": "My App",
+      "pitch": "One line, with no line break.",
+      "description": "What it does, who it is for, and important limits.",
+      "version": "0.1.0",
+      "license": "MIT",
+      "category": "developer-tools",
+      "entry": {"command": "python -m my_app"},
+      "permissions": ["network", "device"],
+      "links": {
+        "repo": "https://github.com/example/my-app",
+        "homepage": "https://example.com/my-app",
+        "video": "https://youtu.be/dQw4w9WgXcQ"
+      },
+      "media": {
+        "icon": "art/icon.png",
+        "header": "art/header.webp",
+        "screenshots": ["art/one.png", "art/two.jpg"]
+      }
+    }
+
+Field rules:
+
+* id is required. Start with a lowercase letter, then use lowercase letters, digits, and single dashes between parts. "tiiny" is reserved. It becomes the catalog URL and farm install command and cannot change on update.
+* name is required and non-empty.
+* pitch is required, non-empty, and one line.
+* description is required and non-empty.
+* version is required and is exactly three nonnegative integers: major.minor.patch. A release update needs a strictly newer version.
+* license is required and non-empty. Prefer a clear SPDX identifier such as MIT.
+* category is required. Use assistant, family, audio, developer-tools, or library.
+* entry is required. It may be null for a library, a command string, {"command":"..."}, or {"python":"package.module","args":["arg"]}. Python module parts contain letters, digits, and underscores and cannot start with a digit. args is an array of strings.
+* permissions is required and has no duplicates. Allowed values are microphone, files, network, and device. Use [] when none are needed. Declare all access the app uses.
+* links is optional and may contain repo, homepage, and video only. Values use HTTPS. video is a YouTube watch or youtu.be URL.
+* media is optional and may contain icon, header, and screenshots only. Values are local paths inside the project, never secret or external files. Images are PNG, JPEG, or WebP. screenshots has at most eight unique paths.
+
+Direct HTTP API path
+--------------------
+
+Use this when farm publish cannot be used. All calls use the person's real token. Media uploads accept PNG, JPEG, or WebP up to 2 MiB and return JSON containing a key and URL. Upload each image and retain the returned URL:
+
+    curl --fail-with-body \
+      -H "Authorization: Bearer $FARM_TOKEN" \
+      -H "Content-Type: image/png" \
+      --data-binary @art/icon.png \
+      https://tiinyapp.farm/api/media
+
+Submit multipart/form-data. media and screenshots are JSON strings containing uploaded URLs. archive is a gzip tar archive no larger than 50 MB and its filename ends in .tar.gz. Do not send both archive and releaseUrl.
+
+    curl --fail-with-body \
+      -H "Authorization: Bearer $FARM_TOKEN" \
+      -F 'id=my-app' \
+      -F 'name=My App' \
+      -F 'pitch=One useful line' \
+      -F 'description=What the app does and what users should know.' \
+      -F 'version=0.1.0' \
+      -F 'license=MIT' \
+      -F 'tags=developer-tools' \
+      -F 'entry={"command":"python -m my_app"}' \
+      -F 'permissions=network,device' \
+      -F 'repo=https://github.com/example/my-app' \
+      -F 'homepage=https://example.com/my-app' \
+      -F 'media={"icon":"https://tiinyapp.farm/media/RETURNED-ICON","header":"https://tiinyapp.farm/media/RETURNED-HEADER","gallery":["https://tiinyapp.farm/media/RETURNED-SCREENSHOT"]}' \
+      -F 'screenshots=["https://tiinyapp.farm/media/RETURNED-SCREENSHOT"]' \
+      -F 'archive=@my-app-0.1.0.tar.gz;type=application/gzip' \
+      https://tiinyapp.farm/api/seeds
+
+For an update, send the same fields with PUT to https://tiinyapp.farm/api/seeds/<id>. To use an existing public archive, omit archive and send releaseUrl as a public HTTPS URL that downloads the .tar.gz directly.
+
+Checks and review
+-----------------
+
+The farm validates the manifest schema and confirms the verified TiinyVerse owner. For a release it verifies the SHA-256 checksum, safely unpacks with path, link, special-file, and size guards, and scans for undeclared access, risky code, and secret patterns. If selfcheck is declared, the entry runs offline in Python 3.11 with --selfcheck and must exit successfully within 120 seconds. A human maintainer then reviews the source. The app appears in the catalog only after merge.
+
+What to tell the person at the end
+----------------------------------
+
+On success, give the person both links printed or returned by the publishing flow:
+
+1. The pull request URL, so they can see the review and checks.
+2. Your apps: https://tiinyapp.farm/account/
+
+Do not claim that the app is published before the pull request is merged.

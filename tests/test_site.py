@@ -232,7 +232,7 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_required_pages_and_byte_identical_manifests(self):
-        for path in ('index.html', 'catalog/index.html', 'install/index.html', 'submit/index.html', 'account/index.html', 'catalog.json', 'categories.json', 'manifests/index.html', 'sitemap.xml', 'robots.txt', '404.html'):
+        for path in ('index.html', 'catalog/index.html', 'install/index.html', 'submit/index.html', 'account/index.html', 'docs/agents/index.html', 'llms.txt', 'catalog.json', 'categories.json', 'manifests/index.html', 'sitemap.xml', 'robots.txt', '404.html'):
             self.assertTrue((self.output / path).is_file(), path)
         for path in (ROOT / 'manifests').glob('*.json'):
             self.assertEqual(path.read_bytes(), (self.output / 'manifests' / path.name).read_bytes())
@@ -266,7 +266,7 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
             relative = path.relative_to(self.output).as_posix()
             if relative in ('index.html', 'catalog/index.html'):
                 expected.append({'type': 'module', 'src': '/assets/catalog.js'})
-            elif relative == 'submit/index.html':
+            elif relative in ('submit/index.html', 'submit/done/index.html'):
                 expected.append({'type': 'module', 'src': '/assets/seeds.js'})
             elif relative.startswith('apps/'):
                 expected.append({'type': 'module', 'src': '/assets/catalog.js'})
@@ -386,7 +386,7 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
     def test_sitemap_and_field_documentation(self):
         tree = ET.parse(self.output / 'sitemap.xml')
         urls = {element.text for element in tree.iter('{http://www.sitemaps.org/schemas/sitemap/0.9}loc')}
-        expected = {'https://tiinyapp.farm' + path for path in ('/', '/catalog/', '/install/', '/submit/', '/manifests/')}
+        expected = {'https://tiinyapp.farm' + path for path in ('/', '/catalog/', '/install/', '/submit/', '/docs/agents/', '/manifests/')}
         expected.update('https://tiinyapp.farm/apps/' + app['id'] + '/' for app in self.apps)
         self.assertEqual(urls, expected)
         self.assertIn('Sitemap: https://tiinyapp.farm/sitemap.xml', (self.output / 'robots.txt').read_text())
@@ -431,7 +431,7 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         html = (self.output / 'submit/index.html').read_text()
         doc = Document(html)
         visible = ' '.join(doc.text)
-        for phrase in ('Sign in', 'Verify you own a Tiiny', 'Your app', 'Send code',
+        for phrase in ('Sign in', 'Verify you own a Tiiny', 'Your app', 'Send it again',
                        'Get my code', 'Submit for review', 'Your draft is saved on this computer as you type.'):
             self.assertIn(phrase, visible)
         legends = [' '.join(Document(text).text) for text in re.findall(r'<legend[^>]*>(.*?)</legend>', html)]
@@ -538,6 +538,28 @@ assert.equal(anonymous.children[0].children[0].tag, 'span');
         self.assertEqual(json.loads((self.output / 'catalog.json').read_text()), self.apps)
         self.assertIn('id="account-farm" href="/account/" hidden', (self.output / 'submit/index.html').read_text())
 
+    def test_agent_guide_and_account_token_controls(self):
+        guide = (ROOT / 'docs/agents.txt').read_text()
+        self.assertEqual((self.output / 'llms.txt').read_text(), guide)
+        page = (self.output / 'docs/agents/index.html').read_text()
+        visible = ' '.join(Document(page).text)
+        for phrase in ('what the farm is', 'farm publish', 'curl --fail-with-body', '/api/media',
+                       '/api/seeds', 'farm.json', 'Ask the person for their token; never make one up.',
+                       'pull request URL', 'https://tiinyapp.farm/account/'):
+            self.assertIn(phrase.lower(), visible.lower())
+        for field in ('id', 'name', 'pitch', 'description', 'version', 'license', 'category',
+                      'entry', 'permissions', 'links', 'media'):
+            self.assertRegex(guide, rf'(?m)^\* {field} ')
+        account = Document((self.output / 'account/index.html').read_text())
+        self.assertTrue({'api-tokens-heading', 'create-token', 'token-form', 'token-name',
+                         'token-reveal', 'new-token', 'copy-token', 'token-status',
+                         'api-tokens'}.issubset(account.ids))
+        script = (self.output / 'assets/farm.js').read_text()
+        for contract in ("api('/api/tokens')", "api('/api/tokens', post({ name:",
+                         "api('/api/tokens/' + encodeURIComponent(token.id), { method: 'DELETE' })",
+                         'navigator.clipboard.writeText'):
+            self.assertIn(contract, script)
+
     def test_seed_tabs_control_three_panels_with_only_first_visible(self):
         doc = Document((self.output / 'submit/index.html').read_text())
         tablists = [attrs for tag, attrs in doc.tags if attrs.get('role') == 'tablist']
@@ -572,13 +594,11 @@ assert.equal(anonymous.children[0].children[0].tag, 'span');
         self.assertEqual(len(steps), 3)
         self.assertEqual(sum(tag == 'dl' for tag, attrs in Document(html).tags), 2)
         submit = ''.join(Document(SITE['seeds']()).text)
-        self.assertIn('Paste the URL of your TiinyVerse profile. We give you a short code. '
-                      'Put that code anywhere in your TiinyVerse bio, save, then press Verify. '
-                      'We read your public profile once to confirm you own it, the same idea as '
-                      'a DNS TXT record. You can remove the code afterwards.', submit)
-        self.assertIn('Submitting opens a pull request on the catalog. Automated checks run, '
-                      'a maintainer reviews it, and it is listed when merged. '
-                      'You can follow it on Your apps.', submit)
+        self.assertIn('Only Tiiny owners can submit apps. Your public TiinyVerse profile is the proof: '
+                      'we give you a code, you put it in your bio, and we read it once. '
+                      'Like a DNS TXT record.', submit)
+        self.assertIn('Two short pages. The card on the right is what people will see in the catalog, '
+                      'and it updates as you type.', submit)
         for app in self.apps:
             html = SITE['app_page'](app, TODAY)
             main, rail = html.split('<aside', 1)
@@ -591,6 +611,8 @@ assert.equal(anonymous.children[0].children[0].tag, 'span');
             for port in app['requires']['ports']:
                 self.assertIn('http://localhost:' + str(port), main)
         for path in self.output.rglob('*.html'):
+            if path.relative_to(self.output).as_posix() == 'docs/agents/index.html':
+                continue  # The public API route is /api/seeds and must be named literally for assistants.
             visible = ' '.join(Document(path.read_text()).text)
             self.assertNotRegex(visible, r'(?i)farmhand|\bsprouting\b|\bseeds?\b|My farm')
 

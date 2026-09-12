@@ -68,6 +68,10 @@ async function bodyJSON(request) {
 export function createApp({ fetcher = fetch, now = () => Date.now(), seedRoutes = async () => null, proofRoutes = async () => null } = {}) {
   return async function handle(request, env) {
     const url = new URL(request.url), path = url.pathname;
+    const bearerRoute = (request.method === 'POST' && ['/api/seeds', '/api/media'].includes(path)) ||
+      (request.method === 'PUT' && /^\/api\/seeds\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(path)) ||
+      (request.method === 'GET' && path === '/api/seeds/mine');
+    const bearerMatch = bearerRoute && request.headers.get('Authorization')?.match(/^Bearer\s+(.+)$/i);
     const get = async key => env.FARM.get(key, 'json');
     const put = async (key, value) => env.FARM.put(key, JSON.stringify(value));
     const del = async key => env.FARM.delete(key);
@@ -83,6 +87,20 @@ export function createApp({ fetcher = fetch, now = () => Date.now(), seedRoutes 
       const id = await unsign(cookies(request)[COOKIE]);
       const record = id && await get('session:' + id);
       return record && record.expires > now() ? { id, ...record, user: await get('user:' + record.userId) } : null;
+    }
+    async function bearerUser() {
+      if (!bearerMatch) return null;
+      const token = bearerMatch[1];
+      if (!/^farm_[a-f0-9]{40}$/.test(token)) return null;
+      const hash = await sha256(encoder.encode(token));
+      const id = await get('api-token-hash:' + hash);
+      const record = id && await get('api-token:' + id);
+      if (!record || record.hash !== hash) return null;
+      const user = await get('user:' + record.userId);
+      if (!user) return null;
+      record.lastUsedAt = new Date(now()).toISOString();
+      await put('api-token:' + id, record);
+      return ensureMaker(user, get, put, random);
     }
     async function setSession(userId) {
       const previous = await session();
@@ -105,7 +123,7 @@ export function createApp({ fetcher = fetch, now = () => Date.now(), seedRoutes 
       return user;
     }
     try {
-      if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method) && request.headers.get('Origin') !== ORIGIN) fail(403, 'Please submit this form from tiinyapp.farm.');
+      if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method) && !bearerMatch && request.headers.get('Origin') !== ORIGIN) fail(403, 'Please submit this form from tiinyapp.farm.');
       if (path === '/api/auth/start' && request.method === 'POST') {
         const input = await bodyJSON(request);
         const email = typeof input?.email === 'string' ? input.email.trim().toLowerCase() : '';
@@ -183,8 +201,54 @@ export function createApp({ fetcher = fetch, now = () => Date.now(), seedRoutes 
         const current = await session(); if (current) await del('session:' + current.id);
         return json({ signedOut: true }, 200, { 'Set-Cookie': cookie(COOKIE, '', 0) });
       }
-      const currentUser = async () => { const user = (await session())?.user; return user ? ensureMaker(user, get, put, random) : null; };
+      const sessionUser = async () => { const user = (await session())?.user; return user ? ensureMaker(user, get, put, random) : null; };
+      const currentUser = async () => bearerMatch ? bearerUser() : sessionUser();
       if (path === '/api/me' && request.method === 'GET') return json({ user: await currentUser() });
+      if (path === '/api/tokens' && request.method === 'POST') {
+        const user = await sessionUser();
+        if (!user) fail(401, 'Sign in to your account first.');
+        if (!user.tiinyverse) fail(403, 'Verify you own a Tiiny before creating an API token.');
+        const input = await bodyJSON(request), name = typeof input.name === 'string' ? input.name.trim() : '';
+        if (!name || name.length > 80) fail(400, 'Give this API token a name of 80 characters or fewer.');
+        const key = 'user-api-tokens:' + user.id;
+        const ids = await get(key) || [];
+        const active = [];
+        for (const id of ids) if (await get('api-token:' + id)) active.push(id);
+        if (active.length >= 5) fail(409, 'You can have up to five API tokens. Revoke one before creating another.');
+        const token = 'farm_' + random(20), hash = await sha256(encoder.encode(token)), id = random(16);
+        const record = { id, userId: user.id, name, prefix: token.slice(0, 13), hash,
+          createdAt: new Date(now()).toISOString(), lastUsedAt: null };
+        await put('api-token:' + id, record);
+        await put('api-token-hash:' + hash, id);
+        await put(key, [...active, id]);
+        return json({ token, id, name, prefix: record.prefix, createdAt: record.createdAt, lastUsedAt: null }, 201);
+      }
+      if (path === '/api/tokens' && request.method === 'GET') {
+        const user = await sessionUser();
+        if (!user) fail(401, 'Sign in to your account first.');
+        const key = 'user-api-tokens:' + user.id, ids = await get(key) || [], active = [], tokens = [];
+        for (const id of ids) {
+          const record = await get('api-token:' + id);
+          if (!record || record.userId !== user.id) continue;
+          active.push(id);
+          tokens.push({ id: record.id, name: record.name, prefix: record.prefix,
+            createdAt: record.createdAt, lastUsedAt: record.lastUsedAt });
+        }
+        if (active.length !== ids.length) await put(key, active);
+        return json({ tokens });
+      }
+      const tokenDelete = request.method === 'DELETE' && path.match(/^\/api\/tokens\/([a-f0-9]{32})$/);
+      if (tokenDelete) {
+        const user = await sessionUser();
+        if (!user) fail(401, 'Sign in to your account first.');
+        const id = tokenDelete[1], record = await get('api-token:' + id);
+        if (!record || record.userId !== user.id) fail(404, 'That API token was not found.');
+        await del('api-token:' + id);
+        await del('api-token-hash:' + record.hash);
+        const key = 'user-api-tokens:' + user.id, ids = await get(key) || [];
+        await put(key, ids.filter(value => value !== id));
+        return json({ revoked: true });
+      }
       const context = { request, env, url, path, get, put, del, now, fetcher, bodyJSON, random,
         currentUser, requireUser: async () => { const user = await currentUser(); if (!user) fail(401, 'Sign in to your account first.'); return user; } };
       return await socialRoutes(context) || await makerRoutes(context) || await proofRoutes(context) || await seedRoutes(context) || json({ error: 'This route does not exist.' }, 404);

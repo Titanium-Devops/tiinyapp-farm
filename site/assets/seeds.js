@@ -11,6 +11,13 @@ function setFormDisabled(disabled) {
   for (const fieldset of document.querySelectorAll('#seed-form fieldset')) fieldset.disabled = disabled;
   byId('seed-form').querySelector('button[type=submit]').disabled = disabled;
 }
+
+function showSeedPage(page) {
+  const about = byId('seed-page-about'), release = byId('seed-page-release');
+  if (!about || !release) return;
+  about.hidden = page !== 1; release.hidden = page !== 2;
+  window.scrollTo?.(0, 0);
+}
 function syncRelease() {
   const hasRelease = byId('seed-form').elements.namedItem('releaseChoice').value !== 'no';
   byId('release-fields').hidden = !hasRelease;
@@ -33,7 +40,7 @@ async function prefillSeed() {
     command: seed.entry?.command ?? (seed.entry?.python ? 'python -m ' + seed.entry.python + ' ' + seed.entry.args.map(arg => JSON.stringify(arg)).join(' ') : ''),
     python: seed.requires.python, ports: seed.requires.ports.join(','),
     models: seed.requires.device.models.join(','), npuUnits: seed.requires.device.npuUnits,
-    tags: seed.tags.join(','), health: seed.health,
+    tags: categoryFor(seed.tags), health: seed.health,
   };
   for (const [key, value] of Object.entries(values)) { const input = form.elements.namedItem(key); if (input) input.value = value ?? ''; }
   form.elements.namedItem('id').readOnly = true;
@@ -49,6 +56,13 @@ async function prefillSeed() {
   setFormDisabled(false);
   showStep(2);
 }
+function categoryFor(tags) {
+  if (tags.some(tag => ['assistant', 'chat', 'voice'].includes(tag))) return 'assistant';
+  if (tags.some(tag => ['stories', 'family'].includes(tag))) return 'family';
+  if (tags.includes('audio')) return 'audio';
+  if (tags.includes('library')) return 'library';
+  return 'developer-tools';
+}
 const tabs = [...document.querySelectorAll('.seed-tabs [role=tab]')];
 function hashStep() {
   const index = tabs.findIndex(tab => '#' + tab.getAttribute('aria-controls') === window.location.hash);
@@ -56,6 +70,7 @@ function hashStep() {
 }
 window.addEventListener?.('hashchange', () => { const step = hashStep(); if (step !== undefined) showStep(step); });
 function showStep(index, focus = false) {
+  byId('onboarding-flow')?.classList.toggle('only-tabs', index === 2);
   tabs.forEach((tab, position) => {
     const selected = position === index;
     tab.setAttribute('aria-selected', String(selected));
@@ -112,14 +127,13 @@ async function refreshAccount(step, focus = false) {
   byId('account-farm').hidden = !user;
   byId('github-signin').hidden = !!user?.github;
   byId('github-signin').textContent = user ? 'Link GitHub' : 'Sign in with GitHub';
-  byId('email-start').hidden = !!user?.email;
   byId('email-verify').hidden = !!user?.email;
   byId('proof-fields').disabled = !user || !!proof;
   setFormDisabled(!proof);
   byId('proof-state').classList.toggle('done', !!proof);
   byId('seed-state').classList.toggle('done', !!proof);
-  byId('proof-state').textContent = proof ? `Verified: ${proof.name}. ` : user ? 'Paste your public TiinyVerse profile below.' : 'First, sign in to your account.';
-  if (proof) { const anchor = document.createElement('a'); anchor.href = proof.profileUrl; anchor.textContent = 'Your verified profile'; byId('proof-state').append(anchor); }
+  byId('proof-state').textContent = proof ? `Verified. Your maker page is ` : user ? 'Paste your public TiinyVerse profile below.' : 'First, sign in to your account.';
+  if (proof) { const anchor = document.createElement('a'); anchor.href = '/makers/' + encodeURIComponent(user.handle) + '/'; anchor.textContent = `tiinyapp.farm/makers/${user.handle}`; byId('proof-state').append(anchor); }
   byId('seed-state').textContent = proof ? 'Enter your app details below.' : 'Sign in and verify you own a Tiiny to submit an app.';
   challenge(!proof && user?.tiinyverseChallenge?.expires > Date.now() ? user.tiinyverseChallenge : null);
   tabs.forEach((tab, index) => {
@@ -131,13 +145,20 @@ async function refreshAccount(step, focus = false) {
   await prefillSeed();
   showStep(step ?? hashStep() ?? (proof ? 2 : user ? 1 : 0), focus);
 }
-onSubmit('email-start', async () => {
-  codeEmail = byId('email').value.trim();
+byId('resend-code')?.addEventListener('click', event => working(event.currentTarget, async () => {
+  codeEmail = codeEmail || byId('email').value.trim();
+  if (!codeEmail) throw new Error('Enter your email first.');
   await api('/api/auth/start', { email: codeEmail });
-  status('Check your email for the sign-in code.'); byId('code').focus();
-});
+  status('Another sign-in code is on its way.');
+}));
 onSubmit('email-verify', async () => {
-  await api('/api/auth/verify', { email: codeEmail || byId('email').value.trim(), code: byId('code').value });
+  codeEmail = byId('email').value.trim();
+  const code = byId('code').value.trim();
+  if (!code) {
+    await api('/api/auth/start', { email: codeEmail });
+    status('Check your email for the sign-in code.'); byId('code').focus(); return;
+  }
+  await api('/api/auth/verify', { email: codeEmail, code });
   byId('code').value = ''; await refreshAccount(1, true); status('You are signed in.');
 });
 byId('logout')?.addEventListener('click', event => working(event.currentTarget, async () => {
@@ -148,8 +169,18 @@ onSubmit('tiiny-link', async () => {
   challenge(result); status(result.instruction);
 });
 byId('tiiny-verify')?.addEventListener('click', event => working(event.currentTarget, async () => {
-  await api('/api/tiinyverse/verify', {}); await refreshAccount(2, true); status('Your TiinyVerse profile is verified. You can submit your app.');
+  await api('/api/tiinyverse/verify', {}); await refreshAccount(1, true); status('Your TiinyVerse profile is verified. Your app step is ready.');
 }));
+byId('copy-bio-code')?.addEventListener('click', async event => {
+  await navigator.clipboard.writeText(byId('bio-code').textContent);
+  event.currentTarget.textContent = 'Copied';
+});
+byId('seed-next')?.addEventListener('click', () => {
+  const invalid = byId('seed-page-about').querySelector(':invalid');
+  if (invalid) { invalid.reportValidity(); return; }
+  showSeedPage(2);
+});
+byId('seed-back')?.addEventListener('click', () => showSeedPage(1));
 onSubmit('seed-form', async () => {
   clearMarks();
   if (updateId && !originalSeed) throw new Error('Load your app before updating it.');
@@ -197,13 +228,15 @@ onSubmit('seed-form', async () => {
   status('Submitting your app for maintainer review…');
   const result = await api(updateId ? '/api/seeds/' + encodeURIComponent(updateId) : '/api/seeds', form, updateId ? 'PUT' : 'POST');
   if (result.warning) { status(result.warning); return; }
-  try { localStorage.removeItem(DRAFT); } catch {}
-  window.location.assign('/account/');
+  try {
+    localStorage.removeItem(DRAFT);
+    localStorage.setItem('farm-submit-done', JSON.stringify({ id: form.get('id'), name: form.get('name'), pitch: form.get('pitch'), category: byId('tags').selectedOptions[0]?.textContent || 'Developer tools', media, prUrl: result.prUrl }));
+  } catch {}
+  window.location.assign(updateId ? '/account/' : '/submit/done/?id=' + encodeURIComponent(result.id));
 });
-refreshAccount().catch(error => status(error.message));
 
 // The server names the field in its message ("tags: must not be empty", "A null entry requires the library tag").
-const FIELD_WORDS = { archive: 'archive', icon: 'seed-icon', header: 'seed-header', screenshots: 'seed-gallery', gallery: 'seed-gallery', repo: 'repo', homepage: 'homepage', video: 'video', command: 'command', entry: 'command', tags: 'tags', version: 'version', license: 'license', id: 'seed-id', name: 'seed-name', pitch: 'pitch', summary: 'pitch', permissions: 'permissions', description: 'description', release: 'releaseUrl', ports: 'ports', python: 'python' };
+const FIELD_WORDS = { archive: 'archive', icon: 'seed-icon', header: 'seed-header', screenshots: 'seed-gallery', gallery: 'seed-gallery', repo: 'repo', homepage: 'homepage', video: 'video', command: 'command', entry: 'command', tags: 'tags', category: 'tags', version: 'version', license: 'license', id: 'seed-id', name: 'seed-name', pitch: 'pitch', summary: 'pitch', permissions: 'permissions', description: 'description', release: 'releaseUrl', ports: 'ports', python: 'python' };
 function clearMarks() {
   for (const input of document.querySelectorAll('#seed-form [aria-invalid]')) input.removeAttribute('aria-invalid');
   for (const note of document.querySelectorAll('#seed-form .field-error')) note.remove();
@@ -255,3 +288,74 @@ if (draftForm) {
     try { localStorage.setItem(DRAFT, JSON.stringify(data)); } catch {}
   });
 }
+
+function syncPreview() {
+  if (!byId('preview-name')) return;
+  byId('preview-name').textContent = byId('seed-name').value.trim() || 'Your app';
+  byId('preview-pitch').textContent = byId('pitch').value.trim() || 'Your one-line summary appears here.';
+  byId('preview-command').textContent = 'farm install ' + (byId('seed-id').value.trim() || 'your-app');
+  byId('preview-category').textContent = byId('tags').selectedOptions?.[0]?.textContent || 'Developer tools';
+}
+async function loadCategories() {
+  if (updateId || !byId('tags')) return;
+  try {
+    const response = await fetch('/categories.json', { cache: 'no-store' }); if (!response.ok) return;
+    const config = await response.json(), current = byId('tags').value;
+    const values = config.order.map(label => [Object.keys(config.map).find(tag => config.map[tag] === label), label]).filter(item => item[0]);
+    byId('tags').replaceChildren(...values.map(([value, label]) => { const option = document.createElement('option'); option.value = value; option.textContent = label; return option; }));
+    if (values.some(item => item[0] === current)) byId('tags').value = current;
+  } catch { /* The built-in options mirror categories.json for offline use. */ }
+}
+for (const id of ['seed-name', 'seed-id', 'pitch', 'tags']) byId(id)?.addEventListener('input', syncPreview);
+byId('tags')?.addEventListener('change', syncPreview);
+for (const [id, target, label] of [['seed-icon', 'preview-icon'], ['seed-header', 'preview-art']]) {
+  byId(id)?.addEventListener('change', event => {
+    const file = event.target.files[0]; if (!file || !URL.createObjectURL) return;
+    const url = URL.createObjectURL(file);
+    if (id === 'seed-icon') byId(target).src = url;
+    else { byId(target).style.backgroundImage = `url("${url}")`; byId('preview-art-label').hidden = true; }
+  });
+}
+
+const helpDialog = byId('release-help-dialog');
+for (const button of document.querySelectorAll('[data-help]')) button.addEventListener('click', () => helpDialog.showModal());
+for (const button of document.querySelectorAll('[data-help-close]')) button.addEventListener('click', () => helpDialog.close());
+for (const button of document.querySelectorAll('[data-path]')) button.addEventListener('click', () => {
+  for (const choice of document.querySelectorAll('[data-path]')) choice.setAttribute('aria-pressed', String(choice === button));
+  for (const steps of document.querySelectorAll('.hsteps')) steps.hidden = steps.dataset.for !== button.dataset.path;
+});
+for (const button of document.querySelectorAll('[data-copy-target]')) button.addEventListener('click', async () => {
+  await navigator.clipboard.writeText(byId(button.dataset.copyTarget).textContent); button.textContent = 'Copied';
+});
+helpDialog?.addEventListener('click', event => { if (event.target === helpDialog) helpDialog.close(); });
+
+function renderDone() {
+  const id = new URLSearchParams(window.location.search).get('id');
+  let saved = {}; try { saved = JSON.parse(localStorage.getItem('farm-submit-done') || '{}'); } catch {}
+  if (saved.id === id) {
+    byId('done-name').textContent = saved.name || 'Your app'; byId('done-card-name').textContent = saved.name || 'Your app';
+    byId('done-pitch').textContent = saved.pitch || ''; byId('done-category').textContent = saved.category || 'Developer tools';
+    byId('done-command').textContent = 'farm install ' + id;
+    if (saved.media?.icon) { byId('done-icon').src = saved.media.icon; byId('done-card-icon').src = saved.media.icon; }
+    if (saved.media?.header) byId('done-art').style.backgroundImage = `url("${saved.media.header}")`;
+  }
+  const poll = async () => {
+    try {
+      const { seeds } = await api('/api/seeds/mine', undefined, 'GET'); const app = seeds.find(seed => seed.id === id); if (!app) return;
+      const state = appStatusForDone(app); const row = byId('done-status').lastElementChild;
+      row.className = 'st ' + state.kind; row.children[1].textContent = state.text;
+    } catch { /* Keep the last known live status visible. */ }
+  };
+  poll(); window.setInterval?.(poll, 10000);
+}
+function appStatusForDone(app) {
+  const failed = (app.checks || []).find(check => ['failure', 'error', 'timed_out', 'cancelled', 'startup_failure', 'stale'].includes(check.status));
+  if (failed) return { kind: 'bad', text: 'Checks failed: ' + failed.name };
+  if (['merged', 'published', 'sprouting'].includes(app.state)) return { kind: 'ok', text: 'Published' };
+  if ((app.checks || []).length && app.checks.every(check => ['success', 'neutral', 'skipped'].includes(check.status))) return { kind: 'wait', text: 'Waiting for review' };
+  return { kind: 'run', text: 'Checks running' };
+}
+
+const donePage = window.location.pathname?.startsWith('/submit/done/');
+if (donePage) { byId('submit-flow').hidden = true; byId('submit-done').hidden = false; renderDone(); }
+else { loadCategories().then(syncPreview); refreshAccount().then(syncPreview).catch(error => status(error.message)); }

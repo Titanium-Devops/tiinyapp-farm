@@ -1,9 +1,15 @@
 import { fail, json, boundedBody } from './index.mjs';
 const ORIGIN = 'https://tiinyapp.farm';
 export const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-export const makerDefaults = user => Object.assign(user, { handle: user.handle ?? null, bio: user.bio ?? '', avatarKey: user.avatarKey ?? null, links: user.links ?? {} });
+export const makerDefaults = user => Object.assign(user, {
+  handle: user.handle ?? null,
+  bio: user.bio ?? '',
+  avatarKey: user.avatarKey ?? null,
+  links: user.links ?? {},
+  public: user.public ?? true,
+});
 export async function ensureMaker(user, get, put, random) {
-  const needsDefaults = ['handle', 'bio', 'avatarKey', 'links'].some(key => !Object.hasOwn(user, key));
+  const needsDefaults = ['handle', 'bio', 'avatarKey', 'links', 'public'].some(key => !Object.hasOwn(user, key));
   makerDefaults(user);
   if (needsDefaults) await put('user:' + user.id, user);
   if (!user.handle && user.tiinyverse) {
@@ -61,6 +67,13 @@ export async function makerRoutes(ctx) {
     Object.assign(user, { bio: input.bio, avatarKey, links }); await put('user:' + user.id, user);
     return json({ user });
   }
+  if (path === '/api/maker/visibility' && request.method === 'PUT') {
+    const user = await requireUser(), input = await bodyJSON(request);
+    if (typeof input.public !== 'boolean') fail(400, 'Choose whether your maker page is public.');
+    user.public = input.public;
+    await put('user:' + user.id, user);
+    return json({ public: user.public });
+  }
   if (path === '/api/media' && request.method === 'POST') {
     const user = await requireUser();
     if (!user.tiinyverse) fail(403, 'Verify you own a Tiiny before uploading images.');
@@ -79,6 +92,10 @@ export async function makerRoutes(ctx) {
   const cardMatch = path.match(/^\/makers\/([a-z0-9]+(?:-[a-z0-9]+)*)\/card\.png$/);
   if (cardMatch) {
     if (!['GET', 'HEAD'].includes(request.method)) return json({ error: 'Use GET or HEAD for share cards.' }, 405);
+    const id = await get('maker:' + cardMatch[1]), maker = id && await get('user:' + id);
+    if (maker?.tiinyverse && maker.handle === cardMatch[1] && maker.public === false && !await ctx.currentUser()) {
+      return privateMakerResponse(request.method);
+    }
     // Maker cards are build snapshots; new makers use the farm card until the
     // next snapshot/build. Reject HTML fallbacks from static asset routing.
     let response = await env.ASSETS.fetch(new Request(ORIGIN + path));
@@ -87,7 +104,8 @@ export async function makerRoutes(ctx) {
     }
     if (!response.ok || !/^image\/png(?:;|$)/i.test(response.headers.get('Content-Type') || '')) fail(404, 'Share card not found.');
     const headers = new Headers(response.headers);
-    headers.set('Cache-Control', 'public, max-age=300');
+    headers.set('Cache-Control', maker?.public === false ? 'private, no-store' : 'public, max-age=300');
+    if (maker?.public === false) headers.set('Vary', 'Cookie');
     headers.set('X-Content-Type-Options', 'nosniff');
     return new Response(request.method === 'HEAD' ? null : response.body, { headers });
   }
@@ -95,6 +113,7 @@ export async function makerRoutes(ctx) {
   if (match && request.method === 'GET') {
     const id = await get('maker:' + match[1]), user = id && await get('user:' + id);
     if (!user?.tiinyverse || user.handle !== match[1]) fail(404, 'That maker was not found.');
+    if (user.public === false && !await ctx.currentUser()) return privateMakerResponse(request.method);
     const seeds = (await catalog(env)).filter(seed => seed.author.tiinyverse === user.tiinyverse.profileUrl);
     const links = Object.entries(user.links || {}).map(([label, url]) => `<a href="${escape(url)}">${escape(label)}</a>`).join(' · ');
     const cards = seeds.map(seed => {
@@ -119,8 +138,21 @@ export async function makerRoutes(ctx) {
 <meta property="og:image" content="${escape(pageURL)}card.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,800&amp;family=Nunito:wght@400;600;700&amp;display=swap"><link rel="stylesheet" href="/assets/site.css"><script type="module" src="/assets/session.js"></script><script type="module" src="/assets/share.js"></script>
-</head><body><div class="wrap"><header><a class="brand" href="/"><img class="brand-mark" src="/brand/icon-512.png" width="36" height="36" alt="">tiinyapp.farm</a><nav aria-label="Main navigation"><a class="on" aria-current="page" href="/">Apps</a><a href="/install/">Install</a><a href="/submit/">Submit an app</a><a class="me" data-farm-nav href="/submit/#account-panel">Sign in</a></nav></header><main class="page">${user.avatarKey ? `<img class="maker-avatar" src="/${escape(user.avatarKey)}" alt="">` : ''}<h1>${escape(user.tiinyverse.name)}</h1><p>@${escape(user.handle)} <span class="badge verified">Verified Tiiny owner</span></p><p class="maker-bio">${escape(description)}</p><p><button class="btn ghost" type="button" data-share data-share-title="${escape(title)}" data-share-text="${escape(description)}">Share</button> <span data-share-status role="status" aria-live="polite"></span></p><p>${links}</p><h2>Apps by ${escape(user.tiinyverse.name)}</h2><div class="field">${cards || '<p>No apps in the catalog yet.</p>'}</div></main></div></body></html>`, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
+</head><body><div class="wrap"><header><a class="brand" href="/"><img class="brand-mark" src="/brand/icon-512.png" width="36" height="36" alt="">tiinyapp.farm</a><nav aria-label="Main navigation"><a class="on" aria-current="page" href="/">Apps</a><a href="/install/">Install</a><a href="/submit/">Submit an app</a><a class="me" data-farm-nav href="/submit/#account-panel">Sign in</a></nav></header><main class="page">${user.avatarKey ? `<img class="maker-avatar" src="/${escape(user.avatarKey)}" alt="">` : ''}<h1>${escape(user.tiinyverse.name)}</h1><p>@${escape(user.handle)} <span class="badge verified">Verified Tiiny owner</span></p><p class="maker-bio">${escape(description)}</p><p><button class="btn ghost" type="button" data-share data-share-title="${escape(title)}" data-share-text="${escape(description)}">Share</button> <span data-share-status role="status" aria-live="polite"></span></p><p>${links}</p><h2>Apps by ${escape(user.tiinyverse.name)}</h2><div class="field">${cards || '<p>No apps in the catalog yet.</p>'}</div></main></div></body></html>`, { headers: {
+      'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+      ...(user.public === false ? { Vary: 'Cookie' } : {}),
+    } });
   }
   if (path.startsWith('/makers/')) fail(404, 'That maker was not found.');
   return null;
+}
+
+function privateMakerResponse(method) {
+  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Members only | tiinyapp.farm</title><link rel="stylesheet" href="/assets/site.css"></head><body><div class="wrap"><main class="page"><h1>This maker's page is for signed-in members.</h1><p><a class="btn hay" href="/submit/">Sign in</a></p></main></div></body></html>`;
+  return new Response(method === 'HEAD' ? null : body, { status: 200, headers: {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'private, no-store',
+    'Vary': 'Cookie',
+    'X-Content-Type-Options': 'nosniff',
+  } });
 }
