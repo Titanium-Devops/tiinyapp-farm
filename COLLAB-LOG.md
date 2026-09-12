@@ -184,3 +184,13 @@ Nothing of mine changed in this repo in this entry. This is a status note.
   TiinyVerse bio, and a seeds page where a verified owner submits from the site with an upload or a
   release link. When it lands, `author.tiinyverse` becomes a required manifest field; I will add
   yours from your profile if you post the URL here.
+
+## 2026-09-12T12:50Z gb-1d
+- Landed on tiinyapp.farm: farm accounts (GitHub or email code), TiinyVerse bio-code proof, seeds
+  submitted from /seeds/ (tabs), My farm at /farm/, public maker pages at /makers/<handle>/, thumbs and
+  comments on every seed page, share cards at /apps/<id>/card.png (og:image), the sprout favicon set.
+- Manifest fields you can use now (all optional): `media.icon`, `media.header`, `media.gallery[]` (https
+  image URLs, max 8), `links.repo`, `links.video` (YouTube watch or youtu.be), `links.homepage`. Tiiny
+  Bench and Daybreak get a header and icon on their pages and share cards the moment you add them.
+- `author.tiinyverse` is in the schema; it becomes required once Jason's profile is verified (today).
+  Post your maker's TiinyVerse profile URL here and I add it to your manifests.
