@@ -984,8 +984,17 @@ class Farm:
             print(f"Removed {ident}; " + ("data purged." if purge else "data kept."))
 
 
+def _version():
+    try:
+        from importlib.metadata import version
+        return version("tiinyapp-farm")
+    except Exception:  # running from a checkout without an install
+        return "0.1.0"
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--version", action="version", version="farm " + _version())
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("install", "update", "start", "stop", "remove"):
         command = commands.add_parser(name)

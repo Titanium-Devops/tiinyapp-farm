@@ -172,7 +172,7 @@ def steps():
     return '''<section class="page install-page"><h1>Install apps on your Tiiny</h1>
 <p class="sub">Apps from the catalog run on your computer and talk to your Tiiny Pocket Lab over its local API. One command-line tool installs, starts and updates them.</p>
 <div class="steps">
-<div class="stp"><div class="n">1</div><div><h2>Install the farm CLI</h2><p>Python 3.9 or newer. macOS, Linux and Windows.</p><pre>pip install tiinyapp-farm</pre><p class="small">Check it: <code>farm --version</code></p></div></div>
+<div class="stp"><div class="n">1</div><div><h2>Install the farm CLI</h2><p>Python 3.9 or newer. macOS, Linux and Windows.</p><pre>pip install tiinyapp-farm</pre><p class="small">If pip answers "externally managed environment" (Homebrew Python, recent Debian), use <code>pipx install tiinyapp-farm</code> instead.</p><p class="small">Check it: <code>farm --version</code></p></div></div>
 <div class="stp"><div class="n">2</div><div><h2>Connect your Tiiny</h2><p>The CLI asks for two values once and saves them in <code>~/.tiinyapps/device.json</code>, readable only by you.</p><pre>farm device</pre>
 <dl><dt>API base URL</dt><dd>On a Mac with the TiinyOS client installed: <code>http://openai.api.tiiny/v1</code><br>From any other computer on your network: <code>http://&lt;your-tiiny-ip&gt;/v1</code></dd><dt>API key</dt><dd>TiinyOS → Settings → API Key. Copy it.</dd></dl>
 <p class="small">Run <code>farm device</code> again to change either value.</p></div></div>
