@@ -30,3 +30,6 @@ class_name = "FarmCoordinator"
 [[migrations]]
 tag = "v1-farm-coordinator"
 new_sqlite_classes = ["FarmCoordinator"]
+
+[vars]
+FARM_ADMINS = "dd3d7322-eae6-474d-af08-827613b20ecd"
