@@ -252,8 +252,12 @@ class Farm:
     def valid_token(token):
         return isinstance(token, str) and re.fullmatch(r"farm_[A-Za-z0-9_-]{40}", token) is not None
 
-    def login(self, token=None):
+    def login(self, token=None, token_stdin=False):
+        if token is None and token_stdin:
+            token = sys.stdin.readline().strip()
         if token is None:
+            if not sys.stdin.isatty():
+                raise FarmError("No terminal to hide the token. Pipe it in instead: printf '%s' \"$(pbpaste)\" | farm login --token-stdin")
             with warnings.catch_warnings():
                 warnings.simplefilter("error", getpass.GetPassWarning)
                 token = getpass.getpass("Farm API token (hidden): ").strip()
@@ -1008,7 +1012,8 @@ def main(argv=None):
     device = commands.add_parser("device")
     device.add_argument("--base", help="Device HTTP(S) base URL (or TIINY_BASE)")
     device.add_argument("--key-stdin", action="store_true", help="Read the device API key from stdin (or TIINY_KEY)")
-    commands.add_parser("login")
+    login = commands.add_parser("login")
+    login.add_argument("--token-stdin", action="store_true", help="Read the token from standard input (one line)")
     publish = commands.add_parser("publish")
     publish.add_argument("--token", help="API token (otherwise FARM_TOKEN or ~/.tiinyapps/token)")
     publish.add_argument("--update", action="store_true", help="Update an existing app")
@@ -1022,7 +1027,7 @@ def main(argv=None):
         if args.command in ("install", "update"):
             farm.install(args.id, yes=args.yes, update=args.command == "update")
         elif args.command == "login":
-            farm.login()
+            farm.login(token_stdin=args.token_stdin)
         elif args.command == "publish":
             farm.publish(token=args.token, update=args.update)
         elif args.command == "status" and args.id:
