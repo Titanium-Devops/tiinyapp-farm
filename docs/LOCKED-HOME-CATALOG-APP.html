@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tiinyapp.farm directions</title>
+<meta name="description" content="Three real directions for the catalog and the app page, one at a time at real size. Keys 1, 2, 3 switch. Pick one.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700&family=Nunito:wght@400;600;700&display=swap">
+<style>
+/* tastemaker · stamp: mood warm dark · macro Shelf/Ledger/Editorial variants · palette from hero.jpg · contrast 12 text-safe · critique: ShowTell 4 · Phil 4 · Hier 4 · Spec 4 · Restr 4 · Var 5 */
+:root{--night:#090D14;--soil:#12171F;--fence:#1E2732;--hay:#F2C462;--cyan:#00C8F0;--mint:#7FE3DC;--ink:#E8EEF2;--mute:#9AA7B4;--bad:#F0A08F;
+--display:Fraunces,Georgia,serif;--body:Nunito,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;color-scheme:dark}
+*{box-sizing:border-box}html,body{overflow-x:clip}html{background:var(--night)}
+body{margin:0;background:var(--night);color:var(--ink);font:16px/1.55 var(--body)}
+a{color:var(--cyan)}a:hover{color:var(--mint)}
+code,pre{font-family:var(--mono)}
+h1,h2,h3{font-family:var(--display);font-weight:700;letter-spacing:-.01em;font-style:normal;text-wrap:balance;margin:0}
+:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.wrap{max-width:1040px;margin:0 auto;padding:0 20px}
+/* header, real */
+header{border-bottom:1px solid var(--fence)}
+header .wrap{display:flex;align-items:center;justify-content:space-between;height:64px;gap:16px}
+.brand{display:flex;align-items:center;gap:10px;color:var(--ink);text-decoration:none;font:700 18px var(--display)}
+.brand img{width:34px;height:34px;border-radius:50%}
+nav{display:flex;align-items:center;gap:24px;font-weight:600;font-size:15px}nav a{color:var(--mute);text-decoration:none}nav a.on{color:var(--ink)}nav a.me{display:flex;align-items:center;gap:8px;color:var(--ink)}nav .av{width:28px;height:28px;border-radius:50%;object-fit:cover}
+/* hero (compressed for context) */
+.hero{margin:20px auto 0;position:relative;border-radius:16px;overflow:hidden;aspect-ratio:1040/360;background:url(HERO) center/cover;max-width:1040px}
+.hero .cp{position:absolute;left:28px;bottom:24px;max-width:56ch}.hero h1{font-size:40px;line-height:1.05;text-shadow:0 2px 20px rgba(0,0,0,.6)}.hero h1 em{font-style:normal;color:var(--hay)}
+.hero p{margin:8px 0 0;color:#d5dde5;text-shadow:0 1px 10px rgba(0,0,0,.7)}
+/* shared bits */
+.btn{display:inline-flex;align-items:center;gap:8px;border:0;border-radius:999px;padding:10px 16px;font:700 15px var(--body);cursor:pointer;background:var(--hay);color:var(--night);text-decoration:none;white-space:nowrap;transition:background .15s ease-out,transform .15s ease-out}
+.btn:hover{background:#f7d27a}.btn:active{transform:translateY(1px)}
+.btn.q{background:transparent;color:var(--ink);border:1px solid var(--fence)}.btn.q:hover{background:var(--soil)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}.chip{border:1px solid var(--fence);border-radius:999px;padding:2px 10px;font-size:12px;color:var(--mute);white-space:nowrap}
+.chip.ok{color:var(--mint);border-color:#1f3b3b}
+.cmd{display:flex;align-items:center;gap:8px;background:#0b1017;border:1px solid var(--fence);border-radius:10px;padding:8px 10px 8px 12px;font:14px/1.4 var(--mono);color:var(--mint);min-width:0}
+.cmd span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cmd button{margin-left:auto;background:none;border:0;color:var(--mute);cursor:pointer;padding:4px;border-radius:6px;display:flex}.cmd button:hover{color:var(--ink);background:var(--soil)}
+.ic{width:18px;height:18px;flex:none}
+.eyebrow{font:600 13px var(--body);letter-spacing:.08em;text-transform:uppercase;color:var(--hay)}
+section.shelf{padding:56px 0 96px}
+.sechead{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin:0 0 24px}.sechead h2{font-size:30px}.sechead p{margin:0;color:var(--mute);font-size:15px}
+.screen{display:none}.screen.on{display:block}
+/* ---- V1 Shelf ---- */
+.v1 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr));gap:20px}
+.v1 .tile{background:var(--soil);border:1px solid var(--fence);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;opacity:0;transform:translateY(12px);animation:rise .3s ease-out forwards}
+.v1 .tile:nth-child(2){animation-delay:.05s}.v1 .tile:nth-child(3){animation-delay:.1s}.v1 .tile:nth-child(4){animation-delay:.15s}
+@keyframes rise{to{opacity:1;transform:none}}
+.v1 .art{aspect-ratio:3/2;background:#0b1017 center/cover;position:relative}
+.v1 .art img.icon{position:absolute;left:16px;bottom:-22px;width:56px;height:56px;border-radius:14px;border:2px solid var(--soil);background:var(--night);box-shadow:0 0 24px rgba(0,200,240,.25)}
+.v1 .body{padding:32px 20px 20px;display:flex;flex-direction:column;gap:12px;flex:1}
+.v1 .name{font-size:22px;line-height:1.2}.v1 .name a{color:var(--ink);text-decoration:none}.v1 .pitch{margin:0;color:#c9d3dc}
+.v1 .meta{font-size:13px;color:var(--mute)}
+.v1 .foot{margin-top:auto;display:flex;gap:10px;align-items:center}.v1 .foot .cmd{flex:1}
+/* ---- V2 Ledger ---- */
+.v2 .rows{border-top:1px solid var(--fence)}
+.v2 .row{display:grid;grid-template-columns:56px minmax(0,1fr) auto auto;gap:18px;align-items:center;padding:16px 0;border-bottom:1px solid var(--fence)}
+.v2 .row img{width:56px;height:56px;border-radius:12px;background:#0b1017}
+.v2 .name{font-size:18px;line-height:1.2}.v2 .name a{color:var(--ink);text-decoration:none}.v2 .pitch{margin:2px 0 6px;color:#c9d3dc;font-size:15px}
+.v2 .row .chips{margin-top:2px}
+.v2 .v{font:600 13px var(--body);color:var(--mute);white-space:nowrap}
+.v2 .row .cmd{display:none}
+@media(max-width:700px){.v2 .row{grid-template-columns:48px minmax(0,1fr)}.v2 .row .v,.v2 .row .btn{display:none}}
+/* ---- V3 Editorial ---- */
+.v3 .list{display:grid;gap:56px}
+.v3 .item{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:40px;align-items:center}
+.v3 .item:nth-child(even) .art{order:2}
+.v3 .art{aspect-ratio:5/3;border-radius:16px;background:#0b1017 center/cover;border:1px solid var(--fence);box-shadow:0 0 60px rgba(0,200,240,.08)}
+.v3 .text{display:flex;flex-direction:column;gap:14px}
+.v3 .name{font-size:36px;line-height:1.05}.v3 .name a{color:var(--ink);text-decoration:none}
+.v3 .pitch{margin:0;font-size:19px;color:#d5dde5}.v3 .desc{margin:0;color:var(--mute);font-size:15px;max-width:52ch}
+.v3 .foot{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+@media(max-width:760px){.v3 .item{grid-template-columns:1fr}.v3 .item:nth-child(even) .art{order:0}.v3 .name{font-size:30px}}
+/* ---- app page shared ---- */
+.app{padding:32px 0 96px}
+.app .head{display:flex;gap:18px;align-items:center;margin-bottom:6px}.app .head img{width:72px;height:72px;border-radius:18px;background:#0b1017;box-shadow:0 0 30px rgba(0,200,240,.2)}
+.app h1{font-size:40px;line-height:1.05}.app .sub{color:var(--mute);font-size:14px;margin-top:6px}
+.app .pitch{font-size:19px;color:#d5dde5;margin:14px 0 0;max-width:60ch}
+.app .two{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:40px;margin-top:32px}
+.app h2{font-size:20px;margin:28px 0 10px}.app h2:first-child{margin-top:0}
+.app .desc{color:#c9d3dc;max-width:62ch}
+.rail .card{background:var(--soil);border:1px solid var(--fence);border-radius:14px;padding:16px;margin-bottom:14px;font-size:14px}
+.rail .card h3{font:600 12px var(--body);letter-spacing:.08em;text-transform:uppercase;color:var(--mute);margin:0 0 10px}
+.rail dl{display:grid;grid-template-columns:82px minmax(0,1fr);gap:8px 12px;margin:0}.rail dt{color:var(--mute)}.rail dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.rail .mono{font:12px/1.5 var(--mono)}
+.maker{display:flex;gap:10px;align-items:center}.maker img{width:36px;height:36px;border-radius:50%;object-fit:cover}
+@media(max-width:760px){.app .two{grid-template-columns:1fr}}
+/* V1 app: header art band */
+.v1 .band{aspect-ratio:1040/300;border-radius:16px;background:#0b1017 center/cover;border:1px solid var(--fence);margin-bottom:-36px}
+.v1 .app .head{padding-left:20px}
+/* V2 app: no band, dense facts table */
+.v2 .facts{border-top:1px solid var(--fence);margin-top:24px}.v2 .facts div{display:grid;grid-template-columns:140px minmax(0,1fr);gap:16px;padding:10px 0;border-bottom:1px solid var(--fence);font-size:15px}.v2 .facts dt{color:var(--mute)}.v2 .facts dd{margin:0;overflow-wrap:anywhere}
+/* V3 app: big art, big name */
+.v3 .band{aspect-ratio:1040/420;border-radius:20px;background:#0b1017 center/cover;border:1px solid var(--fence);margin-bottom:28px;box-shadow:0 0 80px rgba(0,200,240,.1)}
+.v3 .app h1{font-size:56px}
+/* picker chrome (test harness, not product) */
+.pick{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);display:flex;gap:6px;align-items:center;background:rgba(10,12,18,.82);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.12);border-radius:999px;padding:6px;z-index:50;font:600 13px var(--body)}
+.pick button{border:0;background:transparent;color:#cbd5df;border-radius:999px;padding:8px 14px;cursor:pointer;font:inherit}.pick button[aria-current=true]{background:#fff;color:#000}
+.pick .sep{width:1px;height:20px;background:rgba(255,255,255,.15);margin:0 4px}
+.pick .k{color:#8a94a0;font-weight:400;font-size:12px;padding:0 6px}
+@media(max-width:640px){header .wrap{height:auto;padding:12px 16px;flex-wrap:wrap}nav{gap:14px;font-size:14px}nav a.me span{display:none}.hero{aspect-ratio:auto;min-height:340px;margin:16px 16px 0;border-radius:12px}.hero .cp{left:16px;bottom:16px;right:16px}.hero h1{font-size:30px}.sechead{flex-direction:column;align-items:flex-start;gap:4px}.pick{bottom:10px;padding:4px;gap:2px;max-width:calc(100% - 20px)}.pick button{padding:7px 9px;font-size:12px}.pick .k{display:none}.v1 .foot{flex-wrap:wrap}.v1 .foot .cmd{flex-basis:100%}}
+@media(prefers-reduced-motion:reduce){.v1 .tile{animation:none;opacity:1;transform:none}.btn{transition:none}}
+
+/* ---- composed home + catalog ---- */
+.feat{padding:56px 0 0}.feat .list{display:grid;gap:48px}
+.ledger{padding:72px 0 96px}.toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 8px}
+.search{display:flex;align-items:center;gap:10px;flex:1;min-width:240px;background:#0b1017;border:1px solid var(--fence);border-radius:12px;padding:10px 14px}
+.search input{flex:1;background:none;border:0;color:var(--ink);font:15px var(--body);outline:none;min-width:0}.search input::placeholder{color:var(--mute)}
+.cats{display:flex;gap:6px;flex-wrap:wrap}.cat{border:1px solid var(--fence);border-radius:999px;padding:6px 12px;font:600 13px var(--body);color:var(--mute);background:transparent;cursor:pointer}
+.cat[aria-pressed=true]{background:var(--ink);color:var(--night);border-color:var(--ink)}
+.count{color:var(--mute);font-size:14px;margin-left:auto}
+.empty{padding:40px 0;color:var(--mute)}
+.catalog{padding:40px 0 96px}.catalog h1{font-size:40px;margin-bottom:6px}.catalog .lede{color:var(--mute);margin:0 0 24px;max-width:60ch}
+.v2 .row .cat-tag{font:600 12px var(--body);color:var(--hay);letter-spacing:.06em;text-transform:uppercase;margin-bottom:2px}
+.v1 .tile .cat-tag{font:600 12px var(--body);color:var(--hay);letter-spacing:.06em;text-transform:uppercase}
+.v3 .item .cat-tag{font:600 12px var(--body);color:var(--hay);letter-spacing:.06em;text-transform:uppercase}
+.v{display:block}
+</style></head><body>
+<header><div class="wrap"><a class="brand" href="#"><img src="SPROUT" alt="">tiinyapp.farm</a><nav><a class="on" href="#">Apps</a><a href="#">Install</a><a href="#">Submit an app</a><a class="me" href="#"><img class="av" src="AVATAR" alt=""><span>Jason</span></a></nav></div></header>
+
+<!-- ================= HOME ================= -->
+<div id="s-home" class="screen on">
+<div class="hero" role="img" aria-label="Night farm painting"><div class="cp"><h1>Little apps, <em>grown for your Tiiny.</em></h1><p>Community-made apps that run beside your Pocket Lab on your own computer.</p></div></div>
+<section class="feat wrap"><div class="sechead"><h2>Featured</h2><p>Picked by the maintainers this month</p></div><div class="v v3"><div class="list" id="featured"></div></div></section>
+<section class="ledger wrap"><div class="sechead"><h2>All apps</h2><p><a href="#" data-go="catalog">Browse the catalog with filters</a></p></div>
+<div class="toolbar"><div class="search">SEARCHICON<input id="q-home" type="search" placeholder="Search apps, makers, tags" aria-label="Search apps"></div><span class="count" id="count-home"></span></div>
+<div class="v v2"><div class="rows" id="rows-home"></div><p class="empty" id="empty-home" hidden>No app matches. Try fewer words.</p></div></section>
+</div>
+<!-- ================= CATALOG ================= -->
+<div id="s-catalog" class="screen">
+<section class="catalog wrap"><h1>Catalog</h1><p class="lede">Every app on the farm. Each page shows what it needs and what it asks for before you install.</p>
+<div class="toolbar"><div class="search">SEARCHICON<input id="q-cat" type="search" placeholder="Search apps, makers, tags" aria-label="Search apps"></div><span class="count" id="count-cat"></span></div>
+<div class="cats" id="cats" role="group" aria-label="Categories"></div>
+<div class="v v1" style="margin-top:24px"><div class="grid" id="grid-cat"></div><p class="empty" id="empty-cat" hidden>Nothing in that category yet. <a href="#" data-go="submit">Submit an app</a> to plant the first one.</p></div></section>
+</div>
+<!-- ================= APP SCREEN ================= -->
+<div id="s-app" class="screen">
+<div id="s-app" class="screen">
+<section class="app wrap">
+<div class="v v1"><div class="band" style="background-image:url(HDR_story-lantern)"></div></div>
+
+<div class="head"><img src="ICO_story-lantern" alt=""><div><h1>Story Lantern</h1><div class="sub">v0.1.0 · MIT · Not reviewed yet · Grown by <a href="#">Jason</a></div></div></div>
+<p class="pitch">Write, illustrate and narrate bedtime stories on your Tiiny.</p>
+<div class="two"><div>
+<h2>Install</h2>
+<div class="cmd"><span>farm install story-lantern && farm start story-lantern</span><button type="button" aria-label="Copy">COPYICON</button></div>
+<p class="sub">Then open <code>http://localhost:8420</code>. New here? <a href="#">Install the farm CLI first.</a></p>
+<div class="v v2" hidden><dl class="facts"><div><dt>Python</dt><dd>3.9 or newer</dd></div><div><dt>Port</dt><dd>8420</dd></div><div><dt>Models</dt><dd>chat, image, tts</dd></div><div><dt>NPU</dt><dd>89 units</dd></div><div><dt>Uses</dt><dd>Files, Network, Your Tiiny</dd></div><div><dt>Release</dt><dd>0.1.0 · 3.7 MB · <span class="mono">94be15423951…</span> · <a href="#">Source</a></dd></div></dl></div>
+<h2>What it does</h2>
+<p class="desc">DESC_story-lantern</p>
+<h2>Comments</h2><p class="desc" style="color:var(--mute)">No comments yet. <a href="#">Sign in</a> to leave one.</p>
+</div>
+<aside class="rail">
+<div class="v v1"><div class="card"><h3>Needs</h3><dl><dt>Python</dt><dd>3.9 or newer</dd><dt>Port</dt><dd>8420</dd><dt>Models</dt><dd>chat, image, tts</dd><dt>NPU</dt><dd>89 units</dd><dt>Uses</dt><dd><div class="chips"><span class="chip">Files</span><span class="chip">Network</span><span class="chip">Your Tiiny</span></div></dd></dl></div>
+<div class="card"><h3>Release</h3><dl><dt>Version</dt><dd>0.1.0</dd><dt>Size</dt><dd>3.7 MB</dd><dt>SHA-256</dt><dd class="mono">94be15423951…</dd><dt>Source</dt><dd><a href="#">GitHub</a></dd></dl></div></div>
+<div class="card"><h3>Maker</h3><div class="maker"><img src="AVATAR" alt=""><div><b>Jason</b><br><span class="chip ok">Verified Tiiny owner</span></div></div></div>
+<div style="display:flex;gap:10px"><a class="btn q" href="#">Thumbs up · 0</a><a class="btn q" href="#">Share</a></div>
+</aside></div>
+</section>
+</div>
+
+</div>
+<div class="pick" role="group" aria-label="Screens"><button data-s="home">Home</button><button data-s="catalog">Catalog</button><button data-s="app">App page</button><span class="k">keys h c a</span></div>
+<script>
+const APPS = APPS_JSON; const ART = ART_JSON; const CP = 'COPYICON';
+const CATS = {'developer-tools':'Developer tools','library':'Libraries','coordination':'Developer tools','stories':'Family','family':'Family','audio':'Audio','assistant':'Assistants','chat':'Assistants','voice':'Assistants','benchmark':'Developer tools','benchmarks':'Developer tools','measurement':'Developer tools'};
+const ORDER = ['Assistants','Family','Audio','Developer tools','Libraries'];
+const catsOf = a => [...new Set(a.tags.map(t => CATS[t]).filter(Boolean))].sort((x,y)=>ORDER.indexOf(x)-ORDER.indexOf(y));
+APPS.forEach(a => { a.cats = catsOf(a); if (!a.cats.length) a.cats = ['Developer tools']; });
+const perm = p => ({files:'Files',network:'Network',device:'Your Tiiny',microphone:'Microphone'})[p] || p;
+const needs = a => a.models.length ? 'needs ' + a.models.join(', ') : 'no named models';
+const esc = s => s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const tile = a => `<article class="tile"><div class="art" style="background-image:url(${ART[a.id].header})"><img class="icon" src="${ART[a.id].icon}" alt=""></div><div class="body"><span class="cat-tag">${a.cats[0]}</span><h3 class="name"><a href="#" data-go="app">${esc(a.name)}</a></h3><p class="pitch">${esc(a.pitch)}</p><div class="meta">v${a.version} · by ${esc(a.author)} · ${esc(needs(a))}</div><div class="chips">${a.perms.map(p=>`<span class="chip">${perm(p)}</span>`).join('')}</div><div class="foot"><div class="cmd"><span>farm install ${a.id}</span><button type="button" aria-label="Copy">${CP}</button></div><a class="btn" href="#" data-go="app">Install</a></div></div></article>`;
+const row = a => `<div class="row"><img src="${ART[a.id].icon}" alt=""><div><span class="cat-tag">${a.cats[0]}</span><h3 class="name"><a href="#" data-go="app">${esc(a.name)}</a></h3><p class="pitch">${esc(a.pitch)}</p><div class="chips"><span class="chip">${esc(needs(a))}</span>${a.perms.map(p=>`<span class="chip">${perm(p)}</span>`).join('')}</div></div><span class="v">v${a.version}</span><a class="btn" href="#" data-go="app">Install</a></div>`;
+const item = a => `<article class="item"><div class="art" style="background-image:url(${ART[a.id].header})"></div><div class="text"><span class="cat-tag">${a.cats[0]}</span><h3 class="name"><a href="#" data-go="app">${esc(a.name)}</a></h3><p class="pitch">${esc(a.pitch)}</p><p class="desc">${esc(a.desc.split('. ').slice(0,2).join('. '))}.</p><div class="chips">${a.perms.map(p=>`<span class="chip">${perm(p)}</span>`).join('')}<span class="chip">v${a.version}</span></div><div class="foot"><a class="btn" href="#" data-go="app">Install</a><div class="cmd" style="flex:1"><span>farm install ${a.id}</span><button type="button" aria-label="Copy">${CP}</button></div></div></div></article>`;
+document.getElementById('featured').innerHTML = APPS.slice(0,4).map(item).join('');
+const hay = a => [a.name,a.pitch,a.author,...a.tags,...a.cats].join(' ').toLowerCase();
+function renderHome(){ const q=document.getElementById('q-home').value.trim().toLowerCase(); const list=APPS.filter(a=>!q||hay(a).includes(q)); document.getElementById('rows-home').innerHTML=list.map(row).join(''); document.getElementById('empty-home').hidden=list.length>0; document.getElementById('count-home').textContent=`${list.length} of ${APPS.length}`; }
+let cat=''; const catNames=[...new Set(APPS.flatMap(a=>a.cats))].sort((x,y)=>ORDER.indexOf(x)-ORDER.indexOf(y));
+document.getElementById('cats').innerHTML=['All',...catNames].map(c=>`<button class="cat" type="button" data-cat="${c==='All'?'':c}" aria-pressed="${c==='All'}">${c}</button>`).join('');
+function renderCat(){ const q=document.getElementById('q-cat').value.trim().toLowerCase(); const list=APPS.filter(a=>(!cat||a.cats.includes(cat))&&(!q||hay(a).includes(q))); document.getElementById('grid-cat').innerHTML=list.map(tile).join(''); document.getElementById('empty-cat').hidden=list.length>0; document.getElementById('count-cat').textContent=`${list.length} of ${APPS.length}`; document.querySelectorAll('.cat').forEach(b=>b.setAttribute('aria-pressed', b.dataset.cat===cat)); }
+document.getElementById('q-home').addEventListener('input', renderHome); document.getElementById('q-cat').addEventListener('input', renderCat);
+document.getElementById('cats').addEventListener('click', e=>{ const b=e.target.closest('.cat'); if(b){ cat=b.dataset.cat; renderCat(); } });
+function setS(s){ document.querySelectorAll('.screen').forEach(e=>e.classList.toggle('on', e.id==='s-'+s)); document.querySelectorAll('.pick [data-s]').forEach(b=>b.setAttribute('aria-current', b.dataset.s===s?'true':'false')); const u=new URL(location); u.searchParams.set('s',s); history.replaceState(null,'',u); window.scrollTo(0,0); }
+document.querySelectorAll('.pick [data-s]').forEach(b=>b.onclick=()=>setS(b.dataset.s));
+document.addEventListener('click', e=>{ const g=e.target.closest('[data-go]'); if(g){ e.preventDefault(); if(g.dataset.go!=='submit') setS(g.dataset.go); } const b=e.target.closest('.cmd button'); if(b){ navigator.clipboard?.writeText(b.parentElement.querySelector('span').textContent); b.innerHTML='CHECKICON'; setTimeout(()=>b.innerHTML=CP,1200);} });
+addEventListener('keydown', e=>{ if(e.target.tagName==='INPUT')return; if(e.key==='h')setS('home'); if(e.key==='c')setS('catalog'); if(e.key==='a')setS('app'); });
+renderHome(); renderCat(); setS(new URL(location).searchParams.get('s')||'home');
+</script>
+</body></html>

@@ -1,1 +1,5 @@
 2026-09-12T14:40Z pending-review surface=catalog+app-page axis=layout choice=Shelf|Ledger|Editorial reason="Jason rejected the flat card rebuild as AI slop; three real directions built with the locked tokens and new app art, published at artifacts.semfreak.dev/a/tinyapp-farm/directions/, awaiting his pick"
+2026-09-12T15:37Z kept surface=home axis=layout choice="Featured editorial rows (4, manifest featured flag) over a searchable ledger" reason="Jason: 'I love the mixture of the editorial and ledger'"
+2026-09-12T15:37Z kept surface=catalog axis=layout choice="Shelf tiles with search and category chips on /catalog/" reason="Jason: full catalog page that looks like the shelf, filter by categories and search"
+2026-09-12T15:37Z kept surface=app-page axis=layout choice="Shelf app page: header band, icon over it, 1fr + 300 rail" reason="Jason: '100% aligned with the app page'"
+2026-09-12T15:37Z rejected surface=catalog axis=layout choice="Ledger alone / Editorial alone" reason="merged into featured + ledger"
