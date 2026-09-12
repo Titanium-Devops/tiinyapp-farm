@@ -1,4 +1,5 @@
 name = "tiinyapp-farm"
+account_id = "5a845e69fbed4f4e64e2176d86637680"
 compatibility_date = "2026-09-12"
 workers_dev = false
 
