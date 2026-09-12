@@ -1,0 +1,42 @@
+name: Manifest submission checks
+on:
+  pull_request:
+    paths: ['manifests/**']
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out trusted validation code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+          persist-credentials: false
+      - name: Check out submitted files
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: submission
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Prepare the selfcheck image before offline execution
+        run: docker pull python:3.11-slim
+      - name: Validate submissions
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 trusted/scripts/check-submission.py --repository submission --base "$BASE_SHA" --head "$HEAD_SHA" --report submission-report.json
+      - name: Save results for the trusted comment workflow
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-results
+          path: submission-report.json
+          retention-days: 7
+          if-no-files-found: error

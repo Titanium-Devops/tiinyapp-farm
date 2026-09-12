@@ -1,0 +1,59 @@
+name: Publish farm to PyPI
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Require tag to match package version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os, tomllib
+          with open('pyproject.toml', 'rb') as source:
+              version = tomllib.load(source)['project']['version']
+          if os.environ['RELEASE_TAG'] != 'v' + version:
+              raise SystemExit('Release tag must match pyproject.toml version')
+          PY
+      - run: python3 -m unittest
+      - run: python3 scripts/build-site.py
+      - name: Build wheel and source distribution
+        run: |
+          python3 -m pip install build
+          python3 -m build
+      - name: Smoke test the installed CLI outside the checkout
+        run: |
+          python3 -m venv /tmp/farm-package-test
+          /tmp/farm-package-test/bin/pip install --no-deps dist/*.whl
+          cd /tmp
+          /tmp/farm-package-test/bin/farm --help
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-distributions
+          path: dist/
+          if-no-files-found: error
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/tiinyapp-farm
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-distributions
+          path: dist/
+      - name: Publish with PyPI trusted publishing
+        uses: pypa/gh-action-pypi-publish@release/v1

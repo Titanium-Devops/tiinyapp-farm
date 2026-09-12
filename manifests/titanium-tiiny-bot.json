@@ -51,5 +51,6 @@
     "sha256": "58dca3dbb5d573c3c0c3ffefb8fd615d6ef87f013d19de384ffe4f2bcb3cc715",
     "size": 433852
   },
-  "health": "/api/health"
+  "health": "/api/health",
+  "selfcheck": true
 }

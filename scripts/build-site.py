@@ -35,9 +35,10 @@ FIELDS = {
     "requires": "Minimum python version if known, local ports, and device requirements: models and npuUnits.",
     "permissions": "Declared access: microphone, files, network and device. An empty list asks for nothing.",
     "tags": "Short labels that help people find the app.",
-    "verified": "Keep false when submitting. Farm CI and a human maintainer must approve verification.",
+    "verified": "Keep false when submitting. A maintainer sets true in a follow-up commit after CI and manual review.",
     "addedAt": "The day the app joined the farm, YYYY-MM-DD. New lasts less than 30 days.",
     "updatedAt": "The most recent manifest update, YYYY-MM-DD.",
+    "selfcheck": "Optional boolean. When true, CI appends --selfcheck to the entry and requires exit 0 offline within 120 seconds.",
     "health": "Optional HTTP health path on the first declared port, returning a JSON object with version and optional ok.",
 }
 
@@ -87,7 +88,8 @@ def page(title, body, path):
 def steps():
     return f'''<section class="sect"><h1>Plant an app in three steps</h1>
 <p class="lede">One farmhand for the whole field. Apps run on your computer beside your Pocket Lab.</p>
-<div class="steps"><section class="step"><h2>1. Get the farmhand</h2><p>Use Python 3.11 or newer on macOS or Linux. Get the source and install the tool from its checkout.</p>
+<div class="steps"><section class="step"><h2>1. Get the farmhand</h2><p>Use Python 3.11 or newer on macOS or Linux. Install the farmhand from PyPI.</p>
+{command('pip install tiinyapp-farm')}<p>Fallback: clone the source and install from its checkout.</p>
 {command('git clone ' + REPO + '.git' + chr(10) + 'cd tiinyapp-farm' + chr(10) + 'python3 -m pip install .')}</section>
 <section class="step"><h2>2. Tell it about your Tiiny</h2><p>Find the base URL and key in TiinyOS, Settings, API Key. The farmhand asks once and keeps them private on your computer.</p>{command('farm device')}</section>
 <section class="step"><h2>3. Plant and grow</h2><p>Read the app's requirements, permissions and release notes first. Once its release is available, plant it and start it.</p>{command('farm install titanium-tiiny-bot' + chr(10) + 'farm start titanium-tiiny-bot')}<p>Libraries have nothing to start. Pending checksums prevent installation.</p></section></div>
@@ -142,6 +144,7 @@ def app_page(app, today):
 def seeds():
     fields = ''.join(f'<dt><code>{e(k)}</code></dt><dd>{e(v)}</dd>' for k, v in FIELDS.items())
     return f'''<section class="sect"><h1>Bring your seeds</h1><p class="lede">Built something for the Pocket Lab? Give it a plot on the farm.</p>
+<p>Read the {link("/docs/SUBMIT.md", "contributor guide")} for packaging, permissions and CI details.</p>
 <h2>How to submit</h2><ol><li>Publish the app's source and a versioned release archive. Include a selfcheck.</li><li>Add <code>manifests/your-app.json</code> using an {link('/manifests/', 'existing seed')} and the {link('/docs/manifest.schema.json', 'manifest schema')}.</li><li>Open a pull request in {link(REPO, 'Titanium-Devops/tiinyapp-farm')}. Leave <code>verified</code> false for the farmhands.</li></ol>
 <h2>The manifest fields</h2><dl>{fields}</dl><h2>The checks</h2><p>Run the local schema check before submitting:</p>{command('python3 scripts/check-manifest.py manifests/your-app.json')}
 <p>For a clearly described release draft only, add <code>--allow-pending</code>. Draft validation does not make an app installable.</p>
@@ -192,7 +195,7 @@ def build(source=ROOT, output=None, today=None):
         write('404.html', page('This plot is empty', '<section class="sect"><h1>This plot is empty</h1><p>That seed is not here. ' + link('/', 'Return to the field') + '.</p></section>', '/404.html'))
         write('sitemap.xml', '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + ''.join(f'<url><loc>{ORIGIN}{url}</loc></url>' for url in sorted(pages)) + '</urlset>\n')
         write('robots.txt', f'User-agent: *\nAllow: /\nSitemap: {ORIGIN}/sitemap.xml\n')
-        for folder, files in {'assets': ['hero.jpg', 'site.css'], 'brand': ['ti-mark.svg', 'titanium-bot-logo.svg', 'tiiny-logo.svg'], 'docs': ['manifest.schema.json']}.items():
+        for folder, files in {'assets': ['hero.jpg', 'site.css'], 'brand': ['ti-mark.svg', 'titanium-bot-logo.svg', 'tiiny-logo.svg'], 'docs': ['manifest.schema.json', 'SUBMIT.md']}.items():
             for name in files:
                 origin = source / ('site/assets' if folder == 'assets' else folder) / name
                 (dest / folder).mkdir(exist_ok=True)

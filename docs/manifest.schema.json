@@ -214,7 +214,7 @@
     },
     "verified": {
       "type": "boolean",
-      "description": "Only farm CI and a human maintainer may set this to true."
+      "description": "Only a human maintainer sets true in a follow-up commit after CI and manual review."
     },
     "addedAt": {
       "type": "string",
@@ -228,6 +228,10 @@
       "type": "string",
       "pattern": "^/(?!/)[A-Za-z0-9_./-]+(?![\\s\\S])",
       "description": "Optional HTTP health path on the first declared port; GET returns a JSON object with version and optional ok."
+    },
+    "selfcheck": {
+      "type": "boolean",
+      "description": "If true, CI runs the entry with --selfcheck appended, offline, with a 120 second limit. Requires a runnable entry."
     }
   },
   "$defs": {

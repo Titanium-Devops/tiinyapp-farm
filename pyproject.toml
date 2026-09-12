@@ -9,6 +9,15 @@ description = "Install and run community apps beside your Tiiny AI Pocket Lab"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: POSIX",
+]
+
+[project.urls]
+Homepage = "https://tiinyapp.farm"
+Repository = "https://github.com/Titanium-Devops/tiinyapp-farm"
 
 [project.scripts]
 farm = "farm.farm:main"

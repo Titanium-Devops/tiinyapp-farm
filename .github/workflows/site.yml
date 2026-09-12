@@ -3,6 +3,7 @@ name: Build and deploy the farm
 on:
   push:
     branches: [main]
+    paths-ignore: ['docs/**']
   pull_request:
     branches: [main]
 

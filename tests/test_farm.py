@@ -20,6 +20,7 @@ from farm.farm import Farm, FarmError, main
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("check_manifest", ROOT / "scripts/check-manifest.py")
+assert spec is not None and spec.loader is not None
 validator = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(validator)
 
@@ -38,10 +39,11 @@ class ManifestTests(unittest.TestCase):
     def setUp(self):
         self.manifest = json.loads((ROOT / "manifests/titanium-tiiny-bot.json").read_text())
         self.manifest["release"]["sha256"] = "pending"
+        self.manifest["description"] = "Release pending publication."
 
-    def test_three_catalog_manifests(self):
+    def test_catalog_manifests(self):
         paths = sorted((ROOT / "manifests").glob("*.json"))
-        self.assertEqual(len(paths), 3)
+        self.assertTrue(paths)
         for path in paths:
             with self.subTest(path=path.name):
                 validator.check_manifest(json.loads(path.read_text()), allow_pending=True)
@@ -53,10 +55,13 @@ class ManifestTests(unittest.TestCase):
         validator.check_manifest(self.manifest)
 
     def test_validator_cli(self):
-        path = ROOT / "manifests/story-lantern.json"
-        command = [sys.executable, str(ROOT / "scripts/check-manifest.py"), str(path)]
-        self.assertEqual(subprocess.run(command, capture_output=True).returncode, 1)
-        self.assertEqual(subprocess.run(command + ["--allow-pending"], capture_output=True).returncode, 0)
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "pending.json"
+            self.manifest["description"] = "Release pending publication."
+            path.write_text(json.dumps(self.manifest))
+            command = [sys.executable, str(ROOT / "scripts/check-manifest.py"), str(path)]
+            self.assertEqual(subprocess.run(command, capture_output=True).returncode, 1)
+            self.assertEqual(subprocess.run(command + ["--allow-pending"], capture_output=True).returncode, 0)
 
     def test_invalid_manifest_fields(self):
         cases = [("id", "tiiny"), ("id", "../oops"), ("id", "Upper"), ("id", "valid-id\n"), ("pitch", "line\n"),

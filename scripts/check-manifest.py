@@ -90,6 +90,8 @@ def validate(value, rule, root, path="$", allow_pending=False):
 def check_manifest(manifest, allow_pending=False):
     schema = json.loads(SCHEMA.read_text())
     validate(manifest, schema, schema, allow_pending=allow_pending)
+    if manifest.get("selfcheck") and manifest["entry"] is None:
+        raise ValueError("$.selfcheck: needs a runnable entry")
     if "health" in manifest and not manifest["requires"]["ports"]:
         raise ValueError("$.health: needs a declared port")
     if manifest["entry"] is None and "library" not in manifest["tags"]:

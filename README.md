@@ -12,12 +12,12 @@ Brought to you by [Titanium Bot](https://titanium.bot). Made by Titanium Computi
 
 See `SPEC.md`.
 
-## Phase 1 installer
+## Install the farmhand
 
 Python 3.11 or newer on macOS or Linux; runtime dependencies are all standard library.
 
 ```sh
-python3 -m pip install .
+pip install tiinyapp-farm
 farm device
 farm install titanium-tiiny-bot
 farm start titanium-tiiny-bot
@@ -25,10 +25,18 @@ farm status
 farm stop titanium-tiiny-bot
 ```
 
-Story Lantern and OneLane are **pending release drafts**. They can be validated
-with `--allow-pending`, but installation is refused until their checksums are set.
-The Lite manifest records the included local archive's checksum and size; its
-public release URL remains unverified. Nothing is downloaded or run
+If the package is not yet published, or you want to work from source:
+
+```sh
+git clone https://github.com/Titanium-Devops/tiinyapp-farm.git
+cd tiinyapp-farm
+python3 -m pip install .
+```
+
+A manifest with a **pending release** can be validated with `--allow-pending`,
+but installation is refused until its checksum is set. Read each current manifest
+for release readiness. The bundled Lite archive is available for local checks;
+this phase did not verify public release availability. Nothing is downloaded or run
 by manifest validation. The installer displays permissions and requirements and
 asks once; `--yes` explicitly accepts that prompt for automation.
 
@@ -93,4 +101,27 @@ Archives are tar/tar.gz, bounded to 512 MiB downloaded and 2 GiB unpacked. Trave
 links, special files and duplicate file entries are refused. Checksums and byte
 sizes must match before extraction. These checks do not sandbox installed app code;
 permissions describe what the author declares. `verified` remains false until CI
-and human review. The site and submission CI are later phases.
+and human review. The static site and submission checks are included.
+
+
+## Bring your seeds
+
+Read [the contributor guide](docs/SUBMIT.md). PR checks validate changed manifests,
+verify archive checksums and sizes, safely unpack them, and scan for unsafe code,
+undeclared network access and secret patterns. A declared `"selfcheck": true`
+runs the entry with `--selfcheck` in an offline container for at most 120 seconds.
+Shell/subprocess use is forbidden. Microphone access is declared, not detected.
+Checks report one PR comment; only a maintainer sets `verified: true` after review.
+
+## Publish the farmhand
+
+Update `project.version` in `pyproject.toml`, then push its matching `v*` tag
+(for example `v0.1.0`). The workflow tests, builds a wheel and source distribution,
+smoke-tests `farm`, and publishes through PyPI trusted publishing without a token
+secret. Before the first release, a maintainer must configure PyPI's trusted
+publisher for this repository, workflow `publish.yml`, and environment `pypi`,
+and configure the GitHub `pypi` environment as appropriate. A tag alone does not
+create that PyPI trust relationship. No package has been published by this change.
+
+The site workflow builds and tests before deploying a push to main. Pushes that
+change only `docs/` skip the site workflow; PR builds still run.

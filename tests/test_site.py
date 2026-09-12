@@ -145,7 +145,7 @@ class SiteTests(unittest.TestCase):
         self.assertNotIn('>Verified<', html)
         self.assertNotIn('>Library<', html)
 
-    def test_four_manifest_build_with_future_seed_and_rebuild(self):
+    def test_catalog_build_with_future_seed_and_rebuild(self):
         with tempfile.TemporaryDirectory() as temp:
             source = Path(temp)
             for directory in ('manifests', 'brand', 'docs'):
@@ -155,9 +155,9 @@ class SiteTests(unittest.TestCase):
             fourth.update(id='fourth-seed', name='Fourth <seed> & friends', entry={'command': 'python run.py --label "A&B"'}, tags=['test'], screenshots=['https://example.org/screenshot.jpg'])
             path = source / 'manifests/fourth-seed.json'
             path.write_text(json.dumps(fourth, indent=4) + '\n')
-            self.assertEqual(SITE['build'](source=source, today=TODAY), 4)
+            self.assertEqual(SITE['build'](source=source, today=TODAY), len(self.apps) + 1)
             dest = source / 'site/dist'
-            self.assertEqual(len(list((dest / 'apps').glob('*/index.html'))), 4)
+            self.assertEqual(len(list((dest / 'apps').glob('*/index.html'))), len(self.apps) + 1)
             self.assertEqual((dest / 'manifests/fourth-seed.json').read_bytes(), path.read_bytes())
             text = (dest / 'apps/fourth-seed/index.html').read_text()
             self.assertIn('Fourth &lt;seed&gt; &amp; friends', text)
