@@ -1,0 +1,39 @@
+{
+  "media": {},
+  "links": {},
+  "id": "farm-cli-test",
+  "name": "Farm CLI test",
+  "pitch": "Proves farm publish end to end.",
+  "description": "A one-file test app used to prove the token and publish path. It prints one line and exits.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Jason",
+    "url": "https://www.tiinyverse.com/users/39628b1e-e94e-4bd8-800e-5437d5336e1f",
+    "tiinyverse": "https://www.tiinyverse.com/users/39628b1e-e94e-4bd8-800e-5437d5336e1f"
+  },
+  "license": "MIT",
+  "homepage": "https://www.tiinyverse.com/users/39628b1e-e94e-4bd8-800e-5437d5336e1f",
+  "screenshots": [],
+  "release": {
+    "url": "https://tiinyapp.farm/seeds-files/farm-cli-test/0.1.0/farm-cli-test-0.1.0.tar.gz",
+    "sha256": "c7800f3320092c21a753035480b38e08c41ff8d9687269af3c1661a543c1df71",
+    "size": 483
+  },
+  "entry": {
+    "command": "python -m main"
+  },
+  "requires": {
+    "ports": [],
+    "device": {
+      "models": [],
+      "npuUnits": 0
+    }
+  },
+  "permissions": [],
+  "tags": [
+    "developer-tools"
+  ],
+  "verified": false,
+  "addedAt": "2026-09-12",
+  "updatedAt": "2026-09-12"
+}
