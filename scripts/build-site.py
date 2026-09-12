@@ -147,8 +147,12 @@ def seeds():
 <p>No GitHub account needed. Your TiinyVerse profile is your owner's handshake.</p>
 <noscript><p>These forms need JavaScript to send codes and check your profile. You can still read the whole guide below.</p></noscript>
 <p id="farm-status" role="status" aria-live="polite"></p>
-<div class="seed-cards">
-<section class="seed-card" aria-labelledby="account-heading"><span class="step-number" aria-hidden="true">01</span><h2 id="account-heading">Your farm account</h2>
+<div class="seed-tabs" role="tablist" aria-labelledby="account-tab proof-tab seed-tab">
+<button id="account-tab" type="button" role="tab" aria-selected="true" aria-controls="account-panel" tabindex="0">01 Your farm account</button>
+<button id="proof-tab" class="locked" type="button" role="tab" aria-selected="false" aria-controls="proof-panel" tabindex="-1">02 Prove your Tiiny</button>
+<button id="seed-tab" class="locked" type="button" role="tab" aria-selected="false" aria-controls="seed-panel" tabindex="-1">03 Plant a seed</button>
+</div><div class="seed-cards">
+<section class="seed-card" id="account-panel" role="tabpanel" aria-labelledby="account-tab" tabindex="0"><span class="step-number" aria-hidden="true">01</span><h2 id="account-heading">Your farm account</h2>
 <p>An email, a code, and you're home. Or come in through GitHub. Both doors lead to the same farm.</p>
 <p id="account-state" class="card-state" role="status">Start here. No password to remember.</p>
 <form id="email-start"><label for="email">Email address</label><input id="email" name="email" type="email" autocomplete="email" maxlength="254" required><button class="btn hay" type="submit">Send my code</button></form>
@@ -157,39 +161,39 @@ def seeds():
 <a class="btn ghost" id="github-signin" href="/api/auth/github">Sign in with GitHub</a>
 <p class="fine">Already signed in? Add the other sign-in here to link it to this account.</p>
 <button id="logout" class="btn ghost" type="button" hidden>Sign out</button></section>
-<section class="seed-card" aria-labelledby="proof-heading"><span class="step-number" aria-hidden="true">02</span><h2 id="proof-heading">Prove your Tiiny</h2>
+<section class="seed-card" id="proof-panel" role="tabpanel" aria-labelledby="proof-tab" tabindex="0" hidden><span class="step-number" aria-hidden="true">02</span><h2 id="proof-heading">Prove your Tiiny</h2>
 <p>Your public TiinyVerse profile tells the farm who is planting. Its display name will appear beside your seed.</p>
 <p id="proof-state" class="card-state" role="status">First, sign in to your farm account.</p>
 <form id="tiiny-link"><fieldset id="proof-fields" disabled><legend>Your owner's profile</legend><label for="profileUrl">TiinyVerse profile URL</label><input id="profileUrl" name="profileUrl" type="url" placeholder="https://www.tiinyverse.com/users/…" required><button class="btn hay" type="submit">Get my bio code</button></fieldset></form>
 <div id="bio-challenge" hidden><p>Put this in your TiinyVerse bio, then press Verify.</p><output id="bio-code"></output><p class="fine" id="bio-expiry">Your code lasts 24 hours.</p><button id="tiiny-verify" class="btn hay" type="button">Verify</button></div>
 <p class="fine">One TiinyVerse profile belongs to one farm account. Sign in to that same account next time.</p></section>
-<section class="seed-card" aria-labelledby="seed-heading"><span class="step-number" aria-hidden="true">03</span><h2 id="seed-heading">Plant a seed</h2>
+<section class="seed-card" id="seed-panel" role="tabpanel" aria-labelledby="seed-tab" tabindex="0" hidden><span class="step-number" aria-hidden="true">03</span><h2 id="seed-heading">Plant a seed</h2>
 <p>Tell us what it does and what it needs. The farmhands will check your seed before it joins the field.</p>
 <p id="seed-state" class="card-state" role="status">Unlocks when your account and Tiiny proof are done.</p>
-<form id="seed-form"><fieldset id="seed-fields" disabled><legend>Your seed</legend>
-<label for="seed-name">Name</label><input id="seed-name" name="name" required maxlength="120">
-<label for="seed-id">Seed ID</label><input id="seed-id" name="id" pattern="[a-z][a-z0-9]*(-[a-z0-9]+)*" placeholder="my-little-app" required maxlength="80">
-<label for="version">Version</label><input id="version" name="version" pattern="(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)" value="0.1.0" required>
-<label for="pitch">One-line pitch</label><input id="pitch" name="pitch" required maxlength="240">
-<label for="description">What does it do?</label><textarea id="description" name="description" rows="4" required maxlength="12000"></textarea>
-<label for="license">License</label><input id="license" name="license" placeholder="MIT" required maxlength="100">
-<label for="repo">Source repository URL (optional)</label><input id="repo" name="repo" type="url" placeholder="https://…">
-<label for="homepage">Home page (optional)</label><input id="homepage" name="homepage" type="url" placeholder="https://…">
-<label for="releaseUrl">Direct release URL</label><input id="releaseUrl" name="releaseUrl" type="url" placeholder="https://…/release.tar.gz">
-<p class="fine">Either a direct HTTPS tar.gz link without redirects, or an upload below. The archive must include the source for review.</p>
-<label for="archive">Or upload a tar.gz (up to 50 MB)</label><input id="archive" name="archive" type="file" accept=".tar.gz,application/gzip">
-<label for="permissions">What it asks for</label><select id="permissions" name="permissionChoices" multiple size="4" aria-describedby="permission-help"><option value="microphone">Microphone</option><option value="files">Files</option><option value="network">Network</option><option value="device">Tiiny device</option></select>
-<p class="fine" id="permission-help">Choose all access your app uses. Leave empty if it asks for nothing. Use Control or Command to select several.</p>
-<details><summary>What it needs &amp; how it starts</summary>
-<label for="command">Start command (empty for a library)</label><input id="command" name="command" placeholder="python -m my_app">
-<label for="python">Python version (optional)</label><input id="python" name="python" placeholder="3.11" pattern="[0-9]+\.[0-9]+">
-<label for="ports">Local ports, separated by commas</label><input id="ports" name="ports" placeholder="8080">
-<label for="models">Tiiny models, separated by commas</label><input id="models" name="models" placeholder="qwen3:8b">
-<label for="npuUnits">NPU units</label><input id="npuUnits" name="npuUnits" type="number" min="0" step="1" value="0">
-<label for="tags">Tags, separated by commas</label><input id="tags" name="tags" placeholder="library, tools"><p class="fine">Include library if there is no start command.</p>
-<label for="health">HTTP health path (optional)</label><input id="health" name="health" placeholder="/health">
-<label class="check-label"><input name="selfcheck" type="checkbox" value="true"> Supports an offline --selfcheck</label></details>
-<button class="btn hay" type="submit">Send to the farmhands</button></fieldset></form>
+<form id="seed-form"><fieldset id="seed-fields" disabled><legend>Your seed</legend><div class="seed-form-grid">
+<div class="seed-field"><label for="seed-name">Name</label><input id="seed-name" name="name" required maxlength="120"></div>
+<div class="seed-field"><label for="seed-id">Seed ID</label><input id="seed-id" name="id" pattern="[a-z][a-z0-9]*(-[a-z0-9]+)*" placeholder="my-little-app" required maxlength="80"></div>
+<div class="seed-field"><label for="version">Version</label><input id="version" name="version" pattern="(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)" value="0.1.0" required></div>
+<div class="seed-field"><label for="pitch">One-line pitch</label><input id="pitch" name="pitch" required maxlength="240"></div>
+<div class="seed-field seed-wide"><label for="description">What does it do?</label><textarea id="description" name="description" rows="4" required maxlength="12000"></textarea></div>
+<div class="seed-field"><label for="license">License</label><input id="license" name="license" placeholder="MIT" required maxlength="100"></div>
+<div class="seed-field"><label for="repo">Source repository URL (optional)</label><input id="repo" name="repo" type="url" placeholder="https://…"></div>
+<div class="seed-field"><label for="homepage">Home page (optional)</label><input id="homepage" name="homepage" type="url" placeholder="https://…"></div>
+<div class="seed-field"><label for="releaseUrl">Direct release URL</label><input id="releaseUrl" name="releaseUrl" type="url" placeholder="https://…/release.tar.gz"></div>
+<p class="fine seed-wide">Either a direct HTTPS tar.gz link without redirects, or an upload below. The archive must include the source for review.</p>
+<div class="seed-field seed-wide"><label for="archive">Or upload a tar.gz (up to 50 MB)</label><input id="archive" name="archive" type="file" accept=".tar.gz,application/gzip"></div>
+<div class="seed-field seed-wide"><label for="permissions">What it asks for</label><select id="permissions" name="permissionChoices" multiple size="4" aria-describedby="permission-help"><option value="microphone">Microphone</option><option value="files">Files</option><option value="network">Network</option><option value="device">Tiiny device</option></select></div>
+<p class="fine seed-wide" id="permission-help">Choose all access your app uses. Leave empty if it asks for nothing. Use Control or Command to select several.</p>
+<details class="seed-wide"><summary>What it needs &amp; how it starts</summary><div class="seed-form-grid">
+<div class="seed-field"><label for="command">Start command (empty for a library)</label><input id="command" name="command" placeholder="python -m my_app"></div>
+<div class="seed-field"><label for="python">Python version (optional)</label><input id="python" name="python" placeholder="3.11" pattern="[0-9]+\.[0-9]+"></div>
+<div class="seed-field"><label for="ports">Local ports, separated by commas</label><input id="ports" name="ports" placeholder="8080"></div>
+<div class="seed-field"><label for="models">Tiiny models, separated by commas</label><input id="models" name="models" placeholder="qwen3:8b"></div>
+<div class="seed-field"><label for="npuUnits">NPU units</label><input id="npuUnits" name="npuUnits" type="number" min="0" step="1" value="0"></div>
+<div class="seed-field"><label for="tags">Tags, separated by commas</label><input id="tags" name="tags" placeholder="library, tools"><p class="fine">Include library if there is no start command.</p></div>
+<div class="seed-field"><label for="health">HTTP health path (optional)</label><input id="health" name="health" placeholder="/health"></div>
+<label class="check-label seed-wide"><input name="selfcheck" type="checkbox" value="true"> Supports an offline --selfcheck</label></div></details>
+<button class="btn hay seed-wide" type="submit">Send to the farmhands</button></div></fieldset></form>
 <a href="/seeds/mine/">My seeds and their checks</a></section></div>
 <section class="seed-notes"><h2>A little care before the field</h2><p>We check the label on the packet, weigh the archive, and make sure the checksum matches. Then we look for unsafe paths, secrets and access the app forgot to declare. If it has a selfcheck, CI runs it offline.</p>
 <p>A green check is a start. A farmhand still reads the source and reviews the seed before merging it. Verified means the farmhands ran it and read it; it is never awarded just for filling in this form.</p>

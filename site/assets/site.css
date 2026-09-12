@@ -36,7 +36,7 @@ footer{border-top:1px solid var(--fence);margin-top:48px;padding:26px 0 40px;dis
 .skip{position:absolute;left:24px;top:-100px;background:var(--hay);color:var(--night);z-index:2;padding:10px}.skip:focus{top:8px}
 @media(min-width:701px){.hero .copy{position:absolute;left:0;right:0;bottom:0;padding:36px}.seeds{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr)}}
 .eyebrow{display:block;color:var(--hay);font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;margin-bottom:10px}
-.seed-intro>.lede{font-size:19px;margin-top:12px}.seed-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;align-items:start;margin-top:28px}
+.seed-intro>.lede{font-size:19px;margin-top:12px}.seed-cards{margin-top:18px}
 .seed-card{border:1px solid var(--fence);border-radius:20px;background:linear-gradient(160deg,var(--soil),var(--night));padding:22px;box-shadow:0 12px 30px rgba(0,0,0,.15)}
 .seed-card h2{font-size:25px}.step-number{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;background:var(--fence);color:var(--hay);border-radius:50%;font-weight:700;margin-bottom:18px}
 .card-state{border-left:3px solid var(--hay);padding:8px 12px;background:var(--soil);font-size:14px}.card-state.done{border-color:var(--mint);color:var(--mint)}
@@ -49,4 +49,10 @@ button:disabled{cursor:wait;opacity:.65}.seed-card fieldset{border:0;padding:0;m
 .seed-card .check-label{display:flex;gap:10px;align-items:center}.seed-card input[type=checkbox]{width:24px;min-height:44px;flex-shrink:0}
 .seed-notes{max-width:75ch}.seed-faq details{border-bottom:1px solid var(--fence);padding:10px 0}.seed-faq summary,.seed-card summary{padding:10px 0;color:var(--hay);font-weight:700}
 #farm-status:not(:empty){padding:14px 18px;border:1px solid var(--fence);border-radius:12px;background:var(--soil)}[hidden]{display:none!important}
-@media(max-width:900px){.seed-cards{grid-template-columns:minmax(0,1fr)}.seed-card{padding:22px}.seed-card h2{font-size:28px}}
+.seed-tabs{display:flex;gap:8px;margin-top:28px}
+.seed-tabs [role=tab]{flex:1;border:1px solid var(--fence);border-radius:12px;padding:12px;background:var(--soil);color:var(--ink);font:700 16px/1.55 Nunito,system-ui,sans-serif}
+.seed-tabs .done{color:var(--mute)}.seed-tabs .done::after{content:" ✓";font-size:12px}.seed-tabs .locked{opacity:.5}
+.seed-tabs [aria-selected=true]{background:var(--hay);color:var(--night);opacity:1}
+.seed-card:focus-visible{outline:3px solid var(--hay);outline-offset:3px}
+.seed-form-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:8px 18px}.seed-wide{grid-column:1/-1}
+@media(min-width:900px){.seed-form-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}

@@ -242,8 +242,34 @@ class SiteTests(unittest.TestCase):
             if tag in ('input', 'textarea', 'select') and attrs.get('type') != 'checkbox':
                 self.assertIn(attrs['id'], labels)
         css = (self.output / 'assets/site.css').read_text()
-        self.assertIn('grid-template-columns:repeat(3,minmax(0,1fr))', css)
-        self.assertIn('@media(max-width:900px){.seed-cards{grid-template-columns:minmax(0,1fr)}', css)
+        self.assertNotIn('grid-template-columns:repeat(3,minmax(0,1fr))', css)
+        self.assertIn('.seed-form-grid{display:grid;grid-template-columns:minmax(0,1fr)', css)
+        self.assertIn('@media(min-width:900px){.seed-form-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}', css)
+        self.assertIn('.seed-wide{grid-column:1/-1}', css)
+        html = (self.output / 'seeds/index.html').read_text()
+        for field in ('description', 'archive', 'permissions'):
+            self.assertIn(f'<div class="seed-field seed-wide"><label for="{field}">', html)
+        self.assertIn('<details class="seed-wide">', html)
+
+    def test_seed_tabs_control_three_panels_with_only_first_visible(self):
+        doc = Document((self.output / 'seeds/index.html').read_text())
+        tablists = [attrs for tag, attrs in doc.tags if attrs.get('role') == 'tablist']
+        tabs = [(tag, attrs) for tag, attrs in doc.tags if attrs.get('role') == 'tab']
+        panels = [attrs for tag, attrs in doc.tags if attrs.get('role') == 'tabpanel']
+        self.assertEqual(len(tablists), 1)
+        self.assertEqual(len(tabs), 3)
+        self.assertEqual(len(panels), 3)
+        for index, ((tag, tab), panel) in enumerate(zip(tabs, panels)):
+            self.assertEqual(tag, 'button')
+            self.assertEqual(tab['type'], 'button')
+            self.assertEqual(tab['aria-controls'], panel['id'])
+            self.assertEqual(panel['aria-labelledby'], tab['id'])
+            self.assertEqual(tab['aria-selected'], 'true' if index == 0 else 'false')
+            self.assertEqual(tab['tabindex'], '0' if index == 0 else '-1')
+            self.assertEqual('hidden' in panel, index != 0)
+            self.assertNotIn('disabled', tab)
+        for label in ('01 Your farm account', '02 Prove your Tiiny', '03 Plant a seed'):
+            self.assertIn(label, doc.text)
 
     def test_cli_works_outside_repository(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -2,6 +2,29 @@ const byId = id => document.getElementById(id);
 const status = message => { byId('farm-status').textContent = message; };
 let currentUser = null;
 let codeEmail = '';
+const tabs = [...document.querySelectorAll('.seed-tabs [role=tab]')];
+function showStep(index, focus = false) {
+  tabs.forEach((tab, position) => {
+    const selected = position === index;
+    tab.setAttribute('aria-selected', String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+    byId(tab.getAttribute('aria-controls')).hidden = !selected;
+    if (selected && focus) tab.focus();
+  });
+}
+tabs.forEach((tab, index) => {
+  tab.addEventListener('click', () => showStep(index));
+  tab.addEventListener('keydown', event => {
+    let next;
+    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+    else if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = tabs.length - 1;
+    else return;
+    event.preventDefault();
+    showStep(next, true);
+  });
+});
 async function api(path, data) {
   const response = await fetch(path, { credentials: 'same-origin', cache: 'no-store',
     ...(data === undefined ? {} : { method: 'POST',
@@ -24,7 +47,7 @@ function challenge(value) {
   byId('bio-challenge').hidden = !value;
   if (value) { byId('bio-code').textContent = value.code; byId('bio-expiry').textContent = 'Expires ' + new Date(value.expires).toLocaleString(); }
 }
-async function refreshAccount() {
+async function refreshAccount(step, focus = false) {
   const { user } = await api('/api/me'); currentUser = user;
   if (!byId('account-state')) return;
   const proof = user?.tiinyverse;
@@ -43,6 +66,11 @@ async function refreshAccount() {
   if (proof) { const anchor = document.createElement('a'); anchor.href = proof.profileUrl; anchor.textContent = 'Your verified profile'; byId('proof-state').append(anchor); }
   byId('seed-state').textContent = proof ? 'Your plot is ready. Tell us about your seed.' : 'Unlocks when your account and Tiiny proof are done.';
   challenge(!proof && user?.tiinyverseChallenge?.expires > Date.now() ? user.tiinyverseChallenge : null);
+  tabs.forEach((tab, index) => {
+    tab.classList.toggle('done', index === 0 ? !!user : index === 1 && !!proof);
+    tab.classList.toggle('locked', index === 1 ? !user : index === 2 && !proof);
+  });
+  showStep(step ?? (proof ? 2 : user ? 1 : 0), focus);
 }
 onSubmit('email-start', async () => {
   codeEmail = byId('email').value.trim();
@@ -51,17 +79,17 @@ onSubmit('email-start', async () => {
 });
 onSubmit('email-verify', async () => {
   await api('/api/auth/verify', { email: codeEmail || byId('email').value.trim(), code: byId('code').value });
-  byId('code').value = ''; await refreshAccount(); status('Welcome to the farm.');
+  byId('code').value = ''; await refreshAccount(1, true); status('Welcome to the farm.');
 });
 byId('logout')?.addEventListener('click', event => working(event.currentTarget, async () => {
-  await api('/api/auth/logout', {}); await refreshAccount(); status('You are signed out.');
+  await api('/api/auth/logout', {}); await refreshAccount(0, true); status('You are signed out.');
 }));
 onSubmit('tiiny-link', async () => {
   const result = await api('/api/tiinyverse/link', { profileUrl: byId('profileUrl').value.trim() });
   challenge(result); status(result.instruction);
 });
 byId('tiiny-verify')?.addEventListener('click', event => working(event.currentTarget, async () => {
-  await api('/api/tiinyverse/verify', {}); await refreshAccount(); status('Your Tiiny proof is done. Time to plant.');
+  await api('/api/tiinyverse/verify', {}); await refreshAccount(2, true); status('Your Tiiny proof is done. Time to plant.');
 }));
 onSubmit('seed-form', async () => {
   const form = new FormData(byId('seed-form'));
