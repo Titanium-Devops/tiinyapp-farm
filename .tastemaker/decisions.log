@@ -3,3 +3,5 @@
 2026-09-12T15:37Z kept surface=catalog axis=layout choice="Shelf tiles with search and category chips on /catalog/" reason="Jason: full catalog page that looks like the shelf, filter by categories and search"
 2026-09-12T15:37Z kept surface=app-page axis=layout choice="Shelf app page: header band, icon over it, 1fr + 300 rail" reason="Jason: '100% aligned with the app page'"
 2026-09-12T15:37Z rejected surface=catalog axis=layout choice="Ledger alone / Editorial alone" reason="merged into featured + ledger"
+2026-09-12T15:55Z kept surface=account-flows axis=layout choice="Sign in, Verify, Submit 1+2, Done, Profile with Public switch, Need help modal (web/terminal/AI paths)" reason="Jason: 'you have a go on all of this'; page 1 takes page 2's feel, preview moves to Done; Public on by default; all four featured"
+2026-09-12T15:55Z kept surface=submit axis=interaction choice="Maker API tokens + farm publish + /docs/agents so an AI assistant can submit for a maker" reason="Jason: '100% make it so'"
