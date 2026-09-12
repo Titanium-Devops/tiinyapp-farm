@@ -15,7 +15,7 @@ export function commentCard(comment, remove) {
     avatar.width = 40; avatar.height = 40; avatar.loading = 'lazy';
     heading.append(avatar);
   }
-  const name = node(author.handle ? 'a' : 'span', author.name || 'A farm maker');
+  const name = node(author.handle ? 'a' : 'span', author.name || 'A maker');
   if (author.handle) name.href = '/makers/' + encodeURIComponent(author.handle) + '/';
   heading.append(name);
   const at = new Date(comment.at);
@@ -42,7 +42,7 @@ if (root) {
   async function request(path, options = {}) {
     const response = await fetch(endpoint + path, { credentials: 'same-origin', cache: 'no-store', ...options });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'The farm could not finish that request.');
+    if (!response.ok) throw new Error(data.error || 'The request could not be completed.');
     return data;
   }
   const post = data => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
@@ -52,7 +52,7 @@ if (root) {
     byId('seed-thumb').setAttribute('aria-pressed', String(social.mine));
     const comments = byId('seed-comments'); comments.replaceChildren();
     for (const comment of social.comments) comments.append(commentCard(comment, remove));
-    if (!social.comments.length) comments.append(node('p', 'No comments yet. A little encouragement goes a long way.'));
+    if (!social.comments.length) comments.append(node('p', 'No comments yet.'));
   }
   function controls() {
     byId('seed-thumb').disabled = busy || !user;
@@ -61,7 +61,7 @@ if (root) {
   }
   async function mutate(action, success) {
     if (busy) return;
-    busy = true; controls(); status('One moment, tending to that…');
+    busy = true; controls(); status('Saving…');
     let saved = false;
     try {
       await action(); saved = true;
@@ -73,7 +73,7 @@ if (root) {
   function remove(id) {
     return mutate(() => request('/comments/' + encodeURIComponent(id), { method: 'DELETE' }), 'Comment removed.');
   }
-  byId('seed-thumb').addEventListener('click', () => mutate(() => request('/thumb', post({})), 'Your encouragement is up to date.'));
+  byId('seed-thumb').addEventListener('click', () => mutate(() => request('/thumb', post({})), 'Your thumbs up is saved.'));
   byId('comment-form').addEventListener('submit', event => {
     event.preventDefault();
     const text = byId('comment-text').value.trim();
@@ -81,15 +81,15 @@ if (root) {
     mutate(async () => {
       await request('/comments', post({ text }));
       byId('comment-text').value = '';
-    }, 'Your comment is planted.');
+    }, 'Your comment is posted.');
   });
   (async () => {
     let sessionError = false;
     try { user = await refreshSession(); } catch { sessionError = true; }
     byId('comment-form').hidden = !user?.tiinyverse;
     byId('social-signin').hidden = !!user?.tiinyverse;
-    if (user && !user.tiinyverse) byId('social-signin').querySelector('a').textContent = 'Prove your Tiiny on the seeds page to leave a comment.';
+    if (user && !user.tiinyverse) byId('social-signin').querySelector('a').textContent = 'Verify you own a Tiiny on Submit an app to leave a comment.';
     await refresh(); controls();
     status(sessionError ? 'Comments loaded. Your sign-in could not be checked; refresh to try again.' : '');
-  })().catch(error => status(error.message || 'The field could not load. Refresh to try again.'));
+  })().catch(error => status(error.message || 'Comments could not load. Refresh to try again.'));
 }

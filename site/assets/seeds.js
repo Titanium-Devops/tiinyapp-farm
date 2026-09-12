@@ -9,9 +9,9 @@ let originalCommand = '';
 async function prefillSeed() {
   if (!updateId || originalSeed || !currentUser?.tiinyverse) return;
   byId('seed-fields').disabled = true;
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(updateId)) throw new Error('Invalid seed ID.');
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(updateId)) throw new Error('Invalid app ID.');
   const { seeds } = await api('/api/seeds/mine');
-  if (!seeds.some(seed => seed.id === updateId && seed.canUpdate)) throw new Error('Only the maker can update this seed.');
+  if (!seeds.some(seed => seed.id === updateId && seed.canUpdate)) throw new Error('Only the maker can update this app.');
   const seed = await api('/manifests/' + encodeURIComponent(updateId) + '.json');
   const form = byId('seed-form');
   const values = {
@@ -30,7 +30,7 @@ async function prefillSeed() {
   originalCommand = values.command;
   originalSeed = seed;
   byId('release-heading').textContent = seed.release ? 'Replace your release (optional)' : 'Add your first release';
-  byId('release-help').textContent = seed.release ? 'Leave these fields empty to keep the current release. A replacement needs a higher version.' : 'Leave these fields empty to keep your seed sprouting.';
+  byId('release-help').textContent = seed.release ? 'Leave these fields empty to keep the current release. A replacement needs a higher version.' : 'Leave these fields empty to submit without a release.';
   byId('seed-state').textContent = 'Updating ' + seed.name + '. Existing images stay unless you upload replacements.';
   byId('seed-fields').disabled = false;
   showStep(2);
@@ -63,13 +63,13 @@ async function api(path, data, method = 'POST') {
     ...(data === undefined ? {} : { method,
       ...(data instanceof FormData ? { body: data } : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }) }) });
   const result = await response.json();
-  if (!response.ok) throw new Error(result.error || 'The farm could not finish that request.');
+  if (!response.ok) throw new Error(result.error || 'The request could not be completed.');
   return result;
 }
 async function working(control, action) {
   const button = control.tagName === 'BUTTON' ? control : control.querySelector('button[type=submit]');
   if (button) button.disabled = true;
-  status('One moment, tending to that…');
+  status('Saving…');
   const under = control.id === 'seed-form' ? byId('seed-error') : null;
   if (under) { under.hidden = true; under.textContent = ''; }
   try { await action(); } catch (error) { const text = error.message || 'Connection interrupted. Please try again.'; status(text); if (under) { under.textContent = text; under.hidden = false; markField(text); under.scrollIntoView({ block: 'nearest' }); } }
@@ -86,7 +86,7 @@ async function refreshAccount(step, focus = false) {
   const user = await refreshSession(); currentUser = user;
   if (!byId('account-state')) return;
   const proof = user?.tiinyverse;
-  byId('account-state').textContent = user ? `Signed in${user.email ? ' as ' + user.email : ' with GitHub @' + user.github.login}.` : 'Start here. No password to remember.';
+  byId('account-state').textContent = user ? `Signed in${user.email ? ' as ' + user.email : ' with GitHub @' + user.github.login}.` : 'Sign in with an email code or GitHub.';
   byId('account-state').classList.toggle('done', !!user);
   byId('logout').hidden = !user;
   byId('account-farm').hidden = !user;
@@ -98,9 +98,9 @@ async function refreshAccount(step, focus = false) {
   byId('seed-fields').disabled = !proof;
   byId('proof-state').classList.toggle('done', !!proof);
   byId('seed-state').classList.toggle('done', !!proof);
-  byId('proof-state').textContent = proof ? `Verified: ${proof.name}. ` : user ? 'Paste your public TiinyVerse profile below.' : 'First, sign in to your farm account.';
+  byId('proof-state').textContent = proof ? `Verified: ${proof.name}. ` : user ? 'Paste your public TiinyVerse profile below.' : 'First, sign in to your account.';
   if (proof) { const anchor = document.createElement('a'); anchor.href = proof.profileUrl; anchor.textContent = 'Your verified profile'; byId('proof-state').append(anchor); }
-  byId('seed-state').textContent = proof ? 'Your plot is ready. Tell us about your seed.' : 'Unlocks when your account and Tiiny proof are done.';
+  byId('seed-state').textContent = proof ? 'Enter your app details below.' : 'Sign in and verify you own a Tiiny to submit an app.';
   challenge(!proof && user?.tiinyverseChallenge?.expires > Date.now() ? user.tiinyverseChallenge : null);
   tabs.forEach((tab, index) => {
     tab.classList.toggle('done', index === 0 ? !!user : index === 1 && !!proof);
@@ -112,11 +112,11 @@ async function refreshAccount(step, focus = false) {
 onSubmit('email-start', async () => {
   codeEmail = byId('email').value.trim();
   await api('/api/auth/start', { email: codeEmail });
-  status('Your code is on its way. Check your inbox.'); byId('code').focus();
+  status('Check your email for the sign-in code.'); byId('code').focus();
 });
 onSubmit('email-verify', async () => {
   await api('/api/auth/verify', { email: codeEmail || byId('email').value.trim(), code: byId('code').value });
-  byId('code').value = ''; await refreshAccount(1, true); status('Welcome to the farm.');
+  byId('code').value = ''; await refreshAccount(1, true); status('You are signed in.');
 });
 byId('logout')?.addEventListener('click', event => working(event.currentTarget, async () => {
   await api('/api/auth/logout', {}); await refreshAccount(0, true); status('You are signed out.');
@@ -126,11 +126,11 @@ onSubmit('tiiny-link', async () => {
   challenge(result); status(result.instruction);
 });
 byId('tiiny-verify')?.addEventListener('click', event => working(event.currentTarget, async () => {
-  await api('/api/tiinyverse/verify', {}); await refreshAccount(2, true); status('Your Tiiny proof is done. Time to plant.');
+  await api('/api/tiinyverse/verify', {}); await refreshAccount(2, true); status('Your TiinyVerse profile is verified. You can submit your app.');
 }));
 onSubmit('seed-form', async () => {
   clearMarks();
-  if (updateId && !originalSeed) throw new Error('Load your seed before updating it.');
+  if (updateId && !originalSeed) throw new Error('Load your app before updating it.');
   const form = new FormData(byId('seed-form'));
   if (originalSeed) {
     form.set('screenshots', JSON.stringify(originalSeed.screenshots));
@@ -152,16 +152,16 @@ onSubmit('seed-form', async () => {
   for (const [kind, files] of Object.entries(groups)) {
     const urls = [];
     for (const file of files) {
-      status('Uploading your seed images…');
+      status('Uploading your app images…');
       const response = await fetch('/api/media', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': file.type }, body: file });
       const uploaded = await response.json();
-      if (!response.ok) throw new Error(uploaded.error || 'Could not upload your seed image.');
+      if (!response.ok) throw new Error(uploaded.error || 'Could not upload your app image.');
       urls.push(uploaded.url);
     }
     if (urls.length) media[kind] = kind === 'gallery' ? urls : urls[0];
   }
   form.set('media', JSON.stringify(media));
-  status('Sending your seed to the farmhands…');
+  status('Submitting your app for maintainer review…');
   const result = await api(updateId ? '/api/seeds/' + encodeURIComponent(updateId) : '/api/seeds', form, updateId ? 'PUT' : 'POST');
   if (result.warning) { status(result.warning); return; }
   try { localStorage.removeItem(DRAFT); } catch {}
@@ -191,7 +191,7 @@ const seedForm = byId('seed-form');
 if (seedForm) {
   seedForm.addEventListener('invalid', event => {
     const input = event.target; event.preventDefault();
-    if (!input.hasAttribute('aria-invalid')) flag(input, input.validity.valueMissing ? 'This one is needed.' : (input.validationMessage || 'Check this value.'));
+    if (!input.hasAttribute('aria-invalid')) flag(input, input.validity.valueMissing ? 'This field is required.' : (input.validationMessage || 'Check this value.'));
     const first = seedForm.querySelector('[aria-invalid]'); if (first === input) { input.scrollIntoView({ block: 'center' }); input.focus({ preventScroll: true }); }
   }, true);
 }

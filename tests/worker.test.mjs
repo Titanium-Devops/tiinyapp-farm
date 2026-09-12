@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { gzipSync } from 'node:zlib';
+import { readFile } from 'node:fs/promises';
+import { runInNewContext } from 'node:vm';
 import { spawnSync } from 'node:child_process';
 import { createApp, sha256, boundedBody } from '../worker/index.mjs';
 import { proofRoutes } from '../worker/proof.mjs';
@@ -510,7 +512,7 @@ test('maker pages carry sprout identity, escaped share metadata and accessible s
   assert.match(html, /rel="manifest" href="\/site.webmanifest"/);
   assert.match(html, /name="theme-color" content="#090D14"/);
   assert.match(html, /class="brand-mark" src="\/brand\/icon-512.png" width="36" height="36"/);
-  assert.match(html, /property="og:title" content="Aster &amp; Fern \| tiinyapp.farm"/);
+  assert.match(html, /property="og:title" content="Apps by Aster &amp; Fern \| tiinyapp.farm"/);
   assert.ok(html.includes(`property="og:url" content="${ORIGIN}/makers/${user.handle}/"`));
   assert.ok(html.includes(`property="og:image" content="${ORIGIN}/makers/${user.handle}/card.png"`));
   assert.match(html, /property="og:image:width" content="1200"/);
@@ -518,6 +520,10 @@ test('maker pages carry sprout identity, escaped share metadata and accessible s
   assert.match(html, /name="twitter:card" content="summary_large_image"/);
   assert.match(html, /property="og:description" content="A &quot;tiny&quot; garden &lt;with&gt; friends &amp; seeds"/);
   assert.match(html, /data-share-text="A &quot;tiny&quot; garden &lt;with&gt; friends &amp; seeds"/);
+  assert.match(html, /<h1>Apps by Aster &amp; Fern<\/h1>/);
+  assert.match(html, />Your apps<\/a>/);
+  assert.match(html, /No apps in the catalog yet\./);
+  assert.doesNotMatch(html, /Bring your seeds|Seeds in the field/);
   assert.match(html, /src="\/assets\/share.js"/);
   assert.match(html, /<button[^>]*type="button"[^>]*data-share /);
   assert.match(html, /data-share-status role="status" aria-live="polite"/);
@@ -651,4 +657,20 @@ test('pending upload updates keep distinct immutable archives and include bytes 
   // A failed new update cannot remove either earlier PR's source archive.
   assert.equal((await put(seedForm({ upload: true, version: '0.2.0', pitch: 'Another review' }))).status, 502);
   assert.equal(f.objects.size, 2);
+});
+
+
+test('app review status uses literal labels and preserves pending update status', async () => {
+  const source = await readFile(new URL('../site/assets/farm.js', import.meta.url), 'utf8');
+  const context = { document: { getElementById: () => ({ addEventListener() {} }) }, refreshSession: () => new Promise(() => {}) };
+  runInNewContext(source.replace(/^import .*;$/gm, ''), context);
+  const { appStatus } = context;
+  for (const state of ['merged', 'published', 'sprouting']) assert.equal(appStatus({ state }), 'In the catalog');
+  assert.equal(appStatus({ state: 'awaiting review', checks: [] }), 'Checks running');
+  assert.equal(appStatus({ state: 'awaiting review', checks: [{ name: 'CI', status: 'queued' }] }), 'Checks running');
+  assert.equal(appStatus({ state: 'awaiting review', checks: [{ name: 'CI', status: 'success' }] }), 'Waiting for a maintainer');
+  assert.equal(appStatus({ state: 'awaiting review', checks: [{ name: 'CI', status: 'timed_out' }] }), 'Checks failed: CI (timed out)');
+  assert.equal(appStatus({ state: 'awaiting review', url: '/apps/existing/', checks: [{ name: 'CI', status: 'failure' }] }), 'Checks failed: CI (failure)');
+  assert.equal(appStatus({ state: 'awaiting review', unavailable: true }), 'Check status unavailable');
+  assert.equal(appStatus({ state: 'closed' }), 'Closed without merging');
 });

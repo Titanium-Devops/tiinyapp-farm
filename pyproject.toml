@@ -7,12 +7,14 @@ name = "tiinyapp-farm"
 version = "0.1.0"
 description = "Install and run community apps beside your Tiiny AI Pocket Lab"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 dependencies = []
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
   "Operating System :: POSIX",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: MacOS",
 ]
 
 [project.urls]

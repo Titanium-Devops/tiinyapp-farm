@@ -87,7 +87,7 @@ class SiteTests(unittest.TestCase):
                 self.assertIn(str(app['requires']['device']['npuUnits']), visible)
                 if 'health' in app:
                     self.assertIn(app['health'], visible)
-                self.assertIn('Not verified by the farmhands.', visible)
+                self.assertIn('Not verified by a maintainer.', visible)
 
     def test_sprouting_seed_keeps_story_and_social_without_install_or_release(self):
         app = copy.deepcopy(self.apps[0])
@@ -95,11 +95,11 @@ class SiteTests(unittest.TestCase):
         page = SITE['app_page'](app, TODAY)
         plot = SITE['plot'](app, TODAY)
         for html in (page, plot):
-            self.assertIn('>Sprouting<', html)
+            self.assertIn('>No release yet<', html)
             self.assertIn(app['pitch'], ' '.join(Document(html).text))
             self.assertNotIn('farm install', html)
-        self.assertIn('No release yet. Follow the maker for the first planting.', page)
-        self.assertNotIn('<h2>Release</h2>', page)
+        self.assertIn('No release yet. This app cannot be installed.', page)
+        self.assertIn('<h2>Release</h2><p>No release yet.</p>', page)
         self.assertNotIn('SHA-256', page)
         self.assertIn('seed-comments', page)
         self.assertIn(app['author']['url'], Document(page).references)
@@ -386,8 +386,8 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
     def test_seed_cards_read_signed_out_and_lock_proof_and_planting(self):
         doc = Document((self.output / 'seeds/index.html').read_text())
         visible = ' '.join(doc.text)
-        for phrase in ('Your farm account', 'Prove your Tiiny', 'Plant a seed',
-                       'Do I need GitHub?', 'No. Use your email', 'paste this code anywhere in the bio'):
+        for phrase in ('Sign in', 'Verify you own a Tiiny', 'Submit your app',
+                       'Do I need GitHub?', 'No. Sign in with your email', 'paste this code anywhere in the bio'):
             self.assertIn(phrase, visible)
         cards = [attrs for tag, attrs in doc.tags if attrs.get('class') == 'seed-card']
         self.assertEqual(len(cards), 3)
@@ -512,8 +512,40 @@ assert.equal(anonymous.children[0].children[0].tag, 'span');
             self.assertEqual(tab['tabindex'], '0' if index == 0 else '-1')
             self.assertEqual('hidden' in panel, index != 0)
             self.assertNotIn('disabled', tab)
-        for label in ('01 Your farm account', '02 Prove your Tiiny', '03 Plant a seed'):
+        for label in ('1 Sign in', '2 Verify you own a Tiiny', '3 Submit your app'):
             self.assertIn(label, doc.text)
+
+    def test_literal_instructions_and_app_section_order(self):
+        install = ' '.join(Document(SITE['steps']()).text)
+        for phrase in ('Python 3.9 or newer', 'macOS, Linux and Windows',
+                       'pip install tiinyapp-farm', 'farm device',
+                       'http://openai.api.tiiny/v1', 'http://<your-tiiny-ip>/v1',
+                       'TiinyOS > Settings > API Key', '~/.tiinyapps/device.json',
+                       'farm install <app-id>', 'farm start <app-id>',
+                       'farm list', 'farm stop <app-id>', 'farm update <app-id>',
+                       'farm remove <app-id>'):
+            self.assertIn(phrase, install)
+        submit = ''.join(Document(SITE['seeds']()).text)
+        self.assertIn('Paste the URL of your TiinyVerse profile. We give you a short code. '
+                      'Put that code anywhere in your TiinyVerse bio, save, then press Verify. '
+                      'We read your public profile once to confirm you own it (the same idea as '
+                      'a DNS TXT record). You can remove the code afterwards.', submit)
+        self.assertIn('This opens a pull request on the catalog; automated checks run, '
+                      'a maintainer reviews it, and it appears in the catalog when merged. '
+                      'Track it on Your apps.', submit)
+        for answer in re.findall(r'<details.*?<p>(.*?)</p></details>', SITE['seeds']()):
+            text = ''.join(Document(answer).text)
+            self.assertLessEqual(len(re.findall(r'[.!?](?:\s|$)', text)), 2)
+        for app in self.apps:
+            html = SITE['app_page'](app, TODAY)
+            headings = re.findall(r'<h2[^>]*>(.*?)</h2>', html)
+            # Media belongs to the description; the six primary sections stay ordered.
+            headings = [heading for heading in headings if heading not in ('Gallery', 'Video')]
+            self.assertEqual(headings, ['Description', 'Install', 'Requirements', 'Release', 'Maker', 'Comments'])
+        for path in self.output.rglob('*.html'):
+            visible = ' '.join(Document(path.read_text()).text)
+            self.assertNotRegex(visible, r'(?i)farmhand|\bsprouting\b|\bseeds?\b|My farm')
+            self.assertIn('Your apps', visible)
 
     def test_cli_works_outside_repository(self):
         with tempfile.TemporaryDirectory() as temp:

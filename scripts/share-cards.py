@@ -19,8 +19,10 @@ def font(source, family, size):
         path = source / 'site/fonts' / ('DejaVuSerif-Bold.ttf' if family == 'Fraunces' else 'DejaVuSans.ttf')
     face = ImageFont.truetype(str(path), size)
     if family == 'Fraunces':  # variable font: pick the Bold instance for headings
-        try: face.set_variation_by_name('Bold')
-        except (OSError, AttributeError): pass
+        try:
+            face.set_variation_by_name('Bold')
+        except (OSError, AttributeError):
+            pass
     return face
 
 
@@ -105,12 +107,12 @@ def render_card(source, target, *, name, pitch, maker, media=None, avatar=None, 
         draw.text((644, y), line, font=body, fill='#9AA7B4')
         y += 36
     if sprouting:
-        draw.text((644, y + 4), 'Sprouting', font=small, fill='#C5AF7D')
+        draw.text((644, y + 4), 'No release yet', font=small, fill='#C5AF7D')
     portrait = ImageOps.fit(picture(source, avatar) or sprout, (52, 52), method=Image.Resampling.LANCZOS)
     circle = Image.new('L', (52, 52))
     ImageDraw.Draw(circle).ellipse((0, 0, 51, 51), fill=255)
     canvas.paste(portrait, (644, 462), circle)
-    attribution = wrapped(draw, 'Grown by ' + maker, small, 444, 1)[0]
+    attribution = wrapped(draw, 'Made by ' + maker, small, 444, 1)[0]
     draw.text((710, 459), attribution, font=small, fill=INK)
     if verified:
         draw.rounded_rectangle((710, 496, 845, 522), radius=13, fill='#1E2732')

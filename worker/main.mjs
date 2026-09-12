@@ -52,11 +52,11 @@ export default {
       } });
     }
     if (url.pathname.startsWith('/seeds-files/')) {
-      if (!['GET', 'HEAD'].includes(request.method)) return json({ error: 'Use GET or HEAD for seed files.' }, 405);
+      if (!['GET', 'HEAD'].includes(request.method)) return json({ error: 'Use GET or HEAD for app files.' }, 405);
       const path = url.pathname.slice('/seeds-files/'.length);
-      if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*\/(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\/[a-zA-Z0-9][a-zA-Z0-9._-]*\.tar\.gz$/.test(path)) return json({ error: 'That seed file does not exist.' }, 404);
+      if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*\/(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\/[a-zA-Z0-9][a-zA-Z0-9._-]*\.tar\.gz$/.test(path)) return json({ error: 'That app file does not exist.' }, 404);
       const object = await env.SEEDS.get('seeds/' + path);
-      if (!object) return json({ error: 'That seed file does not exist.' }, 404);
+      if (!object) return json({ error: 'That app file does not exist.' }, 404);
       return new Response(request.method === 'HEAD' ? null : object.body, { headers: {
         'Content-Type': 'application/gzip', 'Content-Length': String(object.size),
         'Content-Disposition': `attachment; filename="${path.split('/').pop()}"`,

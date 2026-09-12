@@ -10,9 +10,9 @@ export async function socialRoutes(ctx) {
   if (!allowed) fail(405, 'That action does not use this method.');
   // Only seeds in the deployed catalog have a public conversation.
   const response = await env.ASSETS.fetch(new Request(`https://tiinyapp.farm/manifests/${seedId}.json`));
-  if (!response.ok) fail(404, 'That seed is not in the field.');
-  let manifest; try { manifest = await response.json(); } catch { fail(404, 'That seed is not in the field.'); }
-  if (manifest.id !== seedId) fail(404, 'That seed is not in the field.');
+  if (!response.ok) fail(404, 'That app is not in the catalog.');
+  let manifest; try { manifest = await response.json(); } catch { fail(404, 'That app is not in the catalog.'); }
+  if (manifest.id !== seedId) fail(404, 'That app is not in the catalog.');
   const key = 'social:' + seedId, social = await get(key) || { thumbs: [], comments: [] };
   const user = action === 'social' ? await currentUser() : await requireUser();
   const admins = new Set((env.FARM_ADMINS || '').split(',').map(id => id.trim()).filter(Boolean));
@@ -33,12 +33,12 @@ export async function socialRoutes(ctx) {
     if (index < 0) social.thumbs.push(user.id);
     else social.thumbs.splice(index, 1);
   } else if (request.method === 'POST') {
-    if (!user.tiinyverse) fail(403, 'Prove your Tiiny before leaving a comment.');
+    if (!user.tiinyverse) fail(403, 'Verify you own a Tiiny before leaving a comment.');
     const input = await bodyJSON(request);
     if (typeof input.text !== 'string' || !input.text.trim() || [...input.text].length > 1000) fail(400, 'Write a comment of 1 to 1000 characters.');
     const rateKey = 'comment-rate:' + user.id;
     const recent = (await get(rateKey) || []).filter(time => time > now() - 3600000);
-    if (recent.length >= 5) fail(429, 'Five comments per hour; give the field a little time.');
+    if (recent.length >= 5) fail(429, 'You can post five comments per hour. Please try again later.');
     // Keep rate history separate so deleting comments cannot reset the limit.
     await put(rateKey, [...recent, now()]);
     social.comments.push({ id: random(16), userId: user.id, text: input.text.trim(), at: new Date(now()).toISOString() });

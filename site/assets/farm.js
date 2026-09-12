@@ -6,7 +6,7 @@ let currentUser;
 async function api(path, options = {}) {
   const response = await fetch(path, { credentials: 'same-origin', cache: 'no-store', ...options });
   const result = await response.json();
-  if (!response.ok) throw new Error(result.error || 'The farm could not finish that request.');
+  if (!response.ok) throw new Error(result.error || 'The request could not be completed.');
   return result;
 }
 const post = data => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
@@ -18,12 +18,12 @@ function element(tag, text) {
 function renderMaker(user) {
   currentUser = user;
   const proof = user.tiinyverse;
-  byId('maker-name').textContent = proof?.name || 'Your maker card';
-  byId('maker-handle').textContent = user.handle ? '@' + user.handle : 'Your handle grows after your Tiiny proof.';
-  byId('maker-bio').textContent = user.bio || 'Tell the field a little about yourself.';
+  byId('maker-name').textContent = proof?.name || 'Your profile';
+  byId('maker-handle').textContent = user.handle ? '@' + user.handle : 'Your handle is assigned after you verify your TiinyVerse profile.';
+  byId('maker-bio').textContent = user.bio || 'Add a bio to your public profile.';
   byId('bio').value = user.bio || '';
   byId('maker-fields').disabled = !proof;
-  byId('maker-proof').textContent = proof ? 'Verified Tiiny owner' : 'Finish your Tiiny proof on the seeds page to edit your maker card.';
+  byId('maker-proof').textContent = proof ? 'Verified Tiiny owner' : 'Verify you own a Tiiny on Submit an app to edit your profile.';
   byId('maker-avatar').hidden = !user.avatarKey;
   if (user.avatarKey) byId('maker-avatar').src = '/' + user.avatarKey;
   else byId('maker-avatar').removeAttribute('src');
@@ -40,35 +40,50 @@ function renderMaker(user) {
     }
   }
 }
+// Keep stored API states stable while presenting the current review status.
+function appStatus(app) {
+  if (['merged', 'published', 'sprouting'].includes(app.state)) return 'In the catalog';
+  if (app.state === 'closed') return 'Closed without merging';
+  if (app.state === 'submission failed') return 'App submission failed';
+  if (app.state === 'submission uncertain') return 'App submission needs maintainer assistance';
+  const checks = app.checks || [];
+  const failed = checks.filter(check => ['failure', 'error', 'timed_out', 'cancelled', 'action_required', 'startup_failure', 'stale'].includes(check.status));
+  if (failed.length) return 'Checks failed: ' + failed.map(check => `${check.name} (${check.status.replaceAll('_', ' ')})`).join(', ');
+  if (app.unavailable) return 'Check status unavailable';
+  if (!checks.length || checks.some(check => !['success', 'neutral', 'skipped'].includes(check.status))) return 'Checks running';
+  return 'Waiting for a maintainer';
+}
+
 async function refreshSeeds() {
   const { seeds } = await api('/api/seeds/mine');
   byId('my-seeds').replaceChildren();
   for (const seed of seeds) {
     const card = element('article', ''); card.className = 'plot';
-    card.append(element('h3', seed.name), element('p', `v${seed.version} · ${seed.state}`));
+    card.append(element('h3', seed.name), element('p', `v${seed.version} · ${appStatus(seed)}`));
+    if (seed.state === 'sprouting') card.append(element('p', 'No release yet'));
     const list = element('ul', '');
     for (const check of seed.checks || []) list.append(element('li', `${check.name}: ${check.status}`));
     const reviews = seed.reviews || [];
     card.append(list, element('p', reviews.length ? 'Review: ' + reviews.join(', ').toLowerCase().replaceAll('_', ' ') : 'No maintainer review yet.'));
     card.append(element('p', `${seed.thumbs || 0} thumbs up · ${seed.comments || 0} comments`));
     if (seed.unavailable) card.append(element('p', 'Live checks are temporarily unavailable. Refresh to try again.'));
-    else if (!(seed.checks || []).length) card.append(element('p', 'Checks have not reported yet.'));
-    if (seed.labelPending) card.append(element('p', 'Site label pending. Resubmit the same seed form to retry without creating another review.'));
+    else if (!(seed.checks || []).length && !['merged', 'published', 'sprouting'].includes(seed.state)) card.append(element('p', 'Checks have not reported yet.'));
+    if (seed.labelPending) card.append(element('p', 'Site label pending. Resubmit the same app form to retry without creating another review.'));
     if (seed.url && (seed.url.startsWith('/apps/') || seed.url.startsWith('https://'))) {
-      const anchor = element('a', 'Visit seed page'); anchor.href = seed.url; card.append(anchor);
+      const anchor = element('a', 'View app'); anchor.href = seed.url; card.append(anchor);
     }
     if (seed.canUpdate) {
       const update = element('a', 'Update'); update.className = 'btn hay';
       update.href = '/seeds/?update=' + encodeURIComponent(seed.id); card.append(update);
     }
-    if (!seed.url) card.append(element('p', 'Your seed page grows here once the seed joins the field.'));
+    if (!seed.url) card.append(element('p', 'Your app page is available after the pull request is merged.'));
     byId('my-seeds').append(card);
   }
-  status(seeds.length ? 'Your seeds are up to date.' : 'No seeds yet. Your first plot is waiting.');
+  status(seeds.length ? 'Your apps are up to date.' : 'No apps yet. Use Submit an app to add one.');
 }
 async function working(button, action) {
   button.disabled = true;
-  status('One moment, tending to that…');
+  status('Saving…');
   try { await action(); } catch (error) { status(error.message || 'Connection interrupted. Please try again.'); }
   finally { button.disabled = false; }
 }
@@ -94,7 +109,7 @@ byId('maker-form').addEventListener('submit', event => {
     await api('/api/maker', post({ bio, avatarKey, links }));
     byId('avatar').value = '';
     renderMaker(await refreshSession());
-    status('Your maker card is saved.');
+    status('Your profile is saved.');
   });
 });
 byId('remove-avatar').addEventListener('click', event => working(event.currentTarget, async () => {

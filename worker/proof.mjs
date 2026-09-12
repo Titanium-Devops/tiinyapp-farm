@@ -40,17 +40,17 @@ export async function proofRoutes(ctx) {
     const user = await requireUser(), input = await bodyJSON(request), id = profileId(input?.profileUrl);
     if (user.tiinyverse) fail(409, 'Your TiinyVerse profile is already verified.');
     const owner = await get('tvowner:' + id);
-    if (owner && owner !== user.id) fail(409, 'That TiinyVerse profile belongs to another farm account.');
+    if (owner && owner !== user.id) fail(409, 'That TiinyVerse profile belongs to another account.');
     const code = 'farm-' + random(3);
     user.tiinyverseChallenge = { profileUrl: 'https://www.tiinyverse.com/users/' + id, code, expires: now() + 86400000 };
     await put('user:' + user.id, user);
-    return json({ ...user.tiinyverseChallenge, instruction: 'Put this in your TiinyVerse bio, then press Verify.' });
+    return json({ ...user.tiinyverseChallenge, instruction: 'Put this code anywhere in your TiinyVerse bio, save your profile, then press Verify.' });
   }
   if (path === '/api/tiinyverse/verify' && request.method === 'POST') {
     const user = await requireUser(), challenge = user.tiinyverseChallenge;
     if (!challenge || challenge.expires <= now()) fail(400, 'Request a new bio code; the last one has expired.');
     const id = profileId(challenge.profileUrl), owner = await get('tvowner:' + id);
-    if (owner && owner !== user.id) fail(409, 'That TiinyVerse profile belongs to another farm account.');
+    if (owner && owner !== user.id) fail(409, 'That TiinyVerse profile belongs to another account.');
     const result = await remote(fetcher, challenge.profileUrl, { headers: { 'User-Agent': 'tiinyapp-farm-verifier/1.0' } });
     if (result.status !== 200) fail(422, 'The profile could not be read. Make sure it is public.');
     const html = result.text();

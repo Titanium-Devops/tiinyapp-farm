@@ -124,6 +124,7 @@ class FarmTests(unittest.TestCase):
         self.manifest = json.loads((ROOT / "manifests/titanium-tiiny-bot.json").read_text())
         self.manifest.update(id="fake-app", name="Fake app", version="0.1.0",
                              entry={"python": "fake", "args": []})
+        self.manifest["requires"]["python"] = "3.9"
         self.manifest["requires"]["ports"] = []
         self.manifest.pop("health", None)
         self.output = io.StringIO()
@@ -185,9 +186,9 @@ class FarmTests(unittest.TestCase):
         self.save_manifest()
         self.farm.list()
         self.assertIn('fake-app 0.1.0', self.output.getvalue())
-        self.assertIn('[sprouting]', self.output.getvalue())
+        self.assertIn('[No release yet]', self.output.getvalue())
         with patch.object(self.farm, 'download') as download:
-            with self.assertRaisesRegex(FarmError, 'sprouting and has no release'):
+            with self.assertRaisesRegex(FarmError, 'has no release'):
                 self.install()
         download.assert_not_called()
         self.assertFalse((self.app / 'current').exists())
@@ -231,7 +232,7 @@ class FarmTests(unittest.TestCase):
             self.install()
 
     def test_archive_traversal_and_links_refused(self):
-        for name, kind in [("../../escape", None), ("/absolute", None),
+        for name, kind in [("../../escape", None), ("/absolute", None), ("C:/escape", None), ("file:stream", None),
                            ("fake/symlink", tarfile.SYMTYPE), ("fake/hardlink", tarfile.LNKTYPE),
                            ("fake/fifo", tarfile.FIFOTYPE)]:
             with self.subTest(name=name):
@@ -240,6 +241,15 @@ class FarmTests(unittest.TestCase):
                     self.install()
                 self.assertFalse((self.app / "current").exists())
         self.assertFalse((self.root / "escape").exists())
+
+    def test_windows_archive_path_aliases_are_refused(self):
+        for name in (".. /escape", "NUL", "folder/con.txt", "name."):
+            with self.subTest(name=name):
+                archive = self.make_release(members=[(name, b"x", None)])
+                destination = self.root / "unpacked"
+                destination.mkdir(exist_ok=True)
+                with patch("farm.farm.WINDOWS", True), self.assertRaisesRegex(FarmError, "Unsafe archive"):
+                    Farm.unpack(archive, destination, self.manifest["entry"])
 
     def test_archive_limit(self):
         with patch("farm.farm.MAX_UNPACKED", 1):
@@ -279,6 +289,7 @@ class FarmTests(unittest.TestCase):
         self.assertIsNone(self.farm.active("fake-app"))
         self.assertFalse((self.app / "farm.pid").exists())
 
+    @unittest.skipIf(os.name == "nt", "Windows terminate does not send POSIX signals")
     def test_sigkill_after_five_seconds(self):
         code = FAKE_APP.replace('signal.signal(signal.SIGINT, lambda *_: exit(0))',
                                 'signal.signal(signal.SIGINT, signal.SIG_IGN)')
@@ -302,7 +313,7 @@ class FarmTests(unittest.TestCase):
     def test_stale_pid_does_not_signal_unrelated_process(self):
         self.install()
         (self.app / "farm.pid").write_text(str(os.getpid()))
-        with patch("farm.farm.os.killpg") as kill:
+        with patch("farm.farm.os.killpg", create=True) as kill:
             self.farm.stop("fake-app")
         kill.assert_not_called()
         self.assertFalse((self.app / "farm.pid").exists())
@@ -385,13 +396,15 @@ class FarmTests(unittest.TestCase):
             self.farm.device()
         self.assertEqual(prompt.call_count, 2)
         config = self.home / "device.json"
-        self.assertEqual(config.stat().st_mode & 0o777, 0o600)
+        if os.name != "nt":
+            self.assertEqual(config.stat().st_mode & 0o777, 0o600)
         self.assertEqual(json.loads(config.read_text())["key"], "secret-value")
         self.assertNotIn("secret-value", self.output.getvalue())
         config.chmod(0o644)
         with patch("getpass.getpass", side_effect=["http://example.test/v1", "new-secret"]):
             self.farm.device()
-        self.assertEqual(config.stat().st_mode & 0o777, 0o600)
+        if os.name != "nt":
+            self.assertEqual(config.stat().st_mode & 0o777, 0o600)
 
     def test_device_refuses_echo_fallback(self):
         def unsafe(prompt):
@@ -425,6 +438,7 @@ class FarmTests(unittest.TestCase):
         self.farm.remove("onelane", purge=True)
         self.assertEqual(shared.stat().st_ino, inode)
 
+    @unittest.skipIf(os.name == "nt", "POSIX fork/process group behavior")
     def test_stop_kills_forked_child_after_leader_exits(self):
         code = """import os, signal, time
 from pathlib import Path
@@ -451,7 +465,7 @@ while True: time.sleep(0.1)
             self.install()
 
     def test_cli_local_catalog(self):
-        env = os.environ | {"HOME": str(self.root), "FARM_CATALOG": str(self.catalog)}
+        env = os.environ | {"HOME": str(self.root), "USERPROFILE": str(self.root), "FARM_CATALOG": str(self.catalog)}
         result = subprocess.run([sys.executable, str(ROOT / "farm/farm.py"), "install", "fake-app", "--yes"],
                                 env=env, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -459,6 +473,68 @@ while True: time.sleep(0.1)
                                 env=env, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("fake-app", result.stdout)
+
+    def test_separate_cli_start_status_stop(self):
+        self.install()
+        env = dict(os.environ, HOME=str(self.root), USERPROFILE=str(self.root))
+        command = [sys.executable, str(ROOT / "farm/farm.py")]
+        for args in (["start", "fake-app"], ["status"], ["stop", "fake-app"]):
+            result = subprocess.run(command + args, env=env, capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            if args == ["status"]:
+                self.assertIn("fake-app", result.stdout)
+                self.assertIn("running 0.1.0", result.stdout)
+        self.assertIsNone(self.farm.active("fake-app"))
+
+    @unittest.skipUnless(os.name == "nt", "Windows process creation identity")
+    def test_windows_reused_pid_is_not_terminated(self):
+        from farm.farm import WindowsProcess
+        self.install()
+        with WindowsProcess(os.getpid()) as process:
+            identity = process.identity
+        (self.app / "farm.pid").write_text(str(os.getpid()))
+        (self.app / "process.json").write_text(json.dumps({"identity": identity + 1}))
+        with patch.object(WindowsProcess, "terminate") as terminate:
+            self.farm.stop("fake-app")
+        terminate.assert_not_called()
+
+    def test_local_catalog_file_uri(self):
+        farm = Farm(self.home, self.catalog.as_uri())
+        self.assertEqual(farm.manifest("fake-app")["id"], "fake-app")
+
+    def test_windows_lock_uses_same_byte_and_releases(self):
+        from farm.farm import file_lock
+        from unittest.mock import Mock
+        backend = Mock(LK_NBLCK=2, LK_UNLCK=0)
+        offsets = []
+        with (self.root / "byte.lock").open("a+b") as lock:
+            backend.locking.side_effect = lambda *args: offsets.append(lock.tell())
+            with patch("farm.farm.WINDOWS", True), patch.dict(sys.modules, msvcrt=backend):
+                with self.assertRaisesRegex(RuntimeError, "test"):
+                    with file_lock(lock):
+                        raise RuntimeError("test")
+        self.assertEqual(offsets, [0, 0])
+        self.assertEqual([call.args[1:] for call in backend.locking.call_args_list], [(2, 1), (0, 1)])
+
+    def test_windows_private_mode_is_best_effort(self):
+        from farm.farm import private_mode
+        with patch("farm.farm.WINDOWS", True), patch.object(Path, "chmod", side_effect=PermissionError):
+            private_mode(self.root / "settings")
+        with patch("farm.farm.WINDOWS", False), patch.object(Path, "chmod", side_effect=PermissionError):
+            with self.assertRaises(PermissionError):
+                private_mode(self.root / "settings")
+
+    def test_default_device_path_and_legacy_read(self):
+        with patch("farm.farm.Path.home", return_value=self.root):
+            farm = Farm(catalog=self.catalog)
+        self.assertEqual(farm.config_home, self.root / ".tiinyapps")
+        self.install()
+        self.home.joinpath("device.json").write_text(json.dumps({"base": "http://legacy.test/v1", "key": "old"}))
+        self.assertEqual(farm.environment("fake-app", self.manifest)["TIINY_KEY"], "old")
+        with patch.dict(os.environ, {"TIINY_KEY": "new"}):
+            farm.device(base="http://new.test/v1")
+        self.assertEqual(farm.environment("fake-app", self.manifest)["TIINY_KEY"], "new")
+        self.assertTrue((self.root / ".tiinyapps/device.json").exists())
 
     def test_cli_errors_do_not_echo_keys(self):
         errors = io.StringIO()
@@ -557,7 +633,7 @@ while True: time.sleep(0.1)
         self.make_release(code='print("startup exploded", flush=True)\nraise SystemExit(2)\n')
         self.install()
         result = subprocess.run([sys.executable, str(ROOT / 'farm/farm.py'), 'start', 'fake-app'],
-                                env=os.environ | {'HOME': str(self.root)}, capture_output=True, text=True)
+                                env=os.environ | {'HOME': str(self.root), 'USERPROFILE': str(self.root)}, capture_output=True, text=True)
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn('startup exploded', result.stderr)
         self.assertNotIn('Started', result.stdout)

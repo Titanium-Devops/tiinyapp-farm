@@ -50,14 +50,14 @@ export function buildManifest(input, user, release, now) {
 export async function seedRoutes(ctx) {
   const { path, request, env, requireUser, get, put, fetcher, now } = ctx;
   async function github(route, method = 'GET', body, allow404 = false) {
-    if (!env.FARM_GITHUB_TOKEN) fail(503, 'Seed submission is not configured yet.');
+    if (!env.FARM_GITHUB_TOKEN) fail(503, 'App submission is not configured yet.');
     const publicChecks = method === 'GET' && route.startsWith('/commits/');
     const result = await remote(fetcher, API + route, { method, headers: {
       ...(publicChecks ? {} : { Authorization: `Bearer ${env.FARM_GITHUB_TOKEN}` }), Accept: 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'tiinyapp-farm', 'Content-Type': 'application/json',
     }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }, 1024 * 1024);
     if (result.status === 404 && allow404) return null;
-    if (!result.ok) fail(502, 'GitHub could not finish the seed review request. Please try again.');
+    if (!result.ok) fail(502, 'GitHub could not finish the app review request. Please try again.');
     return result.status === 204 ? {} : JSON.parse(result.text());
   }
   const owns = async (user, manifest) => {
@@ -117,8 +117,8 @@ export async function seedRoutes(ctx) {
   const update = request.method === 'PUT' && path.match(/^\/api\/seeds\/([a-z][a-z0-9]*(?:-[a-z0-9]+)*)$/);
   if ((path === '/api/seeds' && request.method === 'POST') || update) {
     const user = await requireUser();
-    if (!user.tiinyverse) fail(403, 'Prove your Tiiny before planting a seed.');
-    if (!env.FARM_GITHUB_TOKEN) fail(503, 'Seed submission is not configured yet.');
+    if (!user.tiinyverse) fail(403, 'Verify you own a Tiiny before submitting an app.');
+    if (!env.FARM_GITHUB_TOKEN) fail(503, 'App submission is not configured yet.');
     let form;
     if (request.headers.get('Content-Type')?.startsWith('multipart/form-data')) {
       let size = 0;
@@ -130,9 +130,9 @@ export async function seedRoutes(ctx) {
         controller.enqueue(chunk);
       } }), { signal: controller.signal });
       try { form = await new Response(stream, { headers: request.headers }).formData(); }
-      catch (error) { if (controller.signal.aborted) fail(408, 'The upload took too long. Please try again.'); if (error.status) throw error; fail(400, 'Send the seed form with a tar.gz file.'); }
+      catch (error) { if (controller.signal.aborted) fail(408, 'The upload took too long. Please try again.'); if (error.status) throw error; fail(400, 'Send the app form with a tar.gz file.'); }
       finally { clearTimeout(timer); }
-    } else fail(415, 'Send the seed form as multipart/form-data.');
+    } else fail(415, 'Send the app form as multipart/form-data.');
     const input = {};
     for (const [key, value] of form) if (typeof value === 'string') {
       if (value.length > 12000) fail(400, 'A form field is too long.');
@@ -143,15 +143,15 @@ export async function seedRoutes(ctx) {
     if (upload && (file.size > MAX || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*\.tar\.gz$/.test(file.name))) fail(400, 'Upload a tar.gz file up to 50 MB with a simple filename.');
     // Validate all ordinary fields before fetching archives or creating external resources.
     let manifest = buildManifest(input, user, { url: ORIGIN + '/placeholder.tar.gz', sha256: '0'.repeat(64), size: 1 }, now());
-    if (update && input.id !== update[1]) fail(400, 'The seed ID cannot change during an update.');
+    if (update && input.id !== update[1]) fail(400, 'The app ID cannot change during an update.');
     let existing, current;
     if (update) {
       existing = await github('/contents/manifests/' + manifest.id + '.json', 'GET', undefined, true);
-      if (!existing) fail(404, 'That seed is not in the field yet.');
+      if (!existing) fail(404, 'That app is not in the catalog yet.');
       try { current = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(existing.content.replace(/\s/g, '')), c => c.charCodeAt(0)))); }
-      catch { fail(502, 'The current seed manifest could not be read.'); }
-      if (current.id !== manifest.id) fail(502, 'The current seed manifest does not match its ID.');
-      if (!await owns(user, current)) fail(403, 'Only this seed’s verified maker can update it.');
+      catch { fail(502, 'The current app manifest could not be read.'); }
+      if (current.id !== manifest.id) fail(502, 'The current app manifest does not match its ID.');
+      if (!await owns(user, current)) fail(403, 'Only this app’s verified maker can update it.');
       const comparison = compareVersion(manifest.version, current.version);
       if (comparison < 0 || ((upload || input.releaseUrl) && comparison <= 0)) fail(400, 'Use a strictly newer version when adding a release; text updates may keep the current version.');
     }
@@ -162,19 +162,19 @@ export async function seedRoutes(ctx) {
     const uploadName = upload ? (update ? updateHash + '-' : '') + file.name : null;
     const previous = await get('seed:' + key);
     const owner = await get('seedowner:' + manifest.id);
-    if (owner && owner !== user.id) fail(409, 'That seed name is already used by another maker.');
+    if (owner && owner !== user.id) fail(409, 'That app name is already used by another maker.');
     if (previous?.pr) {
-      if (previous.userId !== user.id) fail(409, 'That seed release already exists.');
+      if (previous.userId !== user.id) fail(409, 'That app release already exists.');
       if (previous.state === 'label pending') {
         await github('/issues/' + previous.pr + '/labels', 'POST', { labels: ['from-the-site'] });
         previous.state = 'awaiting review'; await put('seed:' + key, previous);
       }
       return json({ id: previous.id, prUrl: previous.prUrl, statusUrl: '/seeds/mine/' });
     }
-    if (previous?.state === 'submission uncertain') fail(409, 'This seed is being reconciled after an interrupted review request. Please contact a farmhand before retrying.');
-    if (!update && await github('/contents/manifests/' + manifest.id + '.json', 'GET', undefined, true)) fail(409, 'That seed ID is already in the field. Use Update from your farm.');
+    if (previous?.state === 'submission uncertain') fail(409, 'This app is being reconciled after an interrupted review request. Please contact a maintainer before retrying.');
+    if (!update && await github('/contents/manifests/' + manifest.id + '.json', 'GET', undefined, true)) fail(409, 'That app ID is already in the catalog. Use Update on Your apps.');
     const recent = (await get('seed-rate:' + user.id) || []).filter(t => t > now() - 3600000);
-    if (recent.length >= 5) fail(429, 'Five planting attempts per hour; please try again later.');
+    if (recent.length >= 5) fail(429, 'You can submit an app five times per hour. Please try again later.');
     await put('seed-rate:' + user.id, [...recent, now()]);
     let bytes, release = current?.release;
     if (upload) {
@@ -221,8 +221,8 @@ export async function seedRoutes(ctx) {
         message: `${update ? 'Keep' : 'Give'} ${manifest.id} ${update ? 'current through' : 'a plot for'} community review\n\nSubmitted through the farm by a verified TiinyVerse owner.\n\nConfidence: medium\nScope-risk: narrow\nTested: ${validation}\nNot-tested: Awaiting CI and maintainer review`, content, branch, ...(update ? { sha: existing.sha } : {}),
       });
       creatingPR = true;
-      const pr = await github('/pulls', 'POST', { title: `${update ? 'Tend' : 'Plant'} ${manifest.id} ${manifest.version}`, head: branch, base,
-        body: `Submitted from tiinyapp.farm by ${user.tiinyverse.profileUrl}.\n\n${bytes ? 'Manifest and archive checksum validated by the farm.' : release ? 'Manifest validated; the existing release is retained.' : 'Manifest validated; this seed is sprouting with no release yet.'} CI checks and human review are still required.\n\nThe site keeps verified=false; a maintainer decides whether to merge.` });
+      const pr = await github('/pulls', 'POST', { title: `${update ? 'Update' : 'Add'} ${manifest.id} ${manifest.version}`, head: branch, base,
+        body: `Submitted from tiinyapp.farm by ${user.tiinyverse.profileUrl}.\n\n${bytes ? 'Manifest and archive checksum validated.' : release ? 'Manifest validated; the existing release is retained.' : 'Manifest validated; this app has no release yet.'} CI checks and human review are still required.\n\nThe site keeps verified=false; a maintainer decides whether to merge.` });
       record.pr = pr.number; record.prUrl = pr.html_url; record.state = 'label pending';
       await put('seed:' + key, record);
       await github('/issues/' + pr.number + '/labels', 'POST', { labels: ['from-the-site'] });
@@ -233,9 +233,9 @@ export async function seedRoutes(ctx) {
         // A timeout may mean GitHub accepted the PR. Keep its branch and archive
         // intact; a maintainer can reconcile using the recorded branch.
         record.state = 'submission uncertain'; await put('seed:' + key, record);
-        return json({ id: manifest.id, statusUrl: '/seeds/mine/', warning: 'The review request was interrupted. Your submission is saved; a farmhand must reconcile this submission before you retry.' }, 202);
+        return json({ id: manifest.id, statusUrl: '/seeds/mine/', warning: 'The review request was interrupted. Your app is saved; a maintainer must reconcile this app before you retry.' }, 202);
       }
-      if (record.pr) return json({ id: manifest.id, statusUrl: '/seeds/mine/', warning: 'The seed reached review, but its site label is pending. Submit the same form again to retry the label.' }, 202);
+      if (record.pr) return json({ id: manifest.id, statusUrl: '/seeds/mine/', warning: 'The app reached review, but its site label is pending. Submit the same form again to retry the label.' }, 202);
       record.state = 'submission failed'; await put('seed:' + key, record);
       if (objectKey) await env.SEEDS.delete(objectKey);
       if (branchCreated) { try { await github('/git/refs/heads/' + branch, 'DELETE'); } catch { /* Reported via the stored failed submission and branch. */ } }

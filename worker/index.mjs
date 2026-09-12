@@ -93,7 +93,7 @@ export function createApp({ fetcher = fetch, now = () => Date.now(), seedRoutes 
     }
     async function account(index, property, value, intendedUser = null) {
       const owner = await get(index);
-      if (intendedUser && owner && owner !== intendedUser) fail(409, 'That sign-in is already linked to another farm account.');
+      if (intendedUser && owner && owner !== intendedUser) fail(409, 'That sign-in is already linked to another account.');
       const id = intendedUser || owner || crypto.randomUUID();
       const user = await get('user:' + id) || { id, createdAt: new Date(now()).toISOString() };
       if (user[property] && JSON.stringify(user[property]) !== JSON.stringify(value)) {
@@ -125,7 +125,7 @@ export function createApp({ fetcher = fetch, now = () => Date.now(), seedRoutes 
         const result = await remote(fetcher, 'https://api.resend.com/emails', { method: 'POST', headers: {
           Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json',
         }, body: JSON.stringify({ from: 'Titanium Bot <farm@tiinyapp.farm>', to: [email],
-          subject: 'Your farm sign-in code', text: `Your farm code is ${code}. It expires in 10 minutes.` }) });
+          subject: 'Your tiinyapp.farm sign-in code', text: `Your sign-in code is ${code}. It expires in 10 minutes.` }) });
         if (!result.ok) { await del('email-code:' + address); fail(502, 'The code could not be sent. Please try again later.'); }
         return json({ sent: true });
       }
@@ -186,10 +186,10 @@ export function createApp({ fetcher = fetch, now = () => Date.now(), seedRoutes 
       const currentUser = async () => { const user = (await session())?.user; return user ? ensureMaker(user, get, put, random) : null; };
       if (path === '/api/me' && request.method === 'GET') return json({ user: await currentUser() });
       const context = { request, env, url, path, get, put, del, now, fetcher, bodyJSON, random,
-        currentUser, requireUser: async () => { const user = await currentUser(); if (!user) fail(401, 'Sign in to your farm account first.'); return user; } };
-      return await socialRoutes(context) || await makerRoutes(context) || await proofRoutes(context) || await seedRoutes(context) || json({ error: 'This farm route does not exist.' }, 404);
+        currentUser, requireUser: async () => { const user = await currentUser(); if (!user) fail(401, 'Sign in to your account first.'); return user; } };
+      return await socialRoutes(context) || await makerRoutes(context) || await proofRoutes(context) || await seedRoutes(context) || json({ error: 'This route does not exist.' }, 404);
     } catch (error) {
-      return json({ error: error instanceof HttpError ? error.message : 'The farm could not finish that request. Please try again.' }, error.status || 502);
+      return json({ error: error instanceof HttpError ? error.message : 'The request could not be completed. Please try again.' }, error.status || 502);
     }
   };
 }

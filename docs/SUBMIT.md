@@ -1,17 +1,17 @@
-# Bring a seed from the site
+# Submit an app from the site
 
 Visit https://tiinyapp.farm/seeds/ to submit without a GitHub account:
 
 1. Sign in with an email code or GitHub. While signed in, use the other method to link it to the same account. Neither method replaces TiinyVerse proof.
 2. Paste your public TiinyVerse `/users/<uuid>` profile URL. Put the issued code in your bio and press Verify within 24 hours. One profile can belong to one farm account.
-3. Complete the seed form, including the version, permissions, and runtime needs. Supply either a direct HTTPS tar.gz release URL (no redirects) or a tar.gz upload up to 50 MiB. Include source and license in the archive. For a library, leave the start command empty and include the `library` tag.
-4. The farm measures and hashes the archive, creates a review PR with its own account, and shows check results and review state at `/seeds/mine/`. A maintainer decides whether to merge. The site rebuilds after merge.
+3. Complete the app form, including the version, permissions, and runtime needs. Supply either a direct HTTPS tar.gz release URL (no redirects) or a tar.gz upload up to 50 MiB. Include source and license in the archive. For a library, leave the start command empty and include the `library` tag.
+4. The farm measures and hashes the archive, creates a review PR with its own account, and shows check results and review state at Your apps (`/farm/`). A maintainer decides whether to merge. The site rebuilds after merge.
 
 The optional source repository is useful for review; it is not a sign-in requirement. The maker name is taken from your verified TiinyVerse profile. The archive and its source become public. Uploads must finish within 30 seconds; direct release fetches have a 10-second deadline.
 
 For hand-made pull requests, verify your profile on the farm first, set `author.tiinyverse` to that exact profile URL and `author.name` to the farm's verified display name. CI queries the farm owner endpoint and refuses unverified or mismatched owners. Existing catalog drafts without owner proof remain readable, but any changed submission must pass the owner gate. Leave `verified` false for maintainer review.
 
-The site currently accepts new seed IDs. For an update to an existing catalog ID, ask a maintainer or submit a hand-made PR using the same owner gate. An interrupted PR creation is shown as `submission uncertain`; a farmhand reconciles the saved branch before you retry, preserving the uploaded archive.
+Use Your apps to update an existing app that you own, or submit a pull request using the same owner verification. An interrupted PR creation is shown as `submission uncertain`; a maintainer reconciles the saved branch before you retry, preserving the uploaded archive.
 
 ---
 

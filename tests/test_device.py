@@ -32,7 +32,8 @@ class DeviceImportTests(unittest.TestCase):
 
     def settings(self):
         config = self.home / "device.json"
-        self.assertEqual(config.stat().st_mode & 0o777, 0o600)
+        if os.name != "nt":
+            self.assertEqual(config.stat().st_mode & 0o777, 0o600)
         return json.loads(config.read_text())
 
     def test_key_pipe_and_base_argument(self):

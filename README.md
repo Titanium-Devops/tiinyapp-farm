@@ -12,9 +12,9 @@ Brought to you by [Titanium Bot](https://titanium.bot). Made by Titanium Computi
 
 See `SPEC.md`.
 
-## Install the farmhand
+## Install the farm CLI (`farm`)
 
-Python 3.11 or newer on macOS or Linux; runtime dependencies are all standard library.
+Python 3.9 or newer on macOS, Linux or Windows; runtime dependencies are all standard library.
 
 ```sh
 pip install tiinyapp-farm
@@ -56,13 +56,13 @@ Installed versions live in `~/tiinyapps/<id>/<version>`; `current` is an atomica
 written version pointer. `launcher.json` registers the entry for `farm start`.
 The app runs in its version directory with `FARM_DATA_DIR` and `TIINY_DATA_DIR`
 pointing at `~/tiinyapps/<id>/data`. Standard output and errors append to `farm.log`;
-`farm.pid` holds the process ID. A runtime file lock distinguishes a live process
-from a stale PID. Entries run directly, without a shell. Apps must remain in the
-foreground and keep inherited descriptors open; daemonizing/closing all inherited
+`farm.pid` holds the process ID. On POSIX, a runtime file lock distinguishes a live process
+from a stale PID; Windows checks the process creation time before stopping it. Entries run directly, without a shell. Apps must remain in the
+foreground and, on POSIX, keep inherited descriptors open; daemonizing/closing all inherited
 file descriptors is not supported by this launcher.
 
 `farm device` reads both the base URL and API key without echo and atomically saves
-`~/tiinyapps/device.json` with mode `0600`. If a secure terminal is unavailable, it
+`~/.tiinyapps/device.json` with mode `0600` on macOS and Linux. Windows permissions are best effort and follow the user-folder ACL; existing `~/tiinyapps/device.json` settings remain readable until you run `farm device` again. If a secure terminal is unavailable, it
 refuses to fall back to echoed input. Scripts can import settings with
 `farm device --base http://device:8800/v1 --key-stdin < private-key-file`, or run
 `farm device` with `TIINY_BASE` and `TIINY_KEY` in the environment. Both forms save
@@ -104,7 +104,7 @@ permissions describe what the author declares. `verified` remains false until CI
 and human review. The static site and submission checks are included.
 
 
-## Bring your seeds
+## Submit an app
 
 Read [the contributor guide](docs/SUBMIT.md). PR checks validate changed manifests,
 verify archive checksums and sizes, safely unpack them, and scan for unsafe code,
@@ -113,7 +113,7 @@ runs the entry with `--selfcheck` in an offline container for at most 120 second
 Shell/subprocess use is forbidden. Microphone access is declared, not detected.
 Checks report one PR comment; only a maintainer sets `verified: true` after review.
 
-## Publish the farmhand
+## Publish the farm CLI
 
 Update `project.version` in `pyproject.toml`, then push its matching `v*` tag
 (for example `v0.1.0`). The workflow tests, builds a wheel and source distribution,

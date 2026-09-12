@@ -57,7 +57,7 @@ class ShareTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, patch.object(ImageDraw.ImageDraw, 'text', capture):
             render(ROOT, Path(directory) / 'card.png', name='Test seed', pitch='A growing seed', maker='Fern', sprouting=True)
         pitch = next(xy for xy, text in drawn if text == 'A growing seed')
-        state = next(xy for xy, text in drawn if text == 'Sprouting')
+        state = next(xy for xy, text in drawn if text == 'No release yet')
         self.assertGreater(state[1], pitch[1])
         self.assertLess(state[1], 459)
 

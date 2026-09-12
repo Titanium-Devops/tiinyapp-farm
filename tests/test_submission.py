@@ -311,7 +311,7 @@ class SubmissionTests(unittest.TestCase):
     def test_site_install_and_guide_links(self):
         site = runpy.run_path(str(ROOT / 'scripts/build-site.py'))
         self.assertIn('pip install tiinyapp-farm', site['steps']())
-        self.assertIn('git clone', site['steps']())
+        self.assertIn('farm device', site['steps']())
         self.assertIn('/docs/SUBMIT.md', site['seeds']())
 
 

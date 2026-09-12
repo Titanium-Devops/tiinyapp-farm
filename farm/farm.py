@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Install and run tiinyapp.farm apps. Python 3.11+, standard library, POSIX."""
+"""Install and run tiinyapp.farm apps. Python 3.9+, standard library, macOS, Linux and Windows."""
 from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
-import fcntl
 import getpass
 import hashlib
 from html.parser import HTMLParser
 from http.client import HTTPException
 import json
+import ntpath
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import shlex
 import shutil
@@ -24,7 +24,7 @@ import tempfile
 import time
 import threading
 from urllib.parse import unquote, urlsplit
-from urllib.request import urlopen
+from urllib.request import urlopen, url2pathname
 import warnings
 
 CATALOG = "https://tiinyapp.farm/manifests/"
@@ -32,11 +32,105 @@ ID = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*\Z")
 VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 START_TIMEOUT = 10.0
 MAX_DOWNLOAD = 512 * 1024 * 1024
+WINDOWS = os.name == "nt"
 MAX_UNPACKED = 2 * 1024 * 1024 * 1024
 
 
 class FarmError(Exception):
     pass
+
+
+@contextmanager
+def file_lock(lock, blocking=True):
+    """Lock one stable byte on Windows, or the file description on POSIX."""
+    if WINDOWS:
+        import msvcrt
+        lock.seek(0, os.SEEK_END)
+        if not lock.tell():
+            lock.write(b"\0")
+            lock.flush()
+        while True:
+            lock.seek(0)
+            try:
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                break
+            except OSError as error:
+                if error.errno not in (13, 11, 36):
+                    raise
+                if not blocking:
+                    raise BlockingIOError from error
+                time.sleep(0.05)
+        try:
+            yield
+        finally:
+            lock.seek(0)
+            msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(lock, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+        # Closing the parent's descriptor preserves an inherited runtime lock.
+        yield
+
+
+class WindowsProcess:
+    """A held kernel handle prevents PID reuse between identity check and stop."""
+    def __init__(self, pid):
+        import ctypes
+        from ctypes import wintypes
+        self.ctypes = ctypes
+        self.api = ctypes.WinDLL("kernel32", use_last_error=True)
+        self.api.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        self.api.OpenProcess.restype = wintypes.HANDLE
+        self.api.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+        self.api.GetProcessTimes.restype = wintypes.BOOL
+        self.api.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        self.api.WaitForSingleObject.restype = wintypes.DWORD
+        self.api.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        self.api.TerminateProcess.restype = wintypes.BOOL
+        self.api.CloseHandle.argtypes = [wintypes.HANDLE]
+        self.api.CloseHandle.restype = wintypes.BOOL
+        self.handle = self.api.OpenProcess(0x1000 | 0x100000 | 0x0001, False, pid)
+        if not self.handle:
+            raise ctypes.WinError(ctypes.get_last_error())
+        times = [wintypes.FILETIME() for _ in range(4)]
+        if not self.api.GetProcessTimes(self.handle, *(ctypes.byref(t) for t in times)):
+            error = ctypes.WinError(ctypes.get_last_error())
+            self.close()
+            raise error
+        self.identity = (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
+
+    def running(self):
+        result = self.api.WaitForSingleObject(self.handle, 0)
+        if result == 0xffffffff:
+            raise self.ctypes.WinError(self.ctypes.get_last_error())
+        return result == 258
+
+    def terminate(self):
+        if not self.api.TerminateProcess(self.handle, 1) and self.running():
+            raise self.ctypes.WinError(self.ctypes.get_last_error())
+
+    def close(self):
+        self.api.CloseHandle(self.handle)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+
+def windows_reserved(part):
+    if hasattr(ntpath, "isreserved"):
+        return ntpath.isreserved(part)
+    return PureWindowsPath(part).is_reserved()
+
+
+def private_mode(path):
+    try:
+        Path(path).chmod(0o600)
+    except OSError:
+        if not WINDOWS:
+            raise
 
 
 def app_id(value):
@@ -50,7 +144,10 @@ def atomic_write(path, text, mode=0o600):
     fd, temporary = tempfile.mkstemp(prefix=".farm-", dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as out:
-            os.fchmod(out.fileno(), mode)
+            if WINDOWS:
+                private_mode(temporary)
+            else:
+                os.fchmod(out.fileno(), mode)
             out.write(text)
             out.flush()
             os.fsync(out.fileno())
@@ -136,10 +233,12 @@ class CatalogLinks(HTMLParser):
 class Farm:
     def __init__(self, home=None, catalog=None):
         self.home = Path(home) if home is not None else Path.home() / "tiinyapps"
+        self.config_home = Path(home) if home is not None else Path.home() / ".tiinyapps"
         self.catalog = str(catalog or os.environ.get("FARM_CATALOG", CATALOG))
         parsed = urlsplit(self.catalog)
-        self.local_catalog = (Path(unquote(parsed.path)) if parsed.scheme == "file"
-                              else Path(self.catalog).expanduser() if not parsed.scheme else None)
+        self.local_catalog = (Path(url2pathname(parsed.path)) if parsed.scheme == "file"
+                              else Path(self.catalog).expanduser()
+                              if not parsed.scheme or (WINDOWS and Path(self.catalog).is_absolute()) else None)
 
     def app_dir(self, ident):
         path = self.home / app_id(ident)
@@ -152,9 +251,9 @@ class Farm:
         self.home.mkdir(parents=True, exist_ok=True, mode=0o700)
         locks = self.home / ".locks"
         locks.mkdir(exist_ok=True, mode=0o700)
-        with (locks / (app_id(ident) + ".lock")).open("a") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            yield
+        with (locks / (app_id(ident) + ".lock")).open("a+b") as lock:
+            with file_lock(lock):
+                yield
 
     def manifest(self, ident):
         ident = app_id(ident)
@@ -206,7 +305,7 @@ class Farm:
         print("Catalog:")
         for ident in self.catalog_ids():
             manifest = self.manifest(ident)
-            draft = (" [sprouting]" if "release" not in manifest else
+            draft = (" [No release yet]" if "release" not in manifest else
                      " [release pending]" if manifest["release"]["sha256"] == "pending" else "")
             print(f"  {ident} {manifest['version']} — {manifest['pitch']}{draft}")
 
@@ -216,7 +315,7 @@ class Farm:
         if self.local_catalog is not None and not parsed.scheme:
             source = (self.local_catalog / location).open("rb")
         elif parsed.scheme == "file" and self.local_catalog is not None:
-            source = Path(unquote(parsed.path)).open("rb")
+            source = Path(url2pathname(parsed.path)).open("rb")
         elif parsed.scheme in ("http", "https"):
             source = urlopen(location, timeout=30)
         else:
@@ -244,6 +343,9 @@ class Farm:
                 count += 1
                 parts = PurePosixPath(member.name).parts
                 if (member.name.startswith("/") or ".." in parts or "\\" in member.name
+                        or any(":" in part for part in parts)
+                        or (WINDOWS and any(part.endswith((".", " ")) or windows_reserved(part)
+                                            for part in parts))
                         or not (member.isfile() or member.isdir())):
                     raise FarmError("Unsafe archive member; paths, links and special files are refused.")
                 size += member.size
@@ -277,7 +379,7 @@ class Farm:
         with self.guard(ident):
             manifest = self.manifest(ident)
             if "release" not in manifest:
-                raise FarmError("This seed is sprouting and has no release to install yet.")
+                raise FarmError("This app has no release to install yet.")
             app = self.app_dir(ident)
             if update:
                 _, previous = self.installed(ident)
@@ -289,7 +391,7 @@ class Farm:
             release = manifest["release"]
             if release["sha256"] == "pending":
                 raise FarmError("Release checksum is pending; this catalog draft cannot be installed.")
-            py = manifest["requires"].get("python", "3.11")
+            py = manifest["requires"].get("python", "3.9")
             if tuple(map(int, py.split("."))) > sys.version_info[:2]:
                 raise FarmError(f"This app needs Python {py} or newer.")
             print(f"{manifest['name']} {manifest['version']}\n{manifest['pitch']}")
@@ -344,7 +446,8 @@ class Farm:
         if not key:
             raise FarmError("Device key must not be empty.")
         self.home.mkdir(parents=True, exist_ok=True, mode=0o700)
-        atomic_write(self.home / "device.json", json.dumps({"base": base, "key": key}) + "\n")
+        self.config_home.mkdir(parents=True, exist_ok=True, mode=0o700)
+        atomic_write(self.config_home / "device.json", json.dumps({"base": base, "key": key}) + "\n")
         print("Device settings saved.")
 
     def environment(self, ident, manifest):
@@ -357,9 +460,11 @@ class Farm:
         env.update(FARM_DATA_DIR=str(data), TIINY_DATA_DIR=str(data),
                    ONELANE_DIR=str(self.home / ".onelane"), PYTHONUNBUFFERED="1")
         (self.home / ".onelane").mkdir(exist_ok=True, mode=0o700)
-        config = self.home / "device.json"
+        config = self.config_home / "device.json"
+        if not config.exists():
+            config = self.home / "device.json"  # Read settings from pre-0.1 installations.
         if config.exists():
-            config.chmod(0o600)
+            private_mode(config)
             settings = read_json(config)
             if not isinstance(settings, dict) or not all(isinstance(settings.get(k), str) for k in ("base", "key")):
                 raise FarmError("Invalid device settings; run farm device.")
@@ -383,11 +488,20 @@ class Farm:
             pid = int((app / "farm.pid").read_text())
             if pid <= 1:
                 return None
-            # Apps inherit this descriptor. A stale PID alone never authorizes a signal.
-            with (app / ".run.lock").open("a") as lock:
+            if WINDOWS:
                 try:
-                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    return None
+                    identity = read_json(app / "process.json").get("identity")
+                    with WindowsProcess(pid) as process:
+                        return pid if process.identity == identity and process.running() else None
+                except OSError as error:
+                    if getattr(error, "winerror", None) == 87:  # PID no longer exists.
+                        return None
+                    raise
+            # Apps inherit this descriptor. A stale PID alone never authorizes a signal.
+            with (app / ".run.lock").open("a+b") as lock:
+                try:
+                    with file_lock(lock, blocking=False):
+                        return None
                 except BlockingIOError:
                     pass
             return pid
@@ -480,19 +594,25 @@ class Farm:
                             command[index] = f"--port={ports[0]}"
                 elif ident == "story-lantern":
                     env["PORT"] = str(ports[0])
-            with (app / ".run.lock").open("a") as lock:
-                try:
-                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except BlockingIOError:
-                    raise FarmError("Another process still holds the app's runtime lock.") from None
-                with (app / "farm.log").open("ab") as log:
+            with (app / ".run.lock").open("a+b") as lock:
+                with file_lock(lock, blocking=False), (app / "farm.log").open("ab") as log:
+                    options = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS}
+                               if WINDOWS else {"start_new_session": True, "pass_fds": (lock.fileno(),)})
                     process = subprocess.Popen(command, cwd=root, env=env, stdin=subprocess.DEVNULL,
-                                               stdout=log, stderr=log, start_new_session=True,
-                                               pass_fds=(lock.fileno(),))
+                                               stdout=log, stderr=log, **options)
                 try:
+                    identity = None
+                    if WINDOWS:
+                        try:
+                            with WindowsProcess(process.pid) as running:
+                                identity = running.identity
+                        except OSError:
+                            if process.poll() is not None:
+                                raise self.startup_error(app, f"{ident} exited at startup (exit {process.returncode}).")
+                            raise
                     atomic_write(app / "farm.pid", str(process.pid) + "\n")
                     atomic_write(app / "process.json", json.dumps({"started": time.time(),
-                                 "ports": ports, "version": manifest["version"], "health": manifest.get("health")}) + "\n")
+                                 "ports": ports, "version": manifest["version"], "health": manifest.get("health"), "identity": identity}) + "\n")
                     deadline = time.monotonic() + START_TIMEOUT
                     while True:
                         time.sleep(min(0.1, max(0, deadline - time.monotonic())))
@@ -520,7 +640,10 @@ class Farm:
                             break
                 except BaseException:
                     try:
-                        os.killpg(process.pid, signal.SIGKILL)
+                        if WINDOWS:
+                            process.terminate()
+                        else:
+                            os.killpg(process.pid, signal.SIGKILL)
                     except ProcessLookupError:
                         pass
                     process.wait()
@@ -533,7 +656,21 @@ class Farm:
     def _stop(self, ident):
         app = self.app_dir(ident)
         pid = self.active(ident)
-        if pid:
+        if pid and WINDOWS:
+            try:
+                with WindowsProcess(pid) as process:
+                    # Recheck using the same handle that will receive termination.
+                    if process.identity == read_json(app / "process.json").get("identity"):
+                        process.terminate()
+                        deadline = time.monotonic() + 5
+                        while process.running() and time.monotonic() < deadline:
+                            time.sleep(0.05)
+                        if process.running():
+                            raise FarmError("App did not stop; keeping its process records.")
+            except OSError as error:
+                if getattr(error, "winerror", None) != 87:
+                    raise
+        elif pid:
             try:
                 os.killpg(pid, signal.SIGINT)
             except ProcessLookupError:
