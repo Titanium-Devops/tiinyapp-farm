@@ -323,7 +323,17 @@ class Farm:
         return b"".join(chunks), "multipart/form-data; boundary=" + boundary
 
     @staticmethod
+    def ask(prompt, optional=False):
+        """Ask on a terminal; without one, optional answers are empty and required ones are an error."""
+        if not sys.stdin.isatty():
+            if optional:
+                return ""
+            raise FarmError(f"farm.json is missing a required field ({prompt.strip(': ')}). Add it, or run farm publish in a terminal.")
+        return input(prompt).strip()
+
+    @staticmethod
     def prompt_manifest(manifest):
+        ask = Farm.ask
         prompts = {
             "id": "App ID: ", "name": "Name: ", "pitch": "One-line summary: ",
             "description": "What it does: ", "version": "Version (for example 0.1.0): ",
@@ -331,17 +341,17 @@ class Farm:
         }
         for field, prompt in prompts.items():
             if not manifest.get(field):
-                manifest[field] = input(prompt).strip()
+                manifest[field] = ask(prompt)
         if "entry" not in manifest:
-            command = input("Start command (leave blank for a library): ").strip()
+            command = ask("Start command (leave blank for a library): ", optional=True)
             manifest["entry"] = {"command": command} if command else None
         if "permissions" not in manifest:
-            value = input("Permissions, comma-separated (optional): ").strip()
+            value = ask("Permissions, comma-separated (optional): ", optional=True)
             manifest["permissions"] = [part.strip() for part in value.split(",") if part.strip()]
         if "links" not in manifest:
             manifest["links"] = {}
             for key, label in (("repo", "Repository URL"), ("homepage", "Homepage URL"), ("video", "YouTube URL")):
-                value = input(label + " (optional): ").strip()
+                value = ask(label + " (optional): ", optional=True)
                 if value:
                     manifest["links"][key] = value
         return manifest
