@@ -15,10 +15,9 @@ directory = "./site/dist"
 html_handling = "force-trailing-slash"
 not_found_handling = "404-page"
 
-# Orchestrator: replace with the ID returned when creating the FARM namespace.
 [[kv_namespaces]]
 binding = "FARM"
-id = "REPLACE_WITH_FARM_KV_NAMESPACE_ID"
+id = "9721f38131824562bdc2f0af690645f7"
 
 [[r2_buckets]]
 binding = "SEEDS"
