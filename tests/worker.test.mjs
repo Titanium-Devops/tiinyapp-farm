@@ -55,6 +55,9 @@ function fixture() {
       throw new Error('Unexpected GitHub route: ' + route);
     }
     if (String(url) === 'https://releases.example.org/seed.tar.gz') return new Response(archive);
+    if (String(url) === 'https://github.example.org/releases/download/v1/seed.tar.gz') return new Response(null, { status: 302, headers: { location: 'https://objects.example.org/seed.tar.gz' } });
+    if (String(url) === 'https://objects.example.org/seed.tar.gz') return new Response(archive);
+    if (String(url) === 'https://loop.example.org/a') return new Response(null, { status: 302, headers: { location: 'https://loop.example.org/a' } });
     throw new Error('Unexpected fetch: ' + url);
   };
   const app = createApp({ fetcher, now: () => clock, proofRoutes, seedRoutes });
@@ -540,4 +543,12 @@ test('maker share cards serve build snapshots, handle HEAD and fall back for mis
   assert.equal((await f.call('/makers/INVALID/card.png')).status, 404);
   f.env.ASSETS.fetch = async () => new Response('Not found', { status: 404 });
   assert.equal((await f.call('/makers/new-grower/card.png')).status, 404);
+});
+
+test('a release URL may redirect (GitHub releases do); loops are refused', async () => {
+  const f = fixture(), first = await f.email(); await f.proof(first.cookie);
+  const ok = await f.call('/api/seeds', seedForm({ id: 'redirected-seed', releaseUrl: 'https://github.example.org/releases/download/v1/seed.tar.gz' }), first.cookie);
+  assert.equal(ok.status, 201, await ok.clone().text());
+  const loop = await f.call('/api/seeds', seedForm({ id: 'looping-seed', releaseUrl: 'https://loop.example.org/a' }), first.cookie);
+  assert.equal(loop.status, 422);
 });

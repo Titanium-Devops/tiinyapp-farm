@@ -54,7 +54,7 @@ export async function remote(fetcher, url, options = {}, limit = 200 * 1024) {
   try {
     const response = await fetcher(url, { ...options, redirect: 'manual', signal: controller.signal });
     const bytes = await boundedBody(response, limit);
-    return { status: response.status, ok: response.ok, bytes, text: () => new TextDecoder().decode(bytes) };
+    return { status: response.status, ok: response.ok, headers: response.headers, bytes, text: () => new TextDecoder().decode(bytes) };
   } finally { clearTimeout(timer); }
 }
 async function bodyJSON(request) {

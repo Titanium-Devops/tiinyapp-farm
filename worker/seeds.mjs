@@ -5,7 +5,7 @@ const API = 'https://api.github.com/repos/Titanium-Devops/tiinyapp-farm';
 const MAX = 50 * 1024 * 1024;
 export function releaseURL(value) {
   let url; try { url = new URL(value); } catch { fail(400, 'Use a public HTTPS release URL.'); }
-  // Reject IP literals, local names, credentials and nonstandard ports. Redirects are never followed.
+  // Reject IP literals, local names, credentials and nonstandard ports. Every redirect hop is checked here too.
   if (url.protocol !== 'https:' || url.username || url.password || url.hash || (url.port && url.port !== '443') ||
       !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(url.hostname) || /(^|\.)(localhost|local|internal|test|invalid)$/i.test(url.hostname)) fail(400, 'Use a public HTTPS release URL.');
   return url.href;
@@ -127,8 +127,16 @@ export async function seedRoutes(ctx) {
       release = { url: `${ORIGIN}/seeds-files/${manifest.id}/${manifest.version}/${file.name}` };
     } else {
       const address = releaseURL(input.releaseUrl);
-      const response = await remote(fetcher, address, {}, MAX);
-      if (response.status !== 200) fail(422, 'Use a direct release URL that answers 200 without a redirect.');
+      // GitHub release downloads answer 302 to a storage host; follow up to three https hops.
+      let hop = address, response;
+      for (let i = 0; i < 4; i++) {
+        response = await remote(fetcher, hop, {}, MAX);
+        if (![301, 302, 303, 307, 308].includes(response.status)) break;
+        const location = response.headers?.get?.('location');
+        if (!location || i === 3) fail(422, 'The release URL redirects too many times.');
+        hop = releaseURL(new URL(location, hop).href);
+      }
+      if (response.status !== 200) fail(422, 'Use a public HTTPS release URL that answers 200.');
       bytes = response.bytes; release = { url: address };
     }
     if (bytes.length < 2 || bytes[0] !== 0x1f || bytes[1] !== 0x8b) fail(400, 'The release must be a gzip archive.');
