@@ -129,6 +129,7 @@ byId('tiiny-verify')?.addEventListener('click', event => working(event.currentTa
   await api('/api/tiinyverse/verify', {}); await refreshAccount(2, true); status('Your Tiiny proof is done. Time to plant.');
 }));
 onSubmit('seed-form', async () => {
+  clearMarks();
   if (updateId && !originalSeed) throw new Error('Load your seed before updating it.');
   const form = new FormData(byId('seed-form'));
   if (originalSeed) {
@@ -193,8 +194,6 @@ if (seedForm) {
     if (!input.hasAttribute('aria-invalid')) flag(input, input.validity.valueMissing ? 'This one is needed.' : (input.validationMessage || 'Check this value.'));
     const first = seedForm.querySelector('[aria-invalid]'); if (first === input) { input.scrollIntoView({ block: 'center' }); input.focus({ preventScroll: true }); }
   }, true);
-  seedForm.addEventListener('input', event => { const input = event.target; if (input.hasAttribute('aria-invalid') && input.checkValidity()) { input.removeAttribute('aria-invalid'); input.closest('.seed-field')?.querySelector('.field-error')?.remove(); } });
-  seedForm.addEventListener('submit', clearMarks, true);
 }
 // A draft of the seed form survives reloads and failed sends. ponytail: localStorage, one key, no expiry.
 const DRAFT = 'farm-seed-draft';
@@ -204,7 +203,8 @@ if (draftForm) {
     const saved = JSON.parse(localStorage.getItem(DRAFT) || '{}');
     for (const [name, value] of Object.entries(saved)) { const el = draftForm.elements[name]; if (el && el.type !== 'file' && !el.value) el.value = value; }
   } catch {}
-  draftForm.addEventListener('input', () => {
+  draftForm.addEventListener('input', event => {
+    const input = event?.target; if (input?.hasAttribute?.('aria-invalid') && input.checkValidity?.()) { input.removeAttribute('aria-invalid'); input.closest?.('.seed-field')?.querySelector('.field-error')?.remove(); }
     const data = {}; for (const el of draftForm.elements) if (el.name && el.type !== 'file' && el.type !== 'submit') data[el.name] = el.value;
     try { localStorage.setItem(DRAFT, JSON.stringify(data)); } catch {}
   });
