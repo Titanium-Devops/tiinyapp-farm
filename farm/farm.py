@@ -262,10 +262,11 @@ class Farm:
                     token = getpass.getpass("Farm API token (hidden): ").strip()
             except getpass.GetPassWarning:
                 raise FarmError("No terminal to hide the token. Pipe it in instead: printf '%s' \"$(pbpaste)\" | farm login --token-stdin")
-        elif isinstance(token, str):
-            token = token.strip()
+        if isinstance(token, str):
+            token = token.strip().strip("\"'")
         if not self.valid_token(token):
-            raise FarmError("Use the farm_ token shown on your account page.")
+            seen = f"{len(token)} characters starting {token[:5]!r}" if isinstance(token, str) else "nothing"
+            raise FarmError(f"That is not a farm token: got {seen}; expected farm_ followed by 40 characters. Copy it again from your account page.")
         self.config_home.mkdir(parents=True, exist_ok=True, mode=0o700)
         atomic_write(self.config_home / "token", token + "\n")
         print("Farm token saved.")
