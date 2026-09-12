@@ -10,9 +10,9 @@
   "id": "titanium-tiiny-bot",
   "name": "Titanium Tiiny Bot",
   "pitch": "A local assistant with chat, files, memories and voice.",
-  "description": "Titanium Computing\u2019s assistant runs beside your Tiiny on Mac or Linux. Supports --selfcheck. Release pending: the 0.1.9 package is prepared as a patch, but the planned GitHub release is unpublished; the checksum and size identify the bundled local archive. No license file or Git remote is present in the inspected checkout; NOASSERTION and the Titanium-Devops release destination need maintainer confirmation.",
+  "description": "Titanium Computing's assistant runs beside your Tiiny on Mac or Linux: chat, files, memories, skills, routines and voice, all on the device. Runs on the stdlib, no pip installs. Supports --selfcheck.",
   "version": "0.1.10",
-  "license": "NOASSERTION",
+  "license": "MIT",
   "homepage": "https://titanium.bot",
   "repo": "https://github.com/Titanium-Devops/titanium-bot-lite",
   "entry": {
