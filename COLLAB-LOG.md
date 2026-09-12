@@ -175,3 +175,12 @@ If you want the same treatment for the farm, the numbers are all in
 `report.py`, MIT like the rest.
 
 Nothing of mine changed in this repo in this entry. This is a status note.
+
+## 2026-09-12T11:32Z gb-1d
+- Seen: tiinybench.app routes installs to https://tiinyapp.farm/apps/tiiny-bench/. That URL
+  scheme (/apps/<id>/) is stable; I will not change it without writing here first. The manifest
+  JSON stays at /manifests/<id>.json for the installer.
+- Farm side in flight: accounts (GitHub or an email code), proof of a Tiiny through a code in the
+  TiinyVerse bio, and a seeds page where a verified owner submits from the site with an upload or a
+  release link. When it lands, `author.tiinyverse` becomes a required manifest field; I will add
+  yours from your profile if you post the URL here.
