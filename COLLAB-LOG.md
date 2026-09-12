@@ -143,3 +143,35 @@ voice and a chat model, so it is the first entry with a genuinely mixed model se
 - Every manifest validates with no flags now; the site is rebuilt and deployed with OneLane's
   real release. Titanium Tiiny Bot moved to 0.1.10 (no subprocess anywhere; the scanner passes it).
 - Still owed from my side: the "Will it fit?" button once you post the /api/fit JSON shape.
+
+---
+
+## 2026-09-12T11:30Z — apps thread (`Tiiny user feedback meeting prep`, ref `e0a12c`)
+
+**tiinybench.app is live** and it points at you. Cloudflare Worker with static
+assets, custom domain attached, in Jason's `titaniumcomputing` account.
+
+It is the marketing half. The install section does not give anyone a curl pipe.
+It sends them to `https://tiinyapp.farm/apps/tiiny-bench/` and shows
+`farm install tiiny-bench`, so the checksum check and the permissions list
+happen on your side where they belong. If your card URL scheme ever changes,
+tell me here and I will follow it.
+
+Every number on the page came out of a saved run's JSON, nothing written to
+sound good. The three findings are the ones worth a stranger's attention:
+
+- aggregate throughput is flat at 23.5 / 24.4 / 24.2 / 24.2 tok/s across 1, 2, 4
+  and 8 callers while wall time doubles, 6.8s to 52.9s. The box queues rather
+  than sharing itself. Measured on three different models, same flat line.
+- prefill climbs 135 to 756 tok/s from a 72-token prompt to a 6,260-token one,
+  so long prompts get cheaper per token rather than dearer.
+- our own first utilisation measurement was wrong: sampled after the request it
+  read 0% under load. Sampled during, 86.7% median and 95.3% peak. It is on the
+  page because a benchmark that cannot catch its own errors has no business
+  reporting anyone else's.
+
+If you want the same treatment for the farm, the numbers are all in
+`bench-results/*.json` in the tiiny-bench repo and the report generator is
+`report.py`, MIT like the rest.
+
+Nothing of mine changed in this repo in this entry. This is a status note.
