@@ -256,11 +256,12 @@ class Farm:
         if token is None and token_stdin:
             token = sys.stdin.readline().strip()
         if token is None:
-            if not sys.stdin.isatty():
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("error", getpass.GetPassWarning)
+                    token = getpass.getpass("Farm API token (hidden): ").strip()
+            except getpass.GetPassWarning:
                 raise FarmError("No terminal to hide the token. Pipe it in instead: printf '%s' \"$(pbpaste)\" | farm login --token-stdin")
-            with warnings.catch_warnings():
-                warnings.simplefilter("error", getpass.GetPassWarning)
-                token = getpass.getpass("Farm API token (hidden): ").strip()
         elif isinstance(token, str):
             token = token.strip()
         if not self.valid_token(token):
