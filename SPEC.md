@@ -48,3 +48,10 @@ permissions match a static scan of the code (sockets, subprocess, microphone). M
    packaged as a release archive with a selfcheck entry.
 2. The site and its build script.
 3. The submission CI.
+
+## Added 2026-09-12 05:00 by Jason
+- A fourth app for launch: Tiiny Bench, partially built, at the path recorded in docs/APPS.md.
+- The feel of the site: FUN. A fantasy farm: apps are things you grow and pick, the catalog is
+  the field, install is "plant it", running apps are "growing", the submit page is "bring your
+  seeds". Warm and playful on top of the Midnight palette, Titan and Tiiny's marks present, no
+  corporate tone. Phase 2 (the site) designs this; phase 1 only names it.
