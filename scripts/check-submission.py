@@ -10,6 +10,8 @@ import subprocess
 import sys
 import tempfile
 import uuid
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -51,6 +53,26 @@ def run_selfcheck(manifest, root):
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def check_owner(manifest):
+    """Fail closed; use only the farm origin, never a manifest-supplied endpoint."""
+    profile = manifest.get('author', {}).get('tiinyverse')
+    if not profile:
+        return False
+    request = Request('https://tiinyapp.farm/api/owners?' + urlencode({'profile': profile}),
+                      headers={'User-Agent': 'tiinyapp-farm-ci/1.0'})
+    try:
+        with urlopen(request, timeout=10) as response:
+            if response.status != 200 or response.url.split('?')[0] != 'https://tiinyapp.farm/api/owners':
+                return False
+            raw = response.read(4097)
+        if len(raw) > 4096:
+            return False
+        owner = json.loads(raw)
+        return owner.get('verified') is True and owner.get('name') == manifest['author']['name']
+    except Exception:
+        return False
+
+
 def check_one(repository, relative, rows):
     def row(check, ok, detail):
         rows.append({'check': f'{relative}: {check}', 'result': 'PASS' if ok else 'FAIL', 'detail': detail})
@@ -79,6 +101,10 @@ def check_one(repository, relative, rows):
         row('identity', valid_id, 'ID must match filename and be unique throughout the catalog')
         if not valid_id:
             return
+        if not check_owner(manifest):
+            row('Tiiny owner', False, 'The seed must name a verified TiinyVerse owner and their current farm display name.')
+            return
+        row('Tiiny owner', True, 'The farm confirmed the TiinyVerse owner and display name')
         with tempfile.TemporaryDirectory(prefix='farm-submission-') as temporary:
             temp = Path(temporary)
             archive = temp / 'release.tar'

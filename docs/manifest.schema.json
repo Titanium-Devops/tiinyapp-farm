@@ -13,7 +13,6 @@
     "author",
     "license",
     "homepage",
-    "repo",
     "screenshots",
     "release",
     "entry",
@@ -63,6 +62,11 @@
         },
         "url": {
           "$ref": "#/$defs/webUrl"
+        },
+        "tiinyverse": {
+          "type": "string",
+          "pattern": "^https://www\\.tiinyverse\\.com/users/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![\\s\\S])",
+          "description": "Verified owner profile. Required for every new or changed submission by the CI owner gate; legacy catalog drafts remain readable."
         }
       }
     },
@@ -74,7 +78,8 @@
       "$ref": "#/$defs/webUrl"
     },
     "repo": {
-      "$ref": "#/$defs/webUrl"
+      "$ref": "#/$defs/webUrl",
+      "description": "Optional source repository URL; an uploaded source archive is sufficient."
     },
     "screenshots": {
       "type": "array",

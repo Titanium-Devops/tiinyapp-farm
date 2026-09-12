@@ -2,12 +2,32 @@ name = "tiinyapp-farm"
 account_id = "5a845e69fbed4f4e64e2176d86637680"
 compatibility_date = "2026-09-12"
 workers_dev = false
+main = "worker/main.mjs"
 
 [[routes]]
 pattern = "tiinyapp.farm"
 custom_domain = true
 
 [assets]
+binding = "ASSETS"
+run_worker_first = ["/api/*", "/seeds-files/*"]
 directory = "./site/dist"
 html_handling = "force-trailing-slash"
 not_found_handling = "404-page"
+
+# Orchestrator: replace with the ID returned when creating the FARM namespace.
+[[kv_namespaces]]
+binding = "FARM"
+id = "REPLACE_WITH_FARM_KV_NAMESPACE_ID"
+
+[[r2_buckets]]
+binding = "SEEDS"
+bucket_name = "farm-seeds"
+
+[[durable_objects.bindings]]
+name = "FARM_COORDINATOR"
+class_name = "FarmCoordinator"
+
+[[migrations]]
+tag = "v1-farm-coordinator"
+new_sqlite_classes = ["FarmCoordinator"]

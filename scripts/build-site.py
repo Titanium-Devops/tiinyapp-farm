@@ -25,10 +25,10 @@ FIELDS = {
     "pitch": "One short line explaining what it does.",
     "description": "The full story, including limitations and release readiness.",
     "version": "The release version as major.minor.patch.",
-    "author": "The maker's name and public web address (name and url).",
+    "author": "The maker's TiinyVerse display name, public URL and verified tiinyverse profile URL.",
     "license": "The license identifier; NOASSERTION means a license is not confirmed.",
     "homepage": "The app's public home page.",
-    "repo": "The source repository for review.",
+    "repo": "Optional source repository; uploaded archives include source for review.",
     "screenshots": "A list of public image URLs; an empty list is fine.",
     "release": "The archive url, its sha256 checksum and its size in bytes. A pending checksum blocks installation; size 0 means unknown.",
     "entry": "A Python module (python) and args, or a command. Use null for a library with nothing to start.",
@@ -134,7 +134,7 @@ def app_page(app, today):
 <section><h2>Plant it</h2><p>Read the release notes below before installing. {link('/plant/', 'Set up the farmhand')}.</p>{command('farm install ' + app['id'])}{start}</section>
 <section><h2>Screenshots</h2>{screenshots}</section>
 <section><h2>The maker and the seed</h2><p>Author: {link(app['author']['url'], app['author']['name'])}</p><dl>{details}</dl>
-<p>{link(app['homepage'], 'App home')} {link(app['repo'], 'Source repository')} {link('/manifests/' + app['id'] + '.json', 'Original manifest')}</p></section>
+<p>{link(app['homepage'], 'App home')} {link(app['repo'], 'Source repository') if app.get('repo') else 'Source supplied in the release archive.'} {link('/manifests/' + app['id'] + '.json', 'Original manifest')}</p></section>
 <section><h2>Release</h2><p>{link(release['url'], 'Release archive')}</p><dl><dt>SHA-256 checksum</dt><dd><code>{e(release['sha256'])}</code></dd><dt>Archive size</dt><dd>{str(release['size']) + ' bytes' if release['size'] else '0 bytes recorded (size unknown)'}</dd></dl>
 {'<p>Release pending: the installer cannot install this seed until its checksum is published.</p>' if release['sha256'] == 'pending' else ''}
 <p>Release notes: {e(app['description'])}</p></section>
@@ -142,14 +142,72 @@ def app_page(app, today):
 
 
 def seeds():
-    fields = ''.join(f'<dt><code>{e(k)}</code></dt><dd>{e(v)}</dd>' for k, v in FIELDS.items())
-    return f'''<section class="sect"><h1>Bring your seeds</h1><p class="lede">Built something for the Pocket Lab? Give it a plot on the farm.</p>
-<p>Read the {link("/docs/SUBMIT.md", "contributor guide")} for packaging, permissions and CI details.</p>
-<h2>How to submit</h2><ol><li>Publish the app's source and a versioned release archive. Include a selfcheck.</li><li>Add <code>manifests/your-app.json</code> using an {link('/manifests/', 'existing seed')} and the {link('/docs/manifest.schema.json', 'manifest schema')}.</li><li>Open a pull request in {link(REPO, 'Titanium-Devops/tiinyapp-farm')}. Leave <code>verified</code> false for the farmhands.</li></ol>
-<h2>The manifest fields</h2><dl>{fields}</dl><h2>The checks</h2><p>Run the local schema check before submitting:</p>{command('python3 scripts/check-manifest.py manifests/your-app.json')}
-<p>For a clearly described release draft only, add <code>--allow-pending</code>. Draft validation does not make an app installable.</p>
-<ul><li>The schema checks required fields, formats, permissions and entry shape.</li><li>The installer checks the archive checksum and byte size before extraction.</li><li>Before verification, farmhands must run the selfcheck, review the source for secrets and confirm declared permissions match the code.</li></ul>
-<p>Schema validation alone does not run the app or perform a security review. Verified requires CI and human review; it is not awarded by this site builder.</p></section>'''
+    return r'''<section class="sect seed-intro"><span class="eyebrow">A little space for what you grow</span><h1>Bring your seeds</h1>
+<p class="lede">Built something for the Pocket Lab? Make a farm account, show us your Tiiny, and give your app a plot.</p>
+<p>No GitHub account needed. Your TiinyVerse profile is your owner's handshake.</p>
+<noscript><p>These forms need JavaScript to send codes and check your profile. You can still read the whole guide below.</p></noscript>
+<p id="farm-status" role="status" aria-live="polite"></p>
+<div class="seed-cards">
+<section class="seed-card" aria-labelledby="account-heading"><span class="step-number" aria-hidden="true">01</span><h2 id="account-heading">Your farm account</h2>
+<p>An email, a code, and you're home. Or come in through GitHub. Both doors lead to the same farm.</p>
+<p id="account-state" class="card-state" role="status">Start here. No password to remember.</p>
+<form id="email-start"><label for="email">Email address</label><input id="email" name="email" type="email" autocomplete="email" maxlength="254" required><button class="btn hay" type="submit">Send my code</button></form>
+<form id="email-verify"><label for="code">Six-digit email code</label><input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required><button class="btn ghost" type="submit">Sign in with code</button></form>
+<p class="fine">Codes last 10 minutes. Up to three per hour.</p>
+<a class="btn ghost" id="github-signin" href="/api/auth/github">Sign in with GitHub</a>
+<p class="fine">Already signed in? Add the other sign-in here to link it to this account.</p>
+<button id="logout" class="btn ghost" type="button" hidden>Sign out</button></section>
+<section class="seed-card" aria-labelledby="proof-heading"><span class="step-number" aria-hidden="true">02</span><h2 id="proof-heading">Prove your Tiiny</h2>
+<p>Your public TiinyVerse profile tells the farm who is planting. Its display name will appear beside your seed.</p>
+<p id="proof-state" class="card-state" role="status">First, sign in to your farm account.</p>
+<form id="tiiny-link"><fieldset id="proof-fields" disabled><legend>Your owner's profile</legend><label for="profileUrl">TiinyVerse profile URL</label><input id="profileUrl" name="profileUrl" type="url" placeholder="https://www.tiinyverse.com/users/…" required><button class="btn hay" type="submit">Get my bio code</button></fieldset></form>
+<div id="bio-challenge" hidden><p>Put this in your TiinyVerse bio, then press Verify.</p><output id="bio-code"></output><p class="fine" id="bio-expiry">Your code lasts 24 hours.</p><button id="tiiny-verify" class="btn hay" type="button">Verify</button></div>
+<p class="fine">One TiinyVerse profile belongs to one farm account. Sign in to that same account next time.</p></section>
+<section class="seed-card" aria-labelledby="seed-heading"><span class="step-number" aria-hidden="true">03</span><h2 id="seed-heading">Plant a seed</h2>
+<p>Tell us what it does and what it needs. The farmhands will check your seed before it joins the field.</p>
+<p id="seed-state" class="card-state" role="status">Unlocks when your account and Tiiny proof are done.</p>
+<form id="seed-form"><fieldset id="seed-fields" disabled><legend>Your seed</legend>
+<label for="seed-name">Name</label><input id="seed-name" name="name" required maxlength="120">
+<label for="seed-id">Seed ID</label><input id="seed-id" name="id" pattern="[a-z][a-z0-9]*(-[a-z0-9]+)*" placeholder="my-little-app" required maxlength="80">
+<label for="version">Version</label><input id="version" name="version" pattern="(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)" value="0.1.0" required>
+<label for="pitch">One-line pitch</label><input id="pitch" name="pitch" required maxlength="240">
+<label for="description">What does it do?</label><textarea id="description" name="description" rows="4" required maxlength="12000"></textarea>
+<label for="license">License</label><input id="license" name="license" placeholder="MIT" required maxlength="100">
+<label for="repo">Source repository URL (optional)</label><input id="repo" name="repo" type="url" placeholder="https://…">
+<label for="homepage">Home page (optional)</label><input id="homepage" name="homepage" type="url" placeholder="https://…">
+<label for="releaseUrl">Direct release URL</label><input id="releaseUrl" name="releaseUrl" type="url" placeholder="https://…/release.tar.gz">
+<p class="fine">Either a direct HTTPS tar.gz link without redirects, or an upload below. The archive must include the source for review.</p>
+<label for="archive">Or upload a tar.gz (up to 50 MB)</label><input id="archive" name="archive" type="file" accept=".tar.gz,application/gzip">
+<label for="permissions">What it asks for</label><select id="permissions" name="permissionChoices" multiple size="4" aria-describedby="permission-help"><option value="microphone">Microphone</option><option value="files">Files</option><option value="network">Network</option><option value="device">Tiiny device</option></select>
+<p class="fine" id="permission-help">Choose all access your app uses. Leave empty if it asks for nothing. Use Control or Command to select several.</p>
+<details><summary>What it needs &amp; how it starts</summary>
+<label for="command">Start command (empty for a library)</label><input id="command" name="command" placeholder="python -m my_app">
+<label for="python">Python version (optional)</label><input id="python" name="python" placeholder="3.11" pattern="[0-9]+\.[0-9]+">
+<label for="ports">Local ports, separated by commas</label><input id="ports" name="ports" placeholder="8080">
+<label for="models">Tiiny models, separated by commas</label><input id="models" name="models" placeholder="qwen3:8b">
+<label for="npuUnits">NPU units</label><input id="npuUnits" name="npuUnits" type="number" min="0" step="1" value="0">
+<label for="tags">Tags, separated by commas</label><input id="tags" name="tags" placeholder="library, tools"><p class="fine">Include library if there is no start command.</p>
+<label for="health">HTTP health path (optional)</label><input id="health" name="health" placeholder="/health">
+<label class="check-label"><input name="selfcheck" type="checkbox" value="true"> Supports an offline --selfcheck</label></details>
+<button class="btn hay" type="submit">Send to the farmhands</button></fieldset></form>
+<a href="/seeds/mine/">My seeds and their checks</a></section></div>
+<section class="seed-notes"><h2>A little care before the field</h2><p>We check the label on the packet, weigh the archive, and make sure the checksum matches. Then we look for unsafe paths, secrets and access the app forgot to declare. If it has a selfcheck, CI runs it offline.</p>
+<p>A green check is a start. A farmhand still reads the source and reviews the seed before merging it. Verified means the farmhands ran it and read it; it is never awarded just for filling in this form.</p>
+<p>Follow progress on <a href="/seeds/mine/">My seeds</a>. You do not need to visit GitHub to submit or check progress.</p></section>
+<section class="seed-faq"><h2>A few things you might wonder</h2>
+<details open><summary>Do I need GitHub?</summary><p>No. Use your email and upload your seed here. GitHub sign-in is an equally welcome option.</p></details>
+<details><summary>Why TiinyVerse?</summary><p>It is the Tiiny owners' community. A code in your public bio proves that profile is yours. Every maker uses this same proof, whichever sign-in they choose.</p></details>
+<details><summary>Can I link email and GitHub?</summary><p>Yes. Sign in first, then use the other sign-in on this page. An identity already linked to another account cannot be moved here.</p></details>
+<details><summary>Can I still send a pull request myself?</summary><p>Of course. Prove your profile here first, then name it in author.tiinyverse and use the same display name in your manifest. Hand-made submissions pass the same checks.</p></details>
+<details><summary>What belongs in the packet?</summary><p>A versioned tar.gz containing your source, license and instructions. Include a selfcheck if you can. The <a href="/docs/SUBMIT.md">contributor guide</a> and <a href="/docs/manifest.schema.json">manifest schema</a> explain the details.</p></details></section></section>
+<script type="module" src="/assets/seeds.js"></script>'''
+
+
+def my_seeds():
+    return '''<section class="sect"><span class="eyebrow">From packet to plot</span><h1>My seeds</h1><p class="lede">Your seed's checks and the farmhands' review, all in one place.</p>
+<p><a href="/seeds/">Back to your farm account and planting form</a></p><p id="farm-status" role="status" aria-live="polite">Sign in on the seeds page to see your submissions.</p>
+<button id="refresh-seeds" class="btn hay" type="button">Refresh checks</button><div id="my-seeds" class="field"></div>
+<noscript><p>JavaScript is needed to load your private submission status.</p></noscript></section><script type="module" src="/assets/seeds.js"></script>'''
 
 
 def build(source=ROOT, output=None, today=None):
@@ -182,7 +240,7 @@ def build(source=ROOT, output=None, today=None):
         field += ''.join(plot(app, today) for _, app in manifests) + '</div></section>'
         invitation = '<section class="seeds"><div><h2>Bring your seeds</h2><p>One manifest, a place in the field, and farmhands to help it grow.</p></div><a class="btn hay" href="/seeds/">Share your app</a></section>'
         pages = {"/": ("The field", hero + field + steps().replace('<h1>', '<h2>').replace('</h1>', '</h2>') + invitation),
-                 "/plant/": ("Plant an app", steps()), "/seeds/": ("Bring your seeds", seeds())}
+                 "/plant/": ("Plant an app", steps()), "/seeds/": ("Bring your seeds", seeds()), "/seeds/mine/": ("My seeds", my_seeds())}
         listing = '<section class="sect"><h1>The seeds</h1><p>The installer catalog at https://tiinyapp.farm/manifests/.</p><ul>'
         for path, app in manifests:
             pages[f"/apps/{app['id']}/"] = (app["name"], app_page(app, today))
@@ -195,7 +253,7 @@ def build(source=ROOT, output=None, today=None):
         write('404.html', page('This plot is empty', '<section class="sect"><h1>This plot is empty</h1><p>That seed is not here. ' + link('/', 'Return to the field') + '.</p></section>', '/404.html'))
         write('sitemap.xml', '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + ''.join(f'<url><loc>{ORIGIN}{url}</loc></url>' for url in sorted(pages)) + '</urlset>\n')
         write('robots.txt', f'User-agent: *\nAllow: /\nSitemap: {ORIGIN}/sitemap.xml\n')
-        for folder, files in {'assets': ['hero.jpg', 'site.css'], 'brand': ['ti-mark.svg', 'titanium-bot-logo.svg', 'tiiny-logo.svg'], 'docs': ['manifest.schema.json', 'SUBMIT.md']}.items():
+        for folder, files in {'assets': ['hero.jpg', 'site.css', 'seeds.js'], 'brand': ['ti-mark.svg', 'titanium-bot-logo.svg', 'tiiny-logo.svg'], 'docs': ['manifest.schema.json', 'SUBMIT.md']}.items():
             for name in files:
                 origin = source / ('site/assets' if folder == 'assets' else folder) / name
                 (dest / folder).mkdir(exist_ok=True)

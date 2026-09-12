@@ -103,7 +103,10 @@ class ScannerTests(unittest.TestCase):
             SCAN['scan_archive'](archive, self.manifest)
 
     def test_bundled_lite_truthfully_flags_shell(self):
-        result = SCAN['scan_archive'](ROOT / 'farm-lite-patch/titanium-tiiny-bot-0.1.9.tar.gz', self.manifest)
+        bundle = ROOT / 'farm-lite-patch/titanium-tiiny-bot-0.1.9.tar.gz'
+        if not bundle.exists():
+            self.skipTest('Optional local Lite release archive is not part of a clean checkout')
+        result = SCAN['scan_archive'](bundle, self.manifest)
         self.assertFalse(result['ok'])
         self.assertTrue(any(f['kind'] == 'shell' for f in result['findings']))
         self.assertFalse(any(f['kind'] == 'secret' for f in result['findings']))
@@ -116,6 +119,10 @@ class SubmissionTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         (self.root / 'manifests').mkdir()
         self.manifest = json.loads((ROOT / 'manifests/titanium-tiiny-bot.json').read_text())
+        # These tests isolate archive/CI behavior; owner gate has its own fixtures below.
+        self.owner_patch = patch.dict(CHECK['check_one'].__globals__, check_owner=lambda manifest: True)
+        self.owner_patch.start()
+        self.addCleanup(self.owner_patch.stop)
         self.manifest['selfcheck'] = False
         self.path = self.root / 'manifests/titanium-tiiny-bot.json'
         self.write()
@@ -252,6 +259,42 @@ class SubmissionTests(unittest.TestCase):
         self.assertIn('pip install tiinyapp-farm', site['steps']())
         self.assertIn('git clone', site['steps']())
         self.assertIn('/docs/SUBMIT.md', site['seeds']())
+
+
+class OwnerGateTests(unittest.TestCase):
+    def setUp(self):
+        self.manifest = json.loads((ROOT / 'manifests/titanium-tiiny-bot.json').read_text())
+        self.manifest['author']['tiinyverse'] = 'https://www.tiinyverse.com/users/39628b1e-e94e-4bd8-800e-5437d5336e1f'
+
+    def response(self, value):
+        response = io.BytesIO(json.dumps(value).encode())
+        response.status = 200
+        response.url = 'https://tiinyapp.farm/api/owners?profile=fixture'
+        return response
+
+    def test_verified_owner_and_matching_name_required(self):
+        for verified, name, expected in ((True, self.manifest['author']['name'], True),
+                                          (False, self.manifest['author']['name'], False),
+                                          (True, 'Impersonated name', False)):
+            with patch.dict(CHECK['check_owner'].__globals__, urlopen=lambda *a, **k: self.response({'verified': verified, 'name': name})):
+                self.assertEqual(CHECK['check_owner'](self.manifest), expected)
+        del self.manifest['author']['tiinyverse']
+        self.assertFalse(CHECK['check_owner'](self.manifest))
+
+    def test_unavailable_gate_fails_closed_before_archive_download(self):
+        with patch.dict(CHECK['check_owner'].__globals__, urlopen=lambda *a, **k: (_ for _ in ()).throw(TimeoutError())):
+            self.assertFalse(CHECK['check_owner'](self.manifest))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'manifests').mkdir()
+            path = root / 'manifests' / (self.manifest['id'] + '.json')
+            path.write_text(json.dumps(self.manifest))
+            rows = []
+            with patch.dict(CHECK['check_one'].__globals__, check_owner=lambda _: False), patch.object(CHECK['Farm'], 'download') as download:
+                CHECK['check_one'](root, 'manifests/' + path.name, rows)
+            download.assert_not_called()
+            self.assertEqual(rows[-1]['check'], 'manifests/' + path.name + ': Tiiny owner')
+            self.assertEqual(rows[-1]['detail'], 'The seed must name a verified TiinyVerse owner and their current farm display name.')
 
 
 if __name__ == '__main__':

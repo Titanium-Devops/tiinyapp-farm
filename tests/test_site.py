@@ -89,7 +89,7 @@ class SiteTests(unittest.TestCase):
                 self.assertIn('Not verified by the farmhands.', visible)
 
     def test_required_pages_and_byte_identical_manifests(self):
-        for path in ('index.html', 'plant/index.html', 'seeds/index.html', 'manifests/index.html', 'sitemap.xml', 'robots.txt', '404.html'):
+        for path in ('index.html', 'plant/index.html', 'seeds/index.html', 'seeds/mine/index.html', 'manifests/index.html', 'sitemap.xml', 'robots.txt', '404.html'):
             self.assertTrue((self.output / path).is_file(), path)
         for path in (ROOT / 'manifests').glob('*.json'):
             self.assertEqual(path.read_bytes(), (self.output / 'manifests' / path.name).read_bytes())
@@ -101,6 +101,8 @@ class SiteTests(unittest.TestCase):
                 parsed = urlsplit(urljoin(source_url, reference))
                 if parsed.netloc != 'tiinyapp.farm':
                     continue
+                if parsed.path == '/api/auth/github':
+                    continue  # Worker OAuth route, not a static file.
                 target = self.output / unquote(parsed.path).lstrip('/')
                 if target.is_dir():
                     target /= 'index.html'
@@ -109,14 +111,18 @@ class SiteTests(unittest.TestCase):
                     if parsed.fragment:
                         self.assertIn(unquote(parsed.fragment), Document(target.read_text()).ids)
 
-    def test_assets_marks_fonts_copy_and_no_javascript(self):
+    def test_assets_marks_fonts_and_javascript_only_on_interactive_seed_pages(self):
         for path in self.output.rglob('*.html'):
             text = path.read_text()
             doc = Document(text)
             self.assertNotIn(chr(0x2014), text)
             self.assertNotIn('tiny' + 'app', text.lower())
             self.assertNotIn('data:image', text)
-            self.assertFalse(any(tag == 'script' for tag, _ in doc.tags))
+            scripts = [attrs for tag, attrs in doc.tags if tag == 'script']
+            if path.relative_to(self.output).as_posix() in ('seeds/index.html', 'seeds/mine/index.html'):
+                self.assertEqual(scripts, [{'type': 'module', 'src': '/assets/seeds.js'}])
+            else:
+                self.assertEqual(scripts, [])
             for reference in ('/brand/tiiny-logo.svg', '/brand/titanium-bot-logo.svg', 'https://titanium.bot', 'https://tiiny.ai'):
                 self.assertIn(reference, doc.references)
             self.assertIn('Brought to you by Titanium Bot', text)
@@ -181,7 +187,7 @@ class SiteTests(unittest.TestCase):
     def test_sitemap_and_field_documentation(self):
         tree = ET.parse(self.output / 'sitemap.xml')
         urls = {element.text for element in tree.iter('{http://www.sitemaps.org/schemas/sitemap/0.9}loc')}
-        expected = {'https://tiinyapp.farm' + path for path in ('/', '/plant/', '/seeds/', '/manifests/')}
+        expected = {'https://tiinyapp.farm' + path for path in ('/', '/plant/', '/seeds/', '/seeds/mine/', '/manifests/')}
         expected.update('https://tiinyapp.farm/apps/' + app['id'] + '/' for app in self.apps)
         self.assertEqual(urls, expected)
         self.assertIn('Sitemap: https://tiinyapp.farm/sitemap.xml', (self.output / 'robots.txt').read_text())
@@ -207,6 +213,12 @@ class SiteTests(unittest.TestCase):
     def test_deploy_configuration(self):
         config = tomllib.loads((ROOT / 'wrangler.toml').read_text())
         self.assertEqual(config['name'], 'tiinyapp-farm')
+        self.assertEqual(config['main'], 'worker/main.mjs')
+        self.assertEqual(config['assets']['binding'], 'ASSETS')
+        self.assertEqual(config['assets']['run_worker_first'], ['/api/*', '/seeds-files/*'])
+        self.assertEqual(config['kv_namespaces'][0]['binding'], 'FARM')
+        self.assertEqual(config['r2_buckets'][0], {'binding': 'SEEDS', 'bucket_name': 'farm-seeds'})
+        self.assertEqual(config['durable_objects']['bindings'][0]['class_name'], 'FarmCoordinator')
         self.assertEqual(config['routes'], [{'pattern': 'tiinyapp.farm', 'custom_domain': True}])
         self.assertEqual(config['assets']['directory'], './site/dist')
         self.assertEqual(config['assets']['not_found_handling'], '404-page')
@@ -214,6 +226,24 @@ class SiteTests(unittest.TestCase):
         workflow = (ROOT / '.github/workflows/site.yml').read_text()
         for required in ('branches: [main]', 'python3 scripts/build-site.py', 'python3 -m unittest', 'command: deploy', 'secrets.CLOUDFLARE_API_TOKEN', 'secrets.CLOUDFLARE_ACCOUNT_ID'):
             self.assertIn(required, workflow)
+
+    def test_seed_cards_read_signed_out_and_lock_proof_and_planting(self):
+        doc = Document((self.output / 'seeds/index.html').read_text())
+        visible = ' '.join(doc.text)
+        for phrase in ('Your farm account', 'Prove your Tiiny', 'Plant a seed',
+                       'Do I need GitHub?', 'No. Use your email', 'Put this in your TiinyVerse bio'):
+            self.assertIn(phrase, visible)
+        cards = [attrs for tag, attrs in doc.tags if attrs.get('class') == 'seed-card']
+        self.assertEqual(len(cards), 3)
+        locked = [attrs['id'] for tag, attrs in doc.tags if tag == 'fieldset' and 'disabled' in attrs]
+        self.assertEqual(locked, ['proof-fields', 'seed-fields'])
+        labels = {attrs['for'] for tag, attrs in doc.tags if tag == 'label' and 'for' in attrs}
+        for tag, attrs in doc.tags:
+            if tag in ('input', 'textarea', 'select') and attrs.get('type') != 'checkbox':
+                self.assertIn(attrs['id'], labels)
+        css = (self.output / 'assets/site.css').read_text()
+        self.assertIn('grid-template-columns:repeat(3,minmax(0,1fr))', css)
+        self.assertIn('@media(max-width:900px){.seed-cards{grid-template-columns:minmax(0,1fr)}', css)
 
     def test_cli_works_outside_repository(self):
         with tempfile.TemporaryDirectory() as temp:

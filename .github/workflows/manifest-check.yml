@@ -27,7 +27,9 @@ jobs:
           python-version: '3.11'
       - name: Prepare the selfcheck image before offline execution
         run: docker pull python:3.11-slim
-      - name: Validate submissions
+      # Trusted checker requires author.tiinyverse and calls
+      # https://tiinyapp.farm/api/owners?profile=<url>, failing closed.
+      - name: Validate submissions and TiinyVerse ownership
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
