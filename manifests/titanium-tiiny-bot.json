@@ -11,7 +11,7 @@
   "name": "Titanium Tiiny Bot",
   "pitch": "A local assistant with chat, files, memories and voice.",
   "description": "Titanium Computing\u2019s assistant runs beside your Tiiny on Mac or Linux. Supports --selfcheck. Release pending: the 0.1.9 package is prepared as a patch, but the planned GitHub release is unpublished; the checksum and size identify the bundled local archive. No license file or Git remote is present in the inspected checkout; NOASSERTION and the Titanium-Devops release destination need maintainer confirmation.",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "license": "NOASSERTION",
   "homepage": "https://titanium.bot",
   "repo": "https://github.com/Titanium-Devops/titanium-bot-lite",
@@ -47,9 +47,9 @@
     "voice"
   ],
   "release": {
-    "url": "https://github.com/Titanium-Devops/titanium-bot-lite/releases/download/v0.1.9/titanium-tiiny-bot-0.1.9.tar.gz",
-    "sha256": "58dca3dbb5d573c3c0c3ffefb8fd615d6ef87f013d19de384ffe4f2bcb3cc715",
-    "size": 433852
+    "url": "https://github.com/Titanium-Devops/titanium-bot-lite/releases/download/v0.1.10/titanium-tiiny-bot-0.1.10.tar.gz",
+    "sha256": "08160481931334c2422da7831fc41b8f4798e34ab1b8c933b79d6aeee995865d",
+    "size": 433818
   },
   "health": "/api/health",
   "selfcheck": true
