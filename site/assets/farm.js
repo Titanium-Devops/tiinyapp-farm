@@ -42,8 +42,8 @@ function renderMaker(user) {
 }
 // Keep stored API states stable while presenting the current review status.
 function appStatus(app) {
-  if (['merged', 'published', 'sprouting'].includes(app.state)) return 'In the catalog';
-  if (app.state === 'closed') return 'Closed without merging';
+  if (['merged', 'published', 'sprouting'].includes(app.state)) return 'Published';
+  if (app.state === 'closed') return 'Closed';
   if (app.state === 'submission failed') return 'App submission failed';
   if (app.state === 'submission uncertain') return 'App submission needs maintainer assistance';
   const checks = app.checks || [];
@@ -51,7 +51,7 @@ function appStatus(app) {
   if (failed.length) return 'Checks failed: ' + failed.map(check => `${check.name} (${check.status.replaceAll('_', ' ')})`).join(', ');
   if (app.unavailable) return 'Check status unavailable';
   if (!checks.length || checks.some(check => !['success', 'neutral', 'skipped'].includes(check.status))) return 'Checks running';
-  return 'Waiting for a maintainer';
+  return 'Waiting for review';
 }
 
 async function refreshSeeds() {
@@ -74,7 +74,7 @@ async function refreshSeeds() {
     }
     if (seed.canUpdate) {
       const update = element('a', 'Update'); update.className = 'btn hay';
-      update.href = '/seeds/?update=' + encodeURIComponent(seed.id); card.append(update);
+      update.href = '/submit/?update=' + encodeURIComponent(seed.id); card.append(update);
     }
     if (!seed.url) card.append(element('p', 'Your app page is available after the pull request is merged.'));
     byId('my-seeds').append(card);
@@ -87,6 +87,13 @@ async function working(button, action) {
   try { await action(); } catch (error) { status(error.message || 'Connection interrupted. Please try again.'); }
   finally { button.disabled = false; }
 }
+byId('edit-profile').addEventListener('click', () => {
+  const form = byId('maker-form');
+  form.hidden = !form.hidden;
+  byId('edit-profile').textContent = form.hidden ? 'Edit' : 'Cancel';
+  byId('edit-profile').setAttribute('aria-expanded', String(!form.hidden));
+  if (!form.hidden) byId('bio').focus();
+});
 byId('maker-form').addEventListener('submit', event => {
   event.preventDefault();
   working(event.submitter || byId('maker-form').querySelector('[type=submit]'), async () => {
@@ -109,6 +116,9 @@ byId('maker-form').addEventListener('submit', event => {
     await api('/api/maker', post({ bio, avatarKey, links }));
     byId('avatar').value = '';
     renderMaker(await refreshSession());
+    byId('maker-form').hidden = true;
+    byId('edit-profile').textContent = 'Edit';
+    byId('edit-profile').setAttribute('aria-expanded', 'false');
     status('Your profile is saved.');
   });
 });
@@ -120,7 +130,7 @@ byId('remove-avatar').addEventListener('click', event => working(event.currentTa
 byId('refresh-seeds').addEventListener('click', event => working(event.currentTarget, refreshSeeds));
 (async () => {
   const user = await refreshSession();
-  if (!user) { window.location.replace('/seeds/'); return; }
+  if (!user) { window.location.replace('/submit/#account-panel'); return; }
   renderMaker(user);
   await refreshSeeds();
 })().catch(error => status(error.message));

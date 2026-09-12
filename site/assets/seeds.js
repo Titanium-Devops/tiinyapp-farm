@@ -6,9 +6,21 @@ let codeEmail = '';
 const updateId = new URLSearchParams(window.location.search).get('update');
 let originalSeed = null;
 let originalCommand = '';
+const permissionInputs = () => [...document.querySelectorAll('#permissions input[type=checkbox]')];
+function setFormDisabled(disabled) {
+  for (const fieldset of document.querySelectorAll('#seed-form fieldset')) fieldset.disabled = disabled;
+  byId('seed-form').querySelector('button[type=submit]').disabled = disabled;
+}
+function syncRelease() {
+  const hasRelease = byId('seed-form').elements.namedItem('releaseChoice').value !== 'no';
+  byId('release-fields').hidden = !hasRelease;
+  for (const id of ['version', 'releaseUrl', 'archive']) byId(id).disabled = !hasRelease;
+  if (!hasRelease) clearMarks();
+}
+
 async function prefillSeed() {
   if (!updateId || originalSeed || !currentUser?.tiinyverse) return;
-  byId('seed-fields').disabled = true;
+  setFormDisabled(true);
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(updateId)) throw new Error('Invalid app ID.');
   const { seeds } = await api('/api/seeds/mine');
   if (!seeds.some(seed => seed.id === updateId && seed.canUpdate)) throw new Error('Only the maker can update this app.');
@@ -23,23 +35,31 @@ async function prefillSeed() {
     models: seed.requires.device.models.join(','), npuUnits: seed.requires.device.npuUnits,
     tags: seed.tags.join(','), health: seed.health,
   };
-  for (const [key, value] of Object.entries(values)) form.elements.namedItem(key).value = value ?? '';
+  for (const [key, value] of Object.entries(values)) { const input = form.elements.namedItem(key); if (input) input.value = value ?? ''; }
   form.elements.namedItem('id').readOnly = true;
-  form.elements.namedItem('selfcheck').checked = !!seed.selfcheck;
-  for (const option of byId('permissions').options) option.selected = seed.permissions.includes(option.value);
+  for (const input of permissionInputs()) input.checked = seed.permissions.includes(input.value);
+  form.elements.namedItem('releaseChoice').value = seed.release ? 'yes' : 'no';
+  syncRelease();
   originalCommand = values.command;
   originalSeed = seed;
   byId('release-heading').textContent = seed.release ? 'Replace your release (optional)' : 'Add your first release';
+  byId('release-help').hidden = false;
   byId('release-help').textContent = seed.release ? 'Leave these fields empty to keep the current release. A replacement needs a higher version.' : 'Leave these fields empty to submit without a release.';
   byId('seed-state').textContent = 'Updating ' + seed.name + '. Existing images stay unless you upload replacements.';
-  byId('seed-fields').disabled = false;
+  setFormDisabled(false);
   showStep(2);
 }
 const tabs = [...document.querySelectorAll('.seed-tabs [role=tab]')];
+function hashStep() {
+  const index = tabs.findIndex(tab => '#' + tab.getAttribute('aria-controls') === window.location.hash);
+  return index < 0 ? undefined : index;
+}
+window.addEventListener?.('hashchange', () => { const step = hashStep(); if (step !== undefined) showStep(step); });
 function showStep(index, focus = false) {
   tabs.forEach((tab, position) => {
     const selected = position === index;
     tab.setAttribute('aria-selected', String(selected));
+    tab.classList.toggle('now', selected);
     tab.tabIndex = selected ? 0 : -1;
     byId(tab.getAttribute('aria-controls')).hidden = !selected;
     if (selected && focus) tab.focus();
@@ -91,11 +111,11 @@ async function refreshAccount(step, focus = false) {
   byId('logout').hidden = !user;
   byId('account-farm').hidden = !user;
   byId('github-signin').hidden = !!user?.github;
-  byId('github-signin').textContent = user ? 'Link GitHub to this account' : 'Sign in with GitHub';
+  byId('github-signin').textContent = user ? 'Link GitHub' : 'Sign in with GitHub';
   byId('email-start').hidden = !!user?.email;
   byId('email-verify').hidden = !!user?.email;
   byId('proof-fields').disabled = !user || !!proof;
-  byId('seed-fields').disabled = !proof;
+  setFormDisabled(!proof);
   byId('proof-state').classList.toggle('done', !!proof);
   byId('seed-state').classList.toggle('done', !!proof);
   byId('proof-state').textContent = proof ? `Verified: ${proof.name}. ` : user ? 'Paste your public TiinyVerse profile below.' : 'First, sign in to your account.';
@@ -103,11 +123,13 @@ async function refreshAccount(step, focus = false) {
   byId('seed-state').textContent = proof ? 'Enter your app details below.' : 'Sign in and verify you own a Tiiny to submit an app.';
   challenge(!proof && user?.tiinyverseChallenge?.expires > Date.now() ? user.tiinyverseChallenge : null);
   tabs.forEach((tab, index) => {
-    tab.classList.toggle('done', index === 0 ? !!user : index === 1 && !!proof);
+    const done = index === 0 ? !!user : index === 1 && !!proof;
+    tab.classList.toggle('done', done);
+    tab.textContent = ['1 · Sign in', '2 · Verify you own a Tiiny', '3 · Your app'][index] + (done ? ' ✓' : '');
     tab.classList.toggle('locked', index === 1 ? !user : index === 2 && !proof);
   });
-  showStep(step ?? (proof ? 2 : user ? 1 : 0), focus);
   await prefillSeed();
+  showStep(step ?? hashStep() ?? (proof ? 2 : user ? 1 : 0), focus);
 }
 onSubmit('email-start', async () => {
   codeEmail = byId('email').value.trim();
@@ -132,21 +154,32 @@ onSubmit('seed-form', async () => {
   clearMarks();
   if (updateId && !originalSeed) throw new Error('Load your app before updating it.');
   const form = new FormData(byId('seed-form'));
+  const hasRelease = form.get('releaseChoice') !== 'no';
+  if (!hasRelease) {
+    form.set('version', originalSeed?.version || '0.1.0');
+    form.delete('releaseUrl'); form.delete('archive');
+  }
+  form.delete('releaseChoice'); form.delete('permissionChoices');
   if (originalSeed) {
     form.set('screenshots', JSON.stringify(originalSeed.screenshots));
+    for (const [key, value] of Object.entries({ python: originalSeed.requires.python ?? '', ports: originalSeed.requires.ports.join(','), models: originalSeed.requires.device.models.join(','), npuUnits: originalSeed.requires.device.npuUnits, tags: originalSeed.tags.join(','), health: originalSeed.health ?? '', selfcheck: originalSeed.selfcheck ? 'true' : '' })) form.set(key, String(value));
     if (byId('command').value === originalCommand) {
       form.set('entry', JSON.stringify(originalSeed.entry));
       form.delete('command');
     }
   }
-  form.set('permissions', [...byId('permissions').selectedOptions].map(option => option.value).join(','));
-  if (byId('releaseUrl').value.trim() && byId('archive').files.length) throw new Error('Choose either a release URL or one tar.gz upload.');
-  if (byId('archive').files[0]?.size > 50 * 1024 * 1024) throw new Error('Choose an archive no larger than 50 MB.');
+  form.set('permissions', permissionInputs().filter(input => input.checked).map(input => input.value).join(','));
+  if (hasRelease && !originalSeed?.release && !byId('releaseUrl').value.trim() && !byId('archive').files.length) throw new Error('Release URL: add a direct link or upload a .tar.gz, or choose No release yet.');
+  if (hasRelease && byId('releaseUrl').value.trim() && byId('archive').files.length) throw new Error('Choose either a release URL or one tar.gz upload.');
+  if (hasRelease && byId('archive').files[0]?.size > 50 * 1024 * 1024) throw new Error('Choose an archive no larger than 50 MB.');
   const gallery = [...byId('seed-gallery').files];
-  if (gallery.length > 8) throw new Error('Choose up to eight gallery images.');
+  if (gallery.length > 8) throw new Error('Choose up to eight screenshots.');
   const groups = { icon: [...byId('seed-icon').files], header: [...byId('seed-header').files], gallery };
-  for (const file of Object.values(groups).flat()) {
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 2 * 1024 * 1024) throw new Error('Choose PNG, JPEG or WebP images no larger than 2 MiB each.');
+  const imageLabels = { icon: 'Icon', header: 'Header image', gallery: 'Screenshots' };
+  for (const [kind, files] of Object.entries(groups)) {
+    for (const file of files) {
+      if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 2 * 1024 * 1024) throw new Error(imageLabels[kind] + ': choose PNG, JPEG or WebP images no larger than 2 MiB each.');
+    }
   }
   const media = { ...originalSeed?.media };
   for (const [kind, files] of Object.entries(groups)) {
@@ -155,7 +188,7 @@ onSubmit('seed-form', async () => {
       status('Uploading your app images…');
       const response = await fetch('/api/media', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': file.type }, body: file });
       const uploaded = await response.json();
-      if (!response.ok) throw new Error(uploaded.error || 'Could not upload your app image.');
+      if (!response.ok) throw new Error(imageLabels[kind] + ': ' + (uploaded.error || 'Could not upload your app image.'));
       urls.push(uploaded.url);
     }
     if (urls.length) media[kind] = kind === 'gallery' ? urls : urls[0];
@@ -165,12 +198,12 @@ onSubmit('seed-form', async () => {
   const result = await api(updateId ? '/api/seeds/' + encodeURIComponent(updateId) : '/api/seeds', form, updateId ? 'PUT' : 'POST');
   if (result.warning) { status(result.warning); return; }
   try { localStorage.removeItem(DRAFT); } catch {}
-  window.location.assign(result.statusUrl);
+  window.location.assign('/account/');
 });
 refreshAccount().catch(error => status(error.message));
 
 // The server names the field in its message ("tags: must not be empty", "A null entry requires the library tag").
-const FIELD_WORDS = { entry: 'command', tags: 'tags', version: 'version', license: 'license', id: 'id', name: 'name', description: 'description', release: 'releaseUrl', ports: 'ports', python: 'python' };
+const FIELD_WORDS = { archive: 'archive', icon: 'seed-icon', header: 'seed-header', screenshots: 'seed-gallery', gallery: 'seed-gallery', repo: 'repo', homepage: 'homepage', video: 'video', command: 'command', entry: 'command', tags: 'tags', version: 'version', license: 'license', id: 'seed-id', name: 'seed-name', pitch: 'pitch', summary: 'pitch', permissions: 'permissions', description: 'description', release: 'releaseUrl', ports: 'ports', python: 'python' };
 function clearMarks() {
   for (const input of document.querySelectorAll('#seed-form [aria-invalid]')) input.removeAttribute('aria-invalid');
   for (const note of document.querySelectorAll('#seed-form .field-error')) note.remove();
@@ -201,11 +234,24 @@ const draftForm = byId('seed-form');
 if (draftForm) {
   try {
     const saved = JSON.parse(localStorage.getItem(DRAFT) || '{}');
-    for (const [name, value] of Object.entries(saved)) { const el = draftForm.elements[name]; if (el && el.type !== 'file' && !el.value) el.value = value; }
+    for (const el of draftForm.elements) {
+      if (!el.name || el.type === 'file' || !(el.name in saved)) continue;
+      const value = saved[el.name];
+      if (el.type === 'checkbox') el.checked = Array.isArray(value) ? value.includes(el.value) : value === el.value;
+      else if (el.type === 'radio') { if (['yes', 'no'].includes(value)) el.checked = value === el.value; }
+      else if (typeof value === 'string') el.value = value;
+    }
   } catch {}
+  syncRelease();
+  draftForm.addEventListener('change', event => { if (event.target.name === 'releaseChoice') syncRelease(); });
   draftForm.addEventListener('input', event => {
     const input = event?.target; if (input?.hasAttribute?.('aria-invalid') && input.checkValidity?.()) { input.removeAttribute('aria-invalid'); input.closest?.('.seed-field')?.querySelector('.field-error')?.remove(); }
-    const data = {}; for (const el of draftForm.elements) if (el.name && el.type !== 'file' && el.type !== 'submit') data[el.name] = el.value;
+    const data = {};
+    for (const el of draftForm.elements) {
+      if (!el.name || el.type === 'file' || el.type === 'submit') continue;
+      if (el.type === 'checkbox') { data[el.name] ??= []; if (el.checked) data[el.name].push(el.value); }
+      else if (el.type !== 'radio' || el.checked) data[el.name] = el.value;
+    }
     try { localStorage.setItem(DRAFT, JSON.stringify(data)); } catch {}
   });
 }

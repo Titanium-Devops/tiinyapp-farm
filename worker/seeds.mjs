@@ -169,7 +169,7 @@ export async function seedRoutes(ctx) {
         await github('/issues/' + previous.pr + '/labels', 'POST', { labels: ['from-the-site'] });
         previous.state = 'awaiting review'; await put('seed:' + key, previous);
       }
-      return json({ id: previous.id, prUrl: previous.prUrl, statusUrl: '/seeds/mine/' });
+      return json({ id: previous.id, prUrl: previous.prUrl, statusUrl: '/account/' });
     }
     if (previous?.state === 'submission uncertain') fail(409, 'This app is being reconciled after an interrupted review request. Please contact a maintainer before retrying.');
     if (!update && await github('/contents/manifests/' + manifest.id + '.json', 'GET', undefined, true)) fail(409, 'That app ID is already in the catalog. Use Update on Your apps.');
@@ -218,7 +218,7 @@ export async function seedRoutes(ctx) {
       const content = btoa(Array.from(new TextEncoder().encode(JSON.stringify(manifest, null, 2) + '\n'), byte => String.fromCharCode(byte)).join(''));
       const validation = bytes ? 'Farm manifest validation and archive SHA-256' : 'Farm manifest validation';
       await github('/contents/manifests/' + manifest.id + '.json', 'PUT', {
-        message: `${update ? 'Keep' : 'Give'} ${manifest.id} ${update ? 'current through' : 'a plot for'} community review\n\nSubmitted through the farm by a verified TiinyVerse owner.\n\nConfidence: medium\nScope-risk: narrow\nTested: ${validation}\nNot-tested: Awaiting CI and maintainer review`, content, branch, ...(update ? { sha: existing.sha } : {}),
+        message: `Submit ${manifest.id} ${update ? 'updates' : 'for publication'} through community review\n\nSubmitted through the farm by a verified TiinyVerse owner.\n\nConfidence: medium\nScope-risk: narrow\nTested: ${validation}\nNot-tested: Awaiting CI and maintainer review`, content, branch, ...(update ? { sha: existing.sha } : {}),
       });
       creatingPR = true;
       const pr = await github('/pulls', 'POST', { title: `${update ? 'Update' : 'Add'} ${manifest.id} ${manifest.version}`, head: branch, base,
@@ -227,15 +227,15 @@ export async function seedRoutes(ctx) {
       await put('seed:' + key, record);
       await github('/issues/' + pr.number + '/labels', 'POST', { labels: ['from-the-site'] });
       record.state = 'awaiting review'; await put('seed:' + key, record);
-      return json({ id: manifest.id, prUrl: record.prUrl, statusUrl: '/seeds/mine/' }, 201);
+      return json({ id: manifest.id, prUrl: record.prUrl, statusUrl: '/account/' }, 201);
     } catch (error) {
       if (creatingPR && !record.pr) {
         // A timeout may mean GitHub accepted the PR. Keep its branch and archive
         // intact; a maintainer can reconcile using the recorded branch.
         record.state = 'submission uncertain'; await put('seed:' + key, record);
-        return json({ id: manifest.id, statusUrl: '/seeds/mine/', warning: 'The review request was interrupted. Your app is saved; a maintainer must reconcile this app before you retry.' }, 202);
+        return json({ id: manifest.id, statusUrl: '/account/', warning: 'The review request was interrupted. Your app is saved; a maintainer must reconcile this app before you retry.' }, 202);
       }
-      if (record.pr) return json({ id: manifest.id, statusUrl: '/seeds/mine/', warning: 'The app reached review, but its site label is pending. Submit the same form again to retry the label.' }, 202);
+      if (record.pr) return json({ id: manifest.id, statusUrl: '/account/', warning: 'The app reached review, but its site label is pending. Submit the same form again to retry the label.' }, 202);
       record.state = 'submission failed'; await put('seed:' + key, record);
       if (objectKey) await env.SEEDS.delete(objectKey);
       if (branchCreated) { try { await github('/git/refs/heads/' + branch, 'DELETE'); } catch { /* Reported via the stored failed submission and branch. */ } }

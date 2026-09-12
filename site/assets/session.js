@@ -7,8 +7,28 @@ export function refreshSession() {
       if (!response.ok) throw new Error('Could not load your account.');
       const { user } = await response.json();
       document.querySelectorAll('[data-farm-nav]').forEach(anchor => {
-        anchor.textContent = 'Your apps';
-        anchor.href = '/farm/';
+        anchor.replaceChildren();
+        anchor.href = user ? '/account/' : '/submit/#account-panel';
+        if (!user) {
+          anchor.textContent = 'Sign in';
+          return;
+        }
+        const name = user.tiinyverse?.name || user.github?.name || user.github?.login || user.email?.split('@')[0] || 'Your apps';
+        const firstName = name.trim().split(/\s+/)[0];
+        const avatar = document.createElement(user.avatarKey ? 'img' : 'span');
+        avatar.className = 'nav-avatar';
+        if (user.avatarKey) {
+          avatar.src = '/' + user.avatarKey;
+          avatar.alt = '';
+          avatar.width = 24;
+          avatar.height = 24;
+        } else {
+          avatar.textContent = firstName.charAt(0).toUpperCase();
+          avatar.setAttribute('aria-hidden', 'true');
+        }
+        const label = document.createElement('span');
+        label.textContent = firstName;
+        anchor.append(avatar, label);
       });
       const update = document.querySelector('[data-seed-update]');
       if (update) {

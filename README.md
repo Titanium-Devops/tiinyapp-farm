@@ -12,7 +12,7 @@ Brought to you by [Titanium Bot](https://titanium.bot). Made by Titanium Computi
 
 See `SPEC.md`.
 
-## Install the farm CLI (`farm`)
+## Install the farm command-line tool (`farm`)
 
 Python 3.9 or newer on macOS, Linux or Windows; runtime dependencies are all standard library.
 

@@ -325,13 +325,13 @@ test('release URLs reject credential-bearing and local origins', () => {
 test('maker defaults, proof-derived stable handle, private farm and escaped public page', async () => {
   const f = fixture(), first = await f.email();
   assert.equal(first.user.handle, null); assert.equal(first.user.bio, ''); assert.equal(first.user.avatarKey, null);
-  assert.equal((await f.call('/farm/')).headers.get('Location'), '/seeds/');
-  assert.equal((await f.call('/seeds/mine/')).headers.get('Location'), '/farm/');
+  assert.equal((await f.call('/account/')).headers.get('Location'), '/submit/');
+  assert.equal((await f.call('/seeds/mine/')).headers.get('Location'), '/account/');
   assert.equal((await f.call('/makers/unknown/')).status, 404);
   await f.proof(first.cookie);
   const user = (await (await f.call('/api/me', undefined, first.cookie)).json()).user;
   assert.match(user.handle, /^aster-fern-[a-f0-9]{4}$/);
-  assert.equal((await f.call('/farm/', undefined, first.cookie)).headers.get('Cache-Control'), 'private, no-store');
+  assert.equal((await f.call('/account/', undefined, first.cookie)).headers.get('Cache-Control'), 'private, no-store');
   assert.equal((await f.call('/api/maker', { bio: '<script>bad</script>', links: { website: 'https://example.org/' }, handle: 'stolen' }, first.cookie)).status, 200);
   assert.equal((await f.call('/api/maker', { bio: 'x'.repeat(601), links: {} }, first.cookie)).status, 400);
   assert.equal((await f.call('/api/maker', { bio: '', links: { website: 'javascript:alert(1)' } }, first.cookie)).status, 400);
@@ -520,8 +520,11 @@ test('maker pages carry sprout identity, escaped share metadata and accessible s
   assert.match(html, /name="twitter:card" content="summary_large_image"/);
   assert.match(html, /property="og:description" content="A &quot;tiny&quot; garden &lt;with&gt; friends &amp; seeds"/);
   assert.match(html, /data-share-text="A &quot;tiny&quot; garden &lt;with&gt; friends &amp; seeds"/);
-  assert.match(html, /<h1>Apps by Aster &amp; Fern<\/h1>/);
-  assert.match(html, />Your apps<\/a>/);
+  assert.match(html, /<h1>Aster &amp; Fern<\/h1>/);
+  assert.match(html, /<h2>Apps by Aster &amp; Fern<\/h2>/);
+  assert.match(html, /href="\/install\/">Install<\/a>/);
+  assert.match(html, /href="\/submit\/">Submit an app<\/a>/);
+  assert.match(html, /data-farm-nav href="\/submit\/#account-panel">Sign in<\/a>/);
   assert.match(html, /No apps in the catalog yet\./);
   assert.doesNotMatch(html, /Bring your seeds|Seeds in the field/);
   assert.match(html, /src="\/assets\/share.js"/);
@@ -665,12 +668,28 @@ test('app review status uses literal labels and preserves pending update status'
   const context = { document: { getElementById: () => ({ addEventListener() {} }) }, refreshSession: () => new Promise(() => {}) };
   runInNewContext(source.replace(/^import .*;$/gm, ''), context);
   const { appStatus } = context;
-  for (const state of ['merged', 'published', 'sprouting']) assert.equal(appStatus({ state }), 'In the catalog');
+  for (const state of ['merged', 'published', 'sprouting']) assert.equal(appStatus({ state }), 'Published');
   assert.equal(appStatus({ state: 'awaiting review', checks: [] }), 'Checks running');
   assert.equal(appStatus({ state: 'awaiting review', checks: [{ name: 'CI', status: 'queued' }] }), 'Checks running');
-  assert.equal(appStatus({ state: 'awaiting review', checks: [{ name: 'CI', status: 'success' }] }), 'Waiting for a maintainer');
+  assert.equal(appStatus({ state: 'awaiting review', checks: [{ name: 'CI', status: 'success' }] }), 'Waiting for review');
   assert.equal(appStatus({ state: 'awaiting review', checks: [{ name: 'CI', status: 'timed_out' }] }), 'Checks failed: CI (timed out)');
   assert.equal(appStatus({ state: 'awaiting review', url: '/apps/existing/', checks: [{ name: 'CI', status: 'failure' }] }), 'Checks failed: CI (failure)');
   assert.equal(appStatus({ state: 'awaiting review', unavailable: true }), 'Check status unavailable');
-  assert.equal(appStatus({ state: 'closed' }), 'Closed without merging');
+  assert.equal(appStatus({ state: 'closed' }), 'Closed');
+});
+
+
+test('legacy pages permanently redirect and account stays private', async () => {
+  const f = fixture();
+  f.env.FARM_COORDINATOR = { idFromName: name => name, get: () => ({ fetch: request => createApp({ proofRoutes, seedRoutes, fetcher: f.fetcher })(request, f.env) }) };
+  for (const [legacy, target] of Object.entries({ plant: '/install/', seeds: '/submit/', farm: '/account/', 'seeds/mine': '/account/' })) {
+    for (const suffix of ['', '/', '/index.html']) {
+      const response = await worker.fetch(new Request(ORIGIN + '/' + legacy + suffix), f.env);
+      assert.equal(response.status, 301);
+      assert.equal(response.headers.get('Location'), target);
+    }
+  }
+  const anonymous = await worker.fetch(new Request(ORIGIN + '/account/'), f.env);
+  assert.equal(anonymous.status, 302);
+  assert.equal(anonymous.headers.get('Location'), '/submit/');
 });

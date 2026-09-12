@@ -1,11 +1,11 @@
 # Submit an app from the site
 
-Visit https://tiinyapp.farm/seeds/ to submit without a GitHub account:
+Visit https://tiinyapp.farm/submit/ to submit without a GitHub account:
 
 1. Sign in with an email code or GitHub. While signed in, use the other method to link it to the same account. Neither method replaces TiinyVerse proof.
-2. Paste your public TiinyVerse `/users/<uuid>` profile URL. Put the issued code in your bio and press Verify within 24 hours. One profile can belong to one farm account.
-3. Complete the app form, including the version, permissions, and runtime needs. Supply either a direct HTTPS tar.gz release URL (no redirects) or a tar.gz upload up to 50 MiB. Include source and license in the archive. For a library, leave the start command empty and include the `library` tag.
-4. The farm measures and hashes the archive, creates a review PR with its own account, and shows check results and review state at Your apps (`/farm/`). A maintainer decides whether to merge. The site rebuilds after merge.
+2. Paste your public TiinyVerse `/users/<uuid>` profile URL. Put the issued code in your bio and press Verify within 24 hours. One profile can belong to one account.
+3. Complete the app form, including the access it uses and runtime needs. Choose “Not yet, list it as No release yet” if there is no archive; otherwise include a version. Supply either a direct HTTPS tar.gz release URL (up to three HTTPS redirects) or a tar.gz upload up to 50 MiB. Include source and license in the archive. For a library, leave the start command empty and include the `library` tag.
+4. The farm measures and hashes the archive, creates a review PR with its own account, and shows check results and review state at Your apps (`/account/`). A maintainer decides whether to merge. The site rebuilds after merge.
 
 The optional source repository is useful for review; it is not a sign-in requirement. The maker name is taken from your verified TiinyVerse profile. The archive and its source become public. Uploads must finish within 30 seconds; direct release fetches have a 10-second deadline.
 

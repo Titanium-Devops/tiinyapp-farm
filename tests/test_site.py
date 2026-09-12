@@ -66,9 +66,9 @@ class SiteTests(unittest.TestCase):
             with self.subTest(app=app['id']):
                 doc = Document((self.output / 'apps' / app['id'] / 'index.html').read_text())
                 visible = ' '.join(doc.text)
-                for key in ('name', 'pitch', 'description', 'id', 'version', 'license', 'addedAt', 'updatedAt'):
+                for key in ('name', 'pitch', 'description', 'id', 'version', 'license'):
                     self.assertIn(str(app[key]), visible)
-                for url in (app['homepage'], app['repo'], app['author']['url'], app['release']['url']):
+                for url in (app['homepage'], app['repo'], app['release']['url']):
                     self.assertIn(url, doc.references)
                 self.assertIn(app['release']['sha256'], visible)
                 self.assertIn(str(app['release']['size']), visible)
@@ -79,15 +79,12 @@ class SiteTests(unittest.TestCase):
                 else:
                     self.assertIn('farm start ' + app['id'], visible)
                 for permission in app['permissions']:
-                    self.assertIn(SITE['PERMISSIONS'][permission], visible)
+                    self.assertIn({'microphone': 'Microphone', 'files': 'Files', 'network': 'Network', 'device': 'Your Tiiny'}[permission], visible)
                 for model in app['requires']['device']['models']:
                     self.assertIn(model, visible)
                 for port in app['requires']['ports']:
                     self.assertIn(str(port), visible)
-                self.assertIn(str(app['requires']['device']['npuUnits']), visible)
-                if 'health' in app:
-                    self.assertIn(app['health'], visible)
-                self.assertIn('Not verified by a maintainer.', visible)
+                self.assertIn('Not reviewed by a maintainer', visible)
 
     def test_sprouting_seed_keeps_story_and_social_without_install_or_release(self):
         app = copy.deepcopy(self.apps[0])
@@ -99,13 +96,13 @@ class SiteTests(unittest.TestCase):
             self.assertIn(app['pitch'], ' '.join(Document(html).text))
             self.assertNotIn('farm install', html)
         self.assertIn('No release yet. This app cannot be installed.', page)
-        self.assertIn('<h2>Release</h2><p>No release yet.</p>', page)
+        self.assertIn('<h2>Release</h2><p>No release yet</p>', page)
         self.assertNotIn('SHA-256', page)
         self.assertIn('seed-comments', page)
         self.assertIn(app['author']['url'], Document(page).references)
         owner_link = next(attrs for tag, attrs in Document(page).tags if 'data-seed-update' in attrs)
         self.assertIn('hidden', owner_link)
-        self.assertEqual(owner_link['href'], '/seeds/?update=' + app['id'])
+        self.assertEqual(owner_link['href'], '/submit/?update=' + app['id'])
 
     def test_update_prefill_and_put_preserve_python_entry_images_and_screenshots(self):
         script = r'''
@@ -117,13 +114,20 @@ class Element {
   listeners = {}; options = [{ value: 'network' }, { value: 'files' }];
   classList = { toggle() {} };
   addEventListener(name, fn) { this.listeners[name] = fn; }
-  append() {} setAttribute() {} focus() {}
+  attributes = {};
+  append() {} focus() {}
+  setAttribute(name, value) { this.attributes[name] = value; }
+  getAttribute(name) { return this.attributes[name]; }
   get selectedOptions() { return this.options.filter(option => option.selected); }
   querySelector() { return new Element(); }
 }
 const controls = new Map();
 const control = id => { if (!controls.has(id)) controls.set(id, new Element()); return controls.get(id); };
 control('seed-form').elements = { namedItem: control };
+const panels = ['account-panel', 'proof-panel', 'seed-panel'];
+const tabs = panels.map(id => { const tab = new Element(); tab.setAttribute('aria-controls', id); return tab; });
+const windowListeners = {};
+const permissions = ['microphone', 'files', 'network', 'device'].map(value => Object.assign(new Element(), { value }));
 const seed = { id: 'test-seed', name: 'My seed', pitch: 'Pitch', description: 'Story', version: '1.0.0',
   license: 'MIT', homepage: 'https://example.org', entry: { python: 'my.module', args: ['a b', 'x'] },
   requires: { python: '3.11', ports: [8080], device: { models: ['test'], npuUnits: 1 } },
@@ -133,34 +137,59 @@ class Data extends Map { constructor() { super(); for (const [id, el] of control
 let submitted, redirected;
 const context = {
   URLSearchParams, FormData: Data, console,
-  document: { getElementById: control, querySelectorAll: () => [], createElement: () => new Element() },
-  window: { location: { search: '?update=test-seed', assign: url => { redirected = url; } } },
+  document: { getElementById: control, querySelectorAll: selector => selector === '#permissions input[type=checkbox]' ? permissions : selector === '.seed-tabs [role=tab]' ? tabs : [], createElement: () => new Element() },
+  window: { addEventListener: (event, fn) => { windowListeners[event] = fn; }, location: { hash: '#account-panel', search: '?update=test-seed', assign: url => { redirected = url; } } },
   refreshSession: async () => ({ email: 'maker@example.org', tiinyverse: { name: 'Maker', profileUrl: 'https://example.org/maker' } }),
   fetch: async (path, options) => {
     let result;
     if (path === '/api/seeds/mine') result = { seeds: [{ id: seed.id, canUpdate: true }] };
     else if (path === '/manifests/test-seed.json') result = seed;
-    else { submitted = { path, ...options }; result = { statusUrl: '/farm/' }; }
+    else { submitted = { path, ...options }; result = { statusUrl: '/account/' }; }
     return { ok: true, json: async () => result };
   },
 };
 vm.runInNewContext(fs.readFileSync('site/assets/seeds.js', 'utf8').replace(/^import[^\n]+\n/, ''), context);
 (async () => {
   await new Promise(resolve => setImmediate(resolve));
+  assert.equal(control('account-panel').hidden, false);
+  assert.equal(control('seed-panel').hidden, true);
+  context.window.location.hash = '#seed-panel';
+  windowListeners.hashchange();
+  assert.equal(control('account-panel').hidden, true);
+  assert.equal(control('seed-panel').hidden, false);
   assert.equal(control('id').value, 'test-seed');
   assert.equal(control('id').readOnly, true);
   assert.equal(control('release-heading').textContent, 'Add your first release');
-  assert.equal(control('ports').value, '8080');
+  assert.equal(control('releaseChoice').value, 'no');
+  assert.equal(control('release-fields').hidden, true);
+  for (const id of ['version', 'releaseUrl', 'archive']) assert.equal(control(id).disabled, true);
+  assert.equal(control('command').disabled, false);
+  control('releaseChoice').value = 'yes';
+  control('seed-form').listeners.change({ target: { name: 'releaseChoice' } });
+  assert.equal(control('release-fields').hidden, false);
+  for (const id of ['version', 'releaseUrl', 'archive']) assert.equal(control(id).disabled, false);
+  control('releaseChoice').value = 'no';
+  control('seed-form').listeners.change({ target: { name: 'releaseChoice' } });
+  assert.equal(control('release-fields').hidden, true);
   assert.equal(control('releaseUrl').value, '');
   control('seed-form').listeners.submit({ preventDefault() {}, currentTarget: control('seed-form') });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(submitted.path, '/api/seeds/test-seed');
   assert.equal(submitted.method, 'PUT');
   assert.deepEqual(JSON.parse(submitted.body.get('entry')), seed.entry);
+  assert.equal(submitted.body.get('python'), seed.requires.python);
+  assert.equal(submitted.body.get('ports'), seed.requires.ports.join(','));
+  assert.equal(submitted.body.get('models'), seed.requires.device.models.join(','));
+  assert.equal(submitted.body.get('npuUnits'), String(seed.requires.device.npuUnits));
+  assert.equal(submitted.body.get('tags'), seed.tags.join(','));
+  assert.equal(submitted.body.get('permissions'), 'network');
   assert.equal(submitted.body.has('command'), false);
+  assert.equal(submitted.body.has('releaseUrl'), false);
+  assert.equal(submitted.body.has('archive'), false);
+  assert.equal(submitted.body.get('version'), seed.version);
   assert.deepEqual(JSON.parse(submitted.body.get('media')), seed.media);
   assert.deepEqual(JSON.parse(submitted.body.get('screenshots')), seed.screenshots);
-  assert.equal(redirected, '/farm/');
+  assert.equal(redirected, '/account/');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
         result = subprocess.run(['node', '-e', script], cwd=ROOT, text=True, capture_output=True, timeout=15)
@@ -193,7 +222,7 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_required_pages_and_byte_identical_manifests(self):
-        for path in ('index.html', 'plant/index.html', 'seeds/index.html', 'seeds/mine/index.html', 'farm/index.html', 'catalog.json', 'manifests/index.html', 'sitemap.xml', 'robots.txt', '404.html'):
+        for path in ('index.html', 'install/index.html', 'submit/index.html', 'account/index.html', 'catalog.json', 'manifests/index.html', 'sitemap.xml', 'robots.txt', '404.html'):
             self.assertTrue((self.output / path).is_file(), path)
         for path in (ROOT / 'manifests').glob('*.json'):
             self.assertEqual(path.read_bytes(), (self.output / 'manifests' / path.name).read_bytes())
@@ -205,8 +234,8 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
                 parsed = urlsplit(urljoin(source_url, reference))
                 if parsed.netloc != 'tiinyapp.farm':
                     continue
-                if parsed.path == '/api/auth/github' or parsed.path.startswith('/makers/'):
-                    continue  # Worker routes (OAuth, maker pages), not static files.
+                if parsed.path == '/api/auth/github' or parsed.path.startswith(('/makers/', '/media/')):
+                    continue  # Worker routes (OAuth, maker pages, media), not static files.
                 target = self.output / unquote(parsed.path).lstrip('/')
                 if target.is_dir():
                     target /= 'index.html'
@@ -224,13 +253,13 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
             self.assertNotIn('data:image', text)
             scripts = [attrs for tag, attrs in doc.tags if tag == 'script']
             expected = []
-            if path.relative_to(self.output).as_posix() == 'seeds/index.html':
+            if path.relative_to(self.output).as_posix() == 'submit/index.html':
                 expected.append({'type': 'module', 'src': '/assets/seeds.js'})
             elif path.relative_to(self.output).as_posix().startswith('apps/'):
                 expected.append({'type': 'module', 'src': '/assets/share.js'})
                 expected.append({'type': 'module', 'src': '/assets/seed-media.js'})
                 expected.append({'type': 'module', 'src': '/assets/social.js'})
-            elif path.relative_to(self.output).as_posix() == 'farm/index.html':
+            elif path.relative_to(self.output).as_posix() == 'account/index.html':
                 expected.append({'type': 'module', 'src': '/assets/farm.js'})
             expected.append({'type': 'module', 'src': '/assets/session.js'})
             self.assertEqual(scripts, expected)
@@ -298,12 +327,12 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
             app['addedAt'] = (TODAY - timedelta(days=age)).isoformat()
             html = SITE['badges'](app, TODAY)
             self.assertEqual('>New<' in html, expected)
-            self.assertIn('>Verified<', html)
+            self.assertIn('>Reviewed<', html)
             self.assertIn('>Library<', html)
         app['verified'] = False
         app['entry'] = {'command': 'run'}
         html = SITE['badges'](app, TODAY)
-        self.assertNotIn('>Verified<', html)
+        self.assertNotIn('>Reviewed<', html)
         self.assertNotIn('>Library<', html)
 
     def test_catalog_build_with_future_seed_and_rebuild(self):
@@ -324,7 +353,7 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
             text = (dest / 'apps/fourth-seed/index.html').read_text()
             self.assertIn('Fourth &lt;seed&gt; &amp; friends', text)
             self.assertIn('https://example.org/screenshot.jpg', Document(text).references)
-            self.assertIn(fourth['entry']['command'], ' '.join(Document(text).text))
+            self.assertIn('farm start fourth-seed', ' '.join(Document(text).text))
             path.unlink()
             SITE['build'](source=source, today=TODAY)
             self.assertFalse((dest / 'apps/fourth-seed').exists())
@@ -343,7 +372,7 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
     def test_sitemap_and_field_documentation(self):
         tree = ET.parse(self.output / 'sitemap.xml')
         urls = {element.text for element in tree.iter('{http://www.sitemaps.org/schemas/sitemap/0.9}loc')}
-        expected = {'https://tiinyapp.farm' + path for path in ('/', '/plant/', '/seeds/', '/manifests/')}
+        expected = {'https://tiinyapp.farm' + path for path in ('/', '/install/', '/submit/', '/manifests/')}
         expected.update('https://tiinyapp.farm/apps/' + app['id'] + '/' for app in self.apps)
         self.assertEqual(urls, expected)
         self.assertIn('Sitemap: https://tiinyapp.farm/sitemap.xml', (self.output / 'robots.txt').read_text())
@@ -360,11 +389,14 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         self.assertIn('white-space:pre-wrap', css)
         self.assertIn('overflow-wrap:anywhere', css)
         self.assertIn('minmax(min(250px,100%),1fr)', css)
-        self.assertIn('minmax(min(220px,100%),1fr)', css)
         # 390px viewport minus wrap padding = 342; a plot has 304px inside.
         self.assertEqual(390 - 2 * 24, 342)
         self.assertEqual(342 - 2 * (18 + 1), 304)
         self.assertIn('@media(min-width:701px)', css)
+        self.assertRegex(css, r'\.two\{[^}]*grid-template-columns:minmax\(0,1fr\) 300px')
+        self.assertRegex(css, r'@media\(max-width:760px\)\{\.two\{grid-template-columns:1fr')
+        self.assertRegex(css, r'\.page\{[^}]*max-width:880px')
+        self.assertRegex(css, r'\.stp \.n\{[^}]*width:32px;height:32px')
 
     def test_deploy_configuration(self):
         config = tomllib.loads((ROOT / 'wrangler.toml').read_text())
@@ -383,29 +415,30 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         for required in ('branches: [main]', 'python3 scripts/build-site.py', 'python3 -m unittest', 'command: deploy', 'secrets.CLOUDFLARE_API_TOKEN', 'secrets.CLOUDFLARE_ACCOUNT_ID'):
             self.assertIn(required, workflow)
 
-    def test_seed_cards_read_signed_out_and_lock_proof_and_planting(self):
-        doc = Document((self.output / 'seeds/index.html').read_text())
+    def test_submit_form_has_v0_groups_release_choices_and_access_checkboxes(self):
+        html = (self.output / 'submit/index.html').read_text()
+        doc = Document(html)
         visible = ' '.join(doc.text)
-        for phrase in ('Sign in', 'Verify you own a Tiiny', 'Submit your app',
-                       'Do I need GitHub?', 'No. Sign in with your email', 'paste this code anywhere in the bio'):
+        for phrase in ('Sign in', 'Verify you own a Tiiny', 'Your app', 'Send code',
+                       'Get my code', 'Submit for review', 'Your draft is saved on this computer as you type.'):
             self.assertIn(phrase, visible)
-        cards = [attrs for tag, attrs in doc.tags if attrs.get('class') == 'seed-card']
-        self.assertEqual(len(cards), 3)
-        locked = [attrs['id'] for tag, attrs in doc.tags if tag == 'fieldset' and 'disabled' in attrs]
-        self.assertEqual(locked, ['proof-fields', 'seed-fields'])
-        labels = {attrs['for'] for tag, attrs in doc.tags if tag == 'label' and 'for' in attrs}
-        for tag, attrs in doc.tags:
-            if tag in ('input', 'textarea', 'select') and attrs.get('type') != 'checkbox':
-                self.assertIn(attrs['id'], labels)
+        legends = [' '.join(Document(text).text) for text in re.findall(r'<legend[^>]*>(.*?)</legend>', html)]
+        for legend in ('About the app', 'Release', 'Links and images'):
+            self.assertTrue(any(text.startswith(legend) for text in legends), legend)
+        locked = [attrs.get('id') for tag, attrs in doc.tags if tag == 'fieldset' and 'disabled' in attrs]
+        self.assertIn('proof-fields', locked)
+        self.assertIn('seed-fields', locked)
+        choices = [attrs for tag, attrs in doc.tags if tag == 'input' and attrs.get('type') == 'radio']
+        self.assertEqual(len(choices), 2)
+        self.assertEqual(len({attrs['name'] for attrs in choices}), 1)
+        permissions = [attrs for tag, attrs in doc.tags if tag == 'input' and attrs.get('type') == 'checkbox']
+        self.assertEqual({attrs['value'] for attrs in permissions}, {'microphone', 'files', 'network', 'device'})
+        self.assertFalse(any(tag == 'select' and 'multiple' in attrs for tag, attrs in doc.tags))
+        for phrase in ('This app uses', 'Microphone', 'Files', 'Network', 'Your Tiiny'):
+            self.assertIn(phrase, visible)
         css = (self.output / 'assets/site.css').read_text()
-        self.assertNotIn('grid-template-columns:repeat(3,minmax(0,1fr))', css)
-        self.assertIn('.seed-form-grid{display:grid;grid-template-columns:minmax(0,1fr)', css)
-        self.assertIn('@media(min-width:900px){.seed-form-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}', css)
-        self.assertIn('.seed-wide{grid-column:1/-1}', css)
-        html = (self.output / 'seeds/index.html').read_text()
-        for field in ('description', 'archive', 'permissions'):
-            self.assertIn(f'<div class="seed-field seed-wide"><label for="{field}">', html)
-        self.assertIn('<label for="command">Start command (optional)</label>', html)
+        self.assertIn('max-width:560px', css)
+        self.assertNotIn('.seed-form-grid{grid-template-columns:repeat(2', css)
 
     def test_social_strip_has_accessible_controls_and_auth_invitation(self):
         for app in self.apps:
@@ -418,7 +451,7 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
             self.assertIn('hidden', controls['comment-form'])
             self.assertEqual(controls['comment-text']['maxlength'], '1000')
             self.assertEqual(controls['social-status']['aria-live'], 'polite')
-            self.assertIn('/seeds/', doc.references)
+            self.assertIn('/submit/', doc.references)
             self.assertTrue(any(attrs.get('data-seed-social') == app['id'] for tag, attrs in doc.tags))
 
     def test_comment_rendering_keeps_untrusted_text_in_text_nodes(self):
@@ -477,26 +510,24 @@ assert.equal(anonymous.children[0].children[0].tag, 'span');
         legacy = Document(SITE['app_page'](app, TODAY))
         self.assertIn(app['homepage'], legacy.references)
         self.assertIn(app['repo'], legacy.references)
-        form = Document((self.output / 'seeds/index.html').read_text())
+        form = Document((self.output / 'submit/index.html').read_text())
         self.assertTrue({'seed-icon', 'seed-header', 'seed-gallery', 'repo', 'video'}.issubset(form.ids))
         gallery = next(attrs for tag, attrs in form.tags if attrs.get('id') == 'seed-gallery')
         self.assertIn('multiple', gallery)
 
     def test_private_farm_shell_and_catalog(self):
-        html = (self.output / 'farm/index.html').read_text()
+        html = (self.output / 'account/index.html').read_text()
         doc = Document(html)
         self.assertTrue({'maker-name', 'maker-avatar', 'maker-bio', 'maker-links', 'maker-form',
                          'bio', 'avatar', 'github', 'website', 'youtube', 'my-seeds', 'refresh-seeds'}.issubset(doc.ids))
         inputs = {attrs['id']: attrs for tag, attrs in doc.tags if tag in ('input', 'textarea')}
         self.assertEqual(inputs['bio']['maxlength'], '600')
         self.assertEqual(inputs['avatar']['accept'], 'image/png,image/jpeg,image/webp')
-        legacy = Document((self.output / 'seeds/mine/index.html').read_text())
-        self.assertIn({'http-equiv': 'refresh', 'content': '0;url=/farm/'}, [attrs for tag, attrs in legacy.tags if tag == 'meta'])
         self.assertEqual(json.loads((self.output / 'catalog.json').read_text()), self.apps)
-        self.assertIn('id="account-farm" href="/farm/" hidden', (self.output / 'seeds/index.html').read_text())
+        self.assertIn('id="account-farm" href="/account/" hidden', (self.output / 'submit/index.html').read_text())
 
     def test_seed_tabs_control_three_panels_with_only_first_visible(self):
-        doc = Document((self.output / 'seeds/index.html').read_text())
+        doc = Document((self.output / 'submit/index.html').read_text())
         tablists = [attrs for tag, attrs in doc.tags if attrs.get('role') == 'tablist']
         tabs = [(tag, attrs) for tag, attrs in doc.tags if attrs.get('role') == 'tab']
         panels = [attrs for tag, attrs in doc.tags if attrs.get('role') == 'tabpanel']
@@ -512,40 +543,59 @@ assert.equal(anonymous.children[0].children[0].tag, 'span');
             self.assertEqual(tab['tabindex'], '0' if index == 0 else '-1')
             self.assertEqual('hidden' in panel, index != 0)
             self.assertNotIn('disabled', tab)
-        for label in ('1 Sign in', '2 Verify you own a Tiiny', '3 Submit your app'):
+        for label in ('1 · Sign in', '2 · Verify you own a Tiiny', '3 · Your app'):
             self.assertIn(label, doc.text)
 
     def test_literal_instructions_and_app_section_order(self):
-        install = ' '.join(Document(SITE['steps']()).text)
+        html = SITE['steps']()
+        install = ' '.join(Document(html).text)
         for phrase in ('Python 3.9 or newer', 'macOS, Linux and Windows',
                        'pip install tiinyapp-farm', 'farm device',
                        'http://openai.api.tiiny/v1', 'http://<your-tiiny-ip>/v1',
-                       'TiinyOS > Settings > API Key', '~/.tiinyapps/device.json',
-                       'farm install <app-id>', 'farm start <app-id>',
-                       'farm list', 'farm stop <app-id>', 'farm update <app-id>',
-                       'farm remove <app-id>'):
+                       'TiinyOS → Settings → API Key', '~/.tiinyapps/device.json',
+                       'farm install titanium-tiiny-bot', 'farm start titanium-tiiny-bot',
+                       'farm list', 'farm stop <id>', 'farm update <id>', 'farm remove <id>'):
             self.assertIn(phrase, install)
+        steps = [attrs for tag, attrs in Document(html).tags if 'stp' in attrs.get('class', '').split()]
+        self.assertEqual(len(steps), 3)
+        self.assertEqual(sum(tag == 'dl' for tag, attrs in Document(html).tags), 2)
         submit = ''.join(Document(SITE['seeds']()).text)
         self.assertIn('Paste the URL of your TiinyVerse profile. We give you a short code. '
                       'Put that code anywhere in your TiinyVerse bio, save, then press Verify. '
-                      'We read your public profile once to confirm you own it (the same idea as '
-                      'a DNS TXT record). You can remove the code afterwards.', submit)
-        self.assertIn('This opens a pull request on the catalog; automated checks run, '
-                      'a maintainer reviews it, and it appears in the catalog when merged. '
-                      'Track it on Your apps.', submit)
-        for answer in re.findall(r'<details.*?<p>(.*?)</p></details>', SITE['seeds']()):
-            text = ''.join(Document(answer).text)
-            self.assertLessEqual(len(re.findall(r'[.!?](?:\s|$)', text)), 2)
+                      'We read your public profile once to confirm you own it, the same idea as '
+                      'a DNS TXT record. You can remove the code afterwards.', submit)
+        self.assertIn('Submitting opens a pull request on the catalog. Automated checks run, '
+                      'a maintainer reviews it, and it is listed when merged. '
+                      'You can follow it on Your apps.', submit)
         for app in self.apps:
             html = SITE['app_page'](app, TODAY)
-            headings = re.findall(r'<h2[^>]*>(.*?)</h2>', html)
-            # Media belongs to the description; the six primary sections stay ordered.
-            headings = [heading for heading in headings if heading not in ('Gallery', 'Video')]
-            self.assertEqual(headings, ['Description', 'Install', 'Requirements', 'Release', 'Maker', 'Comments'])
+            main, rail = html.split('<aside', 1)
+            main_headings = re.findall(r'<h2[^>]*>(.*?)</h2>', main)
+            self.assertEqual(main_headings[:2], ['Install', 'What it does'])
+            self.assertIn('Comments', main_headings)
+            self.assertEqual(re.findall(r'<h2[^>]*>(.*?)</h2>', rail)[:3], ['Needs', 'Release', 'Maker'])
+            self.assertIn('id="seed-thumb"', rail)
+            self.assertIn('data-share', rail)
+            for port in app['requires']['ports']:
+                self.assertIn('http://localhost:' + str(port), main)
         for path in self.output.rglob('*.html'):
             visible = ' '.join(Document(path.read_text()).text)
             self.assertNotRegex(visible, r'(?i)farmhand|\bsprouting\b|\bseeds?\b|My farm')
-            self.assertIn('Your apps', visible)
+
+    def test_navigation_links_and_current_page(self):
+        for path, active in [('index.html', '/'), ('install/index.html', '/install/'),
+                             ('submit/index.html', '/submit/'),
+                             ('apps/' + self.apps[0]['id'] + '/index.html', '/')]:
+            html = (self.output / path).read_text()
+            nav = re.search(r'<nav\b[^>]*>(.*?)</nav>', html, re.S).group(1)
+            doc = Document(nav)
+            anchors = [attrs for tag, attrs in doc.tags if tag == 'a']
+            self.assertEqual([attrs['href'] for attrs in anchors[:3]], ['/', '/install/', '/submit/'])
+            current = [attrs for attrs in anchors if attrs.get('aria-current') == 'page']
+            self.assertEqual([attrs['href'] for attrs in current], [active])
+            self.assertIn('on', current[0].get('class', '').split())
+            self.assertIn('Sign in', ''.join(doc.text))
+            self.assertIn('/submit/', doc.references)
 
     def test_cli_works_outside_repository(self):
         with tempfile.TemporaryDirectory() as temp:

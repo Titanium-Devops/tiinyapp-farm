@@ -36,7 +36,7 @@ export class FarmCoordinator {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname.startsWith('/api/') || /^\/(farm|makers|seeds\/mine)(?:\/|$)/.test(url.pathname)) {
+    if (url.pathname.startsWith('/api/') || /^\/(account|farm|plant|seeds|makers)(?:\/|$)/.test(url.pathname)) {
       return env.FARM_COORDINATOR.get(env.FARM_COORDINATOR.idFromName('farm')).fetch(request);
     }
     if (url.pathname.startsWith('/media/')) {

@@ -1,0 +1,52 @@
+<section class="page submit-page"><h1>Submit an app</h1>
+<p class="sub">Submitting opens a pull request on the catalog. Automated checks run, a maintainer reviews it, and it is listed when merged. You can follow it on <a href="/account/">Your apps</a>.</p>
+<noscript><p>Enable JavaScript to sign in, verify your profile and submit your app.</p></noscript>
+<p id="farm-status" role="status" aria-live="polite"></p>
+<div class="prog seed-tabs" role="tablist" aria-label="Submission progress">
+<button id="account-tab" class="now" type="button" role="tab" aria-selected="true" aria-controls="account-panel" tabindex="0">1 · Sign in</button>
+<button id="proof-tab" class="locked" type="button" role="tab" aria-selected="false" aria-controls="proof-panel" tabindex="-1">2 · Verify you own a Tiiny</button>
+<button id="seed-tab" class="locked" type="button" role="tab" aria-selected="false" aria-controls="seed-panel" tabindex="-1">3 · Your app</button>
+</div>
+<section class="seed-panel" id="account-panel" role="tabpanel" aria-labelledby="account-tab" tabindex="0"><h2>Sign in</h2>
+<p id="account-state" class="card-state" role="status">Sign in with an email code or GitHub.</p>
+<form id="email-start"><label for="email">Email<input id="email" name="email" type="email" autocomplete="email" maxlength="254" required></label><button class="btn hay" type="submit">Send code</button></form>
+<form id="email-verify"><label for="code">Code<input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required></label><button class="btn ghost" type="submit">Sign in</button></form>
+<div class="row"><a class="btn ghost" id="github-signin" href="/api/auth/github">Sign in with GitHub</a><button id="logout" class="btn ghost" type="button" hidden>Sign out</button><a id="account-farm" href="/account/" hidden>Your apps</a></div></section>
+<section class="seed-panel" id="proof-panel" role="tabpanel" aria-labelledby="proof-tab" tabindex="0" hidden><h2>Verify you own a Tiiny</h2>
+<p>Paste the URL of your TiinyVerse profile. We give you a short code. Put that code anywhere in your TiinyVerse bio, save, then press Verify. We read your public profile once to confirm you own it, the same idea as a DNS TXT record. You can remove the code afterwards.</p>
+<p id="proof-state" class="card-state" role="status">First, sign in.</p>
+<form id="tiiny-link"><fieldset id="proof-fields" disabled><legend>Your TiinyVerse profile</legend><label for="profileUrl">TiinyVerse profile URL<input id="profileUrl" name="profileUrl" type="url" placeholder="https://www.tiinyverse.com/users/…" required></label><button class="btn hay" type="submit">Get my code</button></fieldset></form>
+<div id="bio-challenge" hidden><output id="bio-code"></output><p class="fine" id="bio-expiry">Your code lasts 24 hours.</p><button id="tiiny-verify" class="btn hay" type="button">Verify</button></div></section>
+<section class="seed-panel" id="seed-panel" role="tabpanel" aria-labelledby="seed-tab" tabindex="0" hidden>
+<p id="seed-state" class="card-state" role="status">Sign in and verify you own a Tiiny to submit an app.</p>
+<form id="seed-form">
+<fieldset id="seed-fields" disabled><legend>About the app</legend>
+<label class="seed-field" for="seed-name">Name<input id="seed-name" name="name" required maxlength="120"></label>
+<label class="seed-field" for="seed-id">ID <small>lowercase letters, digits and dashes; used in <code>farm install &lt;id&gt;</code> and in the URL</small><input id="seed-id" name="id" pattern="[a-z][a-z0-9]*(-[a-z0-9]+)*" required maxlength="80"></label>
+<label class="seed-field" for="pitch">One-line summary <small>shown on the catalog card</small><input id="pitch" name="pitch" required maxlength="100"></label>
+<label class="seed-field" for="description">Description <small>what it does, who it is for, anything to know before installing</small><textarea id="description" name="description" rows="4" required maxlength="12000"></textarea></label>
+<label class="seed-field" for="license">License<input id="license" name="license" placeholder="MIT" required maxlength="100"></label>
+</fieldset>
+<fieldset disabled><legend id="release-heading">Release</legend>
+<div class="radios"><label><input type="radio" name="releaseChoice" value="yes" checked> I have a release (a .tar.gz with the source inside)</label><label><input type="radio" name="releaseChoice" value="no"> Not yet, list it as "No release yet"</label></div>
+<p id="release-help" class="fine" hidden></p>
+<div id="release-fields">
+<label class="seed-field" for="version">Version<input class="w" id="version" name="version" pattern="(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)" value="0.1.0" required></label>
+<label class="seed-field" for="releaseUrl">Release URL <small>a direct https link to the .tar.gz; GitHub release links work</small><input id="releaseUrl" name="releaseUrl" type="url" pattern="https://.*"></label>
+<label class="seed-field" for="archive">Or upload the .tar.gz <small>up to 50 MB</small><input id="archive" name="archive" type="file" accept=".tar.gz,application/gzip"></label>
+</div>
+<label class="seed-field" for="command">Start command <small>leave empty if this is a library other apps import</small><input id="command" name="command" placeholder="python -m my_app"></label>
+<div id="permissions" class="seed-field" role="group" aria-labelledby="permission-label"><div id="permission-label">This app uses</div><div class="checks"><label><input type="checkbox" name="permissionChoices" value="microphone"> Microphone</label><label><input type="checkbox" name="permissionChoices" value="files"> Files</label><label><input type="checkbox" name="permissionChoices" value="network"> Network</label><label><input type="checkbox" name="permissionChoices" value="device"> Your Tiiny</label></div></div>
+</fieldset>
+<fieldset disabled><legend>Links and images <span class="opt">(all optional)</span></legend>
+<label class="seed-field" for="repo">Source repository<input id="repo" name="repo" type="url" pattern="https://.*"></label>
+<label class="seed-field" for="homepage">Home page<input id="homepage" name="homepage" type="url"></label>
+<label class="seed-field" for="video">YouTube video<input id="video" name="video" type="url" pattern="https://.*" placeholder="https://www.youtube.com/watch?v=…"></label>
+<label class="seed-field" for="seed-icon">Icon <small>square PNG, JPEG or WebP, up to 2 MB</small><input id="seed-icon" type="file" accept="image/png,image/jpeg,image/webp"></label>
+<label class="seed-field" for="seed-header">Header image <small>wide, shown across the top of the app page and on the share card</small><input id="seed-header" type="file" accept="image/png,image/jpeg,image/webp"></label>
+<label class="seed-field" for="seed-gallery">Screenshots <small>up to 8</small><input id="seed-gallery" type="file" accept="image/png,image/jpeg,image/webp" multiple></label>
+</fieldset>
+<div class="row"><button class="btn hay" type="submit" disabled>Submit for review</button><span class="opt">Your draft is saved on this computer as you type.</span></div>
+<p id="seed-error" class="card-state error" role="alert" hidden></p>
+</form></section></section>
+<script type="module" src="/assets/seeds.js"></script>

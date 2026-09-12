@@ -17,7 +17,7 @@ const cookies = request => Object.fromEntries((request.headers.get('Cookie') || 
 const cookie = (name, value, age) => `${name}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${age}`;
 const redirect = (where, headers = {}) => new Response(null, { status: 302, headers: { Location: where, ...headers } });
 async function signature(secret, value) {
-  if (!secret || secret.length < 32) fail(503, 'Farm sign-in is not configured yet.');
+  if (!secret || secret.length < 32) fail(503, 'Sign-in is not configured yet.');
   const key = await crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   return Array.from(new Uint8Array(await crypto.subtle.sign('HMAC', key, encoder.encode(value))), n => n.toString(16).padStart(2, '0')).join('');
 }
@@ -175,7 +175,7 @@ export function createApp({ fetcher = fetch, now = () => Date.now(), seedRoutes 
         if (!Number.isSafeInteger(profile.id) || !profile.login) fail(502, 'GitHub returned an invalid profile.');
         const github = { id: profile.id, login: profile.login, name: profile.name || profile.login, avatar: profile.avatar_url || '' };
         const user = await account('github:' + github.id, 'github', github, stored.userId);
-        const response = redirect('/seeds/', { 'Set-Cookie': await setSession(user.id) });
+        const response = redirect('/submit/', { 'Set-Cookie': await setSession(user.id) });
         response.headers.append('Set-Cookie', cookie('__Host-farm-oauth', '', 0));
         return response;
       }

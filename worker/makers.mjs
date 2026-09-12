@@ -36,11 +36,14 @@ export async function catalog(env) {
 }
 export async function makerRoutes(ctx) {
   const { path, request, env, requireUser, get, put, bodyJSON, random } = ctx;
-  if (path === '/seeds/mine' || path === '/seeds/mine/') return new Response(null, { status: 302, headers: { Location: '/farm/', 'Cache-Control': 'no-store' } });
-  if (path === '/farm' || path === '/farm/' || path === '/farm/index.html') {
+  const legacy = path.match(/^\/(plant|seeds|farm|seeds\/mine)(?:\/|\/index\.html)?$/);
+  if (legacy) return new Response(null, { status: 301, headers: {
+    Location: { plant: '/install/', seeds: '/submit/', farm: '/account/', 'seeds/mine': '/account/' }[legacy[1]],
+  } });
+  if (path === '/account' || path === '/account/' || path === '/account/index.html') {
     const user = await ctx.currentUser();
-    if (!user) return new Response(null, { status: 302, headers: { Location: '/seeds/', 'Cache-Control': 'no-store' } });
-    const response = await env.ASSETS.fetch(new Request(ORIGIN + '/farm/', request));
+    if (!user) return new Response(null, { status: 302, headers: { Location: '/submit/', 'Cache-Control': 'no-store' } });
+    const response = await env.ASSETS.fetch(new Request(ORIGIN + '/account/', request));
     const headers = new Headers(response.headers); headers.set('Cache-Control', 'private, no-store'); headers.set('Vary', 'Cookie');
     return new Response(response.body, { status: response.status, headers });
   }
@@ -94,7 +97,12 @@ export async function makerRoutes(ctx) {
     if (!user?.tiinyverse || user.handle !== match[1]) fail(404, 'That maker was not found.');
     const seeds = (await catalog(env)).filter(seed => seed.author.tiinyverse === user.tiinyverse.profileUrl);
     const links = Object.entries(user.links || {}).map(([label, url]) => `<a href="${escape(url)}">${escape(label)}</a>`).join(' · ');
-    const cards = seeds.map(seed => `<article class="plot"><h2><a href="/apps/${escape(seed.id)}/">${escape(seed.name)}</a></h2><p>${escape(seed.pitch)}</p></article>`).join('');
+    const cards = seeds.map(seed => {
+      const appURL = '/apps/' + escape(seed.id) + '/';
+      const models = seed.requires?.device?.models?.join(', ') || 'no named models';
+      const permissions = (seed.permissions || []).map(value => `<span>${escape({ microphone: 'Microphone', files: 'Files', network: 'Network', device: 'Your Tiiny' }[value] || value)}</span>`).join('') || '<span>no permissions declared</span>';
+      return `<article class="plot"><div class="plot-top"><span class="badge">${seed.release ? seed.verified ? 'Reviewed' : 'Maintainer review' : 'No release yet'}</span><span class="ver">v${escape(seed.version)}</span></div><div class="seed-title">${seed.media?.icon ? `<img class="seed-icon" src="${escape(seed.media.icon)}" alt="" loading="lazy">` : ''}<h3><a href="${appURL}">${escape(seed.name)}</a></h3></div><p class="pitch">${escape(seed.pitch)}</p><p class="by">by <a href="/makers/${escape(user.handle)}/">${escape(user.tiinyverse.name)}</a> · needs ${escape(models)}</p><div class="perms">${permissions}</div><div class="plant">${seed.release ? `<code>farm install ${escape(seed.id)}</code><a class="btn hay" href="${appURL}" aria-label="Install ${escape(seed.name)}">Install</a>` : `<a class="btn hay" href="${appURL}">View app</a>`}</div></article>`;
+    }).join('');
     const title = `Apps by ${user.tiinyverse.name} | tiinyapp.farm`;
     const description = user.bio || `Apps by ${user.tiinyverse.name} on tiinyapp.farm.`;
     const pageURL = `${ORIGIN}/makers/${user.handle}/`;
@@ -111,7 +119,7 @@ export async function makerRoutes(ctx) {
 <meta property="og:image" content="${escape(pageURL)}card.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,800&amp;family=Nunito:wght@400;600;700&amp;display=swap"><link rel="stylesheet" href="/assets/site.css"><script type="module" src="/assets/session.js"></script><script type="module" src="/assets/share.js"></script>
-</head><body><div class="wrap"><header><a class="brand" href="/"><img class="brand-mark" src="/brand/icon-512.png" width="36" height="36" alt="">tiinyapp.farm</a><nav aria-label="Main navigation"><a href="/#field">Apps</a><a data-farm-nav href="/farm/">Your apps</a></nav></header><main class="sect">${user.avatarKey ? `<img class="maker-avatar" src="/${escape(user.avatarKey)}" alt="">` : ''}<h1>Apps by ${escape(user.tiinyverse.name)}</h1><p>@${escape(user.handle)} <span class="badge verified">Verified Tiiny owner</span></p><p class="maker-bio">${escape(description)}</p><p><button class="btn ghost" type="button" data-share data-share-title="${escape(title)}" data-share-text="${escape(description)}">Share</button> <span data-share-status role="status" aria-live="polite"></span></p><p>${links}</p><h2>Apps</h2><div class="field">${cards || '<p>No apps in the catalog yet.</p>'}</div></main></div></body></html>`, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
+</head><body><div class="wrap"><header><a class="brand" href="/"><img class="brand-mark" src="/brand/icon-512.png" width="36" height="36" alt="">tiinyapp.farm</a><nav aria-label="Main navigation"><a class="on" aria-current="page" href="/">Apps</a><a href="/install/">Install</a><a href="/submit/">Submit an app</a><a class="me" data-farm-nav href="/submit/#account-panel">Sign in</a></nav></header><main class="page">${user.avatarKey ? `<img class="maker-avatar" src="/${escape(user.avatarKey)}" alt="">` : ''}<h1>${escape(user.tiinyverse.name)}</h1><p>@${escape(user.handle)} <span class="badge verified">Verified Tiiny owner</span></p><p class="maker-bio">${escape(description)}</p><p><button class="btn ghost" type="button" data-share data-share-title="${escape(title)}" data-share-text="${escape(description)}">Share</button> <span data-share-status role="status" aria-live="polite"></span></p><p>${links}</p><h2>Apps by ${escape(user.tiinyverse.name)}</h2><div class="field">${cards || '<p>No apps in the catalog yet.</p>'}</div></main></div></body></html>`, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
   }
   if (path.startsWith('/makers/')) fail(404, 'That maker was not found.');
   return null;
