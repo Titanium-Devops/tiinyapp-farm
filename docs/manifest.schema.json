@@ -1,0 +1,235 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tinyapp.farm/docs/manifest.schema.json",
+  "title": "tinyapp.farm app manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "pitch",
+    "description",
+    "version",
+    "author",
+    "license",
+    "homepage",
+    "repo",
+    "screenshots",
+    "release",
+    "entry",
+    "requires",
+    "permissions",
+    "tags",
+    "verified",
+    "addedAt",
+    "updatedAt"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?![\\s\\S])",
+      "not": {
+        "const": "tiiny"
+      }
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pitch": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\r\\n]+(?![\\s\\S])"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?![\\s\\S])"
+    },
+    "author": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "url"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "$ref": "#/$defs/webUrl"
+        }
+      }
+    },
+    "license": {
+      "type": "string",
+      "minLength": 1
+    },
+    "homepage": {
+      "$ref": "#/$defs/webUrl"
+    },
+    "repo": {
+      "$ref": "#/$defs/webUrl"
+    },
+    "screenshots": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/webUrl"
+      },
+      "uniqueItems": true
+    },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url",
+        "sha256",
+        "size"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^(https?://|file://)"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^([a-f0-9]{64}|pending)(?![\\s\\S])"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "entry": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "python",
+            "args"
+          ],
+          "properties": {
+            "python": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*(?![\\s\\S])"
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command"
+          ],
+          "properties": {
+            "command": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "requires": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ports",
+        "device"
+      ],
+      "properties": {
+        "python": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+(?![\\s\\S])"
+        },
+        "ports": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          }
+        },
+        "device": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "models",
+            "npuUnits"
+          ],
+          "properties": {
+            "models": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "npuUnits": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "permissions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "microphone",
+          "files",
+          "network",
+          "device"
+        ]
+      }
+    },
+    "tags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "verified": {
+      "type": "boolean",
+      "description": "Only farm CI and a human maintainer may set this to true."
+    },
+    "addedAt": {
+      "type": "string",
+      "format": "date"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date"
+    }
+  },
+  "$defs": {
+    "webUrl": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https?://"
+    }
+  }
+}

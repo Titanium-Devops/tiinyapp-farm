@@ -1,0 +1,51 @@
+{
+  "author": {
+    "name": "Jason Brashear",
+    "url": "https://github.com/webdevtodayjason"
+  },
+  "screenshots": [],
+  "verified": false,
+  "addedAt": "2026-09-12",
+  "updatedAt": "2026-09-12",
+  "id": "story-lantern",
+  "name": "Story Lantern",
+  "pitch": "Write, illustrate and narrate bedtime stories on your Tiiny.",
+  "description": "Creates illustrated stories with recurring characters, saved playback and a parent log. Supports --selfcheck with a real device. Uses chat, image and speech models totaling 89 NPU units. Voice input is not implemented. Release pending: no local release tag was found and live release lookup was blocked; size 0 means unknown. No license file was found (NOASSERTION). Upstream retries device contention but does not yet use OneLane.",
+  "version": "0.1.0",
+  "license": "NOASSERTION",
+  "homepage": "https://github.com/webdevtodayjason/story-lantern",
+  "repo": "https://github.com/webdevtodayjason/story-lantern",
+  "entry": {
+    "python": "lantern",
+    "args": []
+  },
+  "requires": {
+    "python": "3.9",
+    "ports": [
+      8420
+    ],
+    "device": {
+      "models": [
+        "chat",
+        "image",
+        "tts"
+      ],
+      "npuUnits": 89
+    }
+  },
+  "permissions": [
+    "files",
+    "network",
+    "device"
+  ],
+  "tags": [
+    "stories",
+    "family",
+    "audio"
+  ],
+  "release": {
+    "url": "https://github.com/webdevtodayjason/story-lantern/archive/refs/tags/v0.1.0.tar.gz",
+    "sha256": "pending",
+    "size": 0
+  }
+}

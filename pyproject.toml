@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tinyapp-farm"
+version = "0.1.0"
+description = "Install and run community apps beside your Tiiny AI Pocket Lab"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+farm = "farm.farm:main"
+
+[tool.setuptools]
+packages = ["farm"]

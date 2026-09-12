@@ -11,3 +11,66 @@ Brought to you by [Titanium Bot](https://titanium.bot). Made by Titanium Computi
 - `.github/workflows/` the checks a submitted manifest must pass.
 
 See `SPEC.md`.
+
+## Phase 1 installer
+
+Python 3.11 or newer on macOS or Linux; runtime dependencies are all standard library.
+
+```sh
+python3 -m pip install .
+farm device
+farm install titanium-tiiny-bot
+farm start titanium-tiiny-bot
+farm status
+farm stop titanium-tiiny-bot
+```
+
+The bundled catalog entries are **pending release drafts**. They can be validated
+with `--allow-pending`, but installation is refused until a maintainer publishes the
+archive and records its actual SHA-256 and byte size. Nothing is downloaded or run
+by manifest validation. The installer displays permissions and requirements and
+asks once; `--yes` explicitly accepts that prompt for automation.
+
+```sh
+python3 scripts/check-manifest.py --allow-pending manifests/story-lantern.json
+FARM_CATALOG="$PWD/manifests" python3 farm/farm.py list
+python3 -m unittest
+```
+
+`FARM_CATALOG` defaults to `https://tinyapp.farm/manifests/`. It also accepts a local
+directory or `file://` directory URL. Local catalogs may refer to local tar archives
+by absolute/relative path or `file://` URL. Remote catalogs must use HTTP(S) release
+URLs. For `farm list`, a remote catalog directory serves either a JSON array of app
+IDs (or objects with `id`) or HTML links to its manifest JSON files.
+
+Installed versions live in `~/tinyapps/<id>/<version>`; `current` is an atomically
+written version pointer. `launcher.json` registers the entry for `farm start`.
+The app runs in its version directory with `FARM_DATA_DIR` and `TIINY_DATA_DIR`
+pointing at `~/tinyapps/<id>/data`. Standard output and errors append to `farm.log`;
+`farm.pid` holds the process ID. A runtime file lock distinguishes a live process
+from a stale PID. Entries run directly, without a shell. Apps must remain in the
+foreground and keep inherited descriptors open; daemonizing/closing all inherited
+file descriptors is not supported by this launcher.
+
+`farm device` reads both the base URL and API key without echo and atomically saves
+`~/tinyapps/device.json` with mode `0600`. If a secure terminal is unavailable, it
+refuses to fall back to echoed input. The launcher passes `TIINY_BASE`, `TIINY_KEY`,
+and the derived `TIINY_HOST`. Cooperating apps share `ONELANE_DIR=~/tinyapps/.onelane`.
+Story Lantern additionally receives `LANTERN_HOME`, its database/log paths, and
+`PORT`; its upstream device management still expects plain HTTP port 8800.
+Story Lantern currently retries contention but has not adopted OneLane, so merely
+setting the shared path cannot guarantee cross-app serialization for that app.
+
+`farm update <id>` installs only a newer version, preserves data and previous code,
+and stops a running old version after the new archive is verified and unpacked.
+Start it again with `farm start <id>`. `farm stop <id>` sends SIGINT to the process
+group and escalates to SIGKILL after five seconds. `farm remove <id>` stops it and
+keeps `data/`; `farm remove <id> --purge` deletes that app's data too. Shared device
+settings and locks survive app removal. OneLane is a library: it can be installed,
+but `farm start onelane` explains that it has no runnable entry.
+
+Archives are tar/tar.gz, bounded to 512 MiB downloaded and 2 GiB unpacked. Traversal,
+links, special files and duplicate file entries are refused. Checksums and byte
+sizes must match before extraction. These checks do not sandbox installed app code;
+permissions describe what the author declares. `verified` remains false until CI
+and human review. The site and submission CI are later phases.
