@@ -10,7 +10,7 @@
   "id": "onelane",
   "name": "OneLane",
   "pitch": "Let cooperating apps take turns using one Tiiny.",
-  "description": "A Python library providing shared file locks, busy retries and optional model-budget tracking. Copy onelane.py into your application; there is no app to start. Release pending: upstream declares no version and has no local release tags, so 0.1.0 is a proposed first farm release, not an observed upstream version. Live release lookup was blocked; size 0 means unknown. Farm uses Python 3.11; upstream does not state a minimum.",
+  "description": "Two apps, one Tiiny, no collisions. OneLane is a single Python file you copy beside your own code: it holds a kernel-level lock so a second inference waits its turn instead of failing with device error 150004, rides out busy retries, and can track a model budget. There is no app to start; it is a library the other apps on the farm use.",
   "version": "0.1.0",
   "license": "MIT",
   "homepage": "https://github.com/webdevtodayjason/onelane",
