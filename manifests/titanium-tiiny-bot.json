@@ -10,7 +10,7 @@
   "id": "titanium-tiiny-bot",
   "name": "Titanium Tiiny Bot",
   "pitch": "A local assistant with chat, files, memories and voice.",
-  "description": "Titanium Computing\u2019s assistant runs beside your Tiiny on Mac or Linux. Supports --selfcheck. Release pending: the 0.1.9 package is prepared as a patch, but the planned GitHub release is unpublished; size 0 means unknown. No license file or Git remote is present in the inspected checkout; NOASSERTION and the Titanium-Devops release destination need maintainer confirmation.",
+  "description": "Titanium Computing\u2019s assistant runs beside your Tiiny on Mac or Linux. Supports --selfcheck. Release pending: the 0.1.9 package is prepared as a patch, but the planned GitHub release is unpublished; the checksum and size identify the bundled local archive. No license file or Git remote is present in the inspected checkout; NOASSERTION and the Titanium-Devops release destination need maintainer confirmation.",
   "version": "0.1.9",
   "license": "NOASSERTION",
   "homepage": "https://titanium.bot",
@@ -48,7 +48,8 @@
   ],
   "release": {
     "url": "https://github.com/Titanium-Devops/titanium-bot-lite/releases/download/v0.1.9/titanium-tiiny-bot-0.1.9.tar.gz",
-    "sha256": "58dca3dbb5d573c3c0c3ffefb8fd615d6ef87f013d19de384ffe4f2bcb3cc715",
-    "size": 433852
-  }
+    "sha256": "49ad7e973fef53f7c3049f7a39a2dfb29509a8e6ce25e760f996889d76cda797",
+    "size": 434057
+  },
+  "health": "/api/health"
 }

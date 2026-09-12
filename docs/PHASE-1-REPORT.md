@@ -230,3 +230,88 @@ executed. No real Tiiny inference, microphone input, or GUI behavior was tested.
 The implementation keeps the runtime in one file, reuses the apps' existing
 configuration and data environment contracts, and introduces no runtime dependency,
 shell launcher, device daemon, or duplicate OneLane implementation.
+
+## Phase 1b
+
+Completed 2026-09-12 from `docs/PHASE-1B.md`, entirely through CLI tools. No browser
+or GUI was launched and no commit was attempted, as required by the brief.
+
+### Changes
+
+- `farm device --base URL --key-stdin` imports piped credentials without a terminal.
+  `TIINY_BASE` and `TIINY_KEY` also support a one-shot persistent import. Explicit
+  options override environment values; incomplete scripted input fails without
+  prompting. With neither flags nor device environment values, both hidden prompts
+  remain. Atomic writes and mode `0600` are preserved; keys never need an argument.
+- Startup rejects already-listening declared ports before spawning, preventing an
+  existing server from satisfying the new child's readiness check. It then waits
+  up to ten seconds, checking child exit before and after probes. An optional
+  manifest `health` path selects HTTP GET on the primary port; remaining ports use
+  TCP. Without declared ports, a short child-liveness check remains. Failed startup
+  reports the last ten log lines, terminates the process group, and clears its
+  records. HTTP probes have a wall-clock bound as well as socket timeouts, including
+  malformed, truncated and trickling-response handling.
+- `farm start <id> --port N` overrides the primary port, validates its range, and
+  exports `TINYAPP_PORT`. Lite also receives `TIINY_PORT` and a corrected explicit
+  `--port` argument; Story Lantern receives `PORT`. Secondary ports remain declared.
+  `process.json` records effective ports, and status displays those values.
+- Status queries health for the running version, compares with the currently
+  installed manifest, and prints e.g. `running 0.1.8, installed 0.1.9: restart to
+  update`. It supports older process records lacking the health field. When health
+  or its version is unavailable, output labels that condition and falls back to
+  the recorded launch version. Apps without health use their launch version.
+- Lite already returned its packaged version from `/api/health`; that behavior now
+  has explicit regression coverage and a manifest declaration. The refreshed Lite
+  patch adds `TINYAPP_PORT` fallback below `TIINY_PORT` and explicit CLI options.
+  Both a cumulative patch for original `0.1.8` and an incremental Phase 1b patch
+  for the inspected external `0.1.9` checkout are supplied. External sources were
+  not modified. Application instructions are in `farm-lite-patch/README.md`.
+
+### Verification and simplifications
+
+- `python3 -m unittest` (Python 3.14.6): **57 run, 57 passed, zero skips**.
+- `/opt/homebrew/bin/python3.12 -m unittest`: **57 run, 57 passed, zero skips**.
+- `ruff check farm scripts tests`, mypy with untyped body checking for the launcher
+  and validator, Python compilation, and diff whitespace checks passed.
+- All three manifests validate; the two pending manifests require `--allow-pending`.
+  The Lite manifest's checksum and byte size match the delivered archive.
+- Patched Lite suite: **102 run, 98 passed, four existing socket tests skipped**.
+  Compilation and echo-mode selfcheck passed. Rebuilding from the cumulative patch
+  reproduces the archive byte for byte. The incremental patch dry-runs and applies
+  to a temporary copy of the external checkout; changed files match tested sources.
+- Regression coverage includes real subprocess CLI pipe input, exit code 1 and log
+  output, delayed child death, busy-port rejection without spawning, timeout cleanup,
+  multiple-port readiness, health failures, strict deadline handling, port environment
+  and Lite argument precedence, legacy process records, and live-version mismatch.
+- Three initial baseline failures came from tests assuming the Lite checksum was
+  still `pending`; it had already been populated before this task. Pending fixtures
+  are now explicit. Existing fake lifecycle apps declare no listening port because
+  they do not create a listener; separate readiness tests exercise network behavior.
+- Reused existing environment, manifest, process-record and atomic-write mechanisms;
+  runtime remains standard-library-only with no new dependency or launcher layer.
+
+Refreshed archive: `farm-lite-patch/titanium-tiiny-bot-0.1.9.tar.gz`, **434,057 bytes**,
+74 members; SHA-256:
+
+```text
+49ad7e973fef53f7c3049f7a39a2dfb29509a8e6ce25e760f996889d76cda797
+```
+
+### Changed files and remaining limits
+
+Changed `farm/farm.py`, `tests/test_farm.py`, new `tests/test_device.py`,
+`docs/manifest.schema.json`, `scripts/check-manifest.py`,
+`manifests/titanium-tiiny-bot.json`, `README.md`, this report, and the Lite patch
+README, cumulative patch, incremental patch and archive under `farm-lite-patch/`.
+That artifact directory is already gitignored; its delivered files remain on disk.
+
+The sandbox rejects loopback socket binding (confirmed by a direct CLI probe).
+Farm tests therefore exercise actual subprocesses and lifecycle cleanup with
+simulated TCP/HTTP transports; a real HTTP listener/busy-port end-to-end run could
+not be performed here. No real Tiiny device, inference, microphone or GUI was used.
+The public release remains unpublished/unverified; the manifest identifies the
+local artifact, not a verified remote download. Port preflight cannot atomically
+reserve a port until an independently launched app binds it; readiness additionally
+checks the launched process remains alive. Other apps must honor `TINYAPP_PORT`
+to support an override. HTTP probe threads are daemonized so a pathological response
+cannot prevent the CLI from exiting at its deadline.

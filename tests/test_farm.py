@@ -2,6 +2,7 @@ import contextlib
 import copy
 import getpass
 import hashlib
+from http.client import BadStatusLine, IncompleteRead
 import importlib.util
 import io
 import json
@@ -36,6 +37,7 @@ while True: time.sleep(0.1)
 class ManifestTests(unittest.TestCase):
     def setUp(self):
         self.manifest = json.loads((ROOT / "manifests/titanium-tiiny-bot.json").read_text())
+        self.manifest["release"]["sha256"] = "pending"
 
     def test_three_catalog_manifests(self):
         paths = sorted((ROOT / "manifests").glob("*.json"))
@@ -51,7 +53,7 @@ class ManifestTests(unittest.TestCase):
         validator.check_manifest(self.manifest)
 
     def test_validator_cli(self):
-        path = ROOT / "manifests/titanium-tiiny-bot.json"
+        path = ROOT / "manifests/story-lantern.json"
         command = [sys.executable, str(ROOT / "scripts/check-manifest.py"), str(path)]
         self.assertEqual(subprocess.run(command, capture_output=True).returncode, 1)
         self.assertEqual(subprocess.run(command + ["--allow-pending"], capture_output=True).returncode, 0)
@@ -103,7 +105,8 @@ class FarmTests(unittest.TestCase):
         self.manifest = json.loads((ROOT / "manifests/titanium-tiiny-bot.json").read_text())
         self.manifest.update(id="fake-app", name="Fake app", version="0.1.0",
                              entry={"python": "fake", "args": []})
-        self.manifest["requires"]["ports"] = [43210]
+        self.manifest["requires"]["ports"] = []
+        self.manifest.pop("health", None)
         self.output = io.StringIO()
         self.redirect = contextlib.redirect_stdout(self.output)
         self.redirect.__enter__()
@@ -230,7 +233,7 @@ class FarmTests(unittest.TestCase):
         self.assertEqual(env["TIINY_KEY"], "private-key")
         self.assertEqual(env["ONELANE_DIR"], str(self.home / ".onelane"))
         self.farm.status()
-        self.assertIn(f"fake-app {pid} 43210", self.output.getvalue())
+        self.assertIn(f"fake-app {pid} -", self.output.getvalue())
         self.assertNotIn("private-key", self.output.getvalue())
         self.farm.start("fake-app")
         self.assertEqual(int((self.app / "farm.pid").read_text()), pid)
@@ -425,3 +428,190 @@ while True: time.sleep(0.1)
             with contextlib.redirect_stderr(errors):
                 self.assertEqual(main(["device"]), 1)
         self.assertNotIn("contains-secret-key", errors.getvalue())
+
+    def test_start_waits_for_declared_tcp_port(self):
+        self.manifest['requires']['ports'] = [43210]
+        self.save_manifest()
+        self.install()
+        with patch('farm.farm.socket.create_connection', side_effect=[
+                ConnectionRefusedError(), ConnectionRefusedError(), contextlib.nullcontext()]) as connect:
+            self.farm.start('fake-app')
+        self.assertEqual(connect.call_count, 3)
+        self.assertIn('Started fake-app', self.output.getvalue())
+
+    def test_busy_port_never_launches_or_claims_started(self):
+        self.manifest['requires']['ports'] = [43210]
+        self.save_manifest()
+        self.install()
+        with patch('farm.farm.socket.create_connection', return_value=contextlib.nullcontext()):
+            with patch('farm.farm.subprocess.Popen') as spawn:
+                with self.assertRaisesRegex(FarmError, 'already in use'):
+                    self.farm.start('fake-app')
+        spawn.assert_not_called()
+        self.assertNotIn('Started', self.output.getvalue())
+        self.assertFalse((self.app / 'farm.pid').exists())
+
+    def test_start_timeout_reports_last_ten_log_lines_and_cleans_up(self):
+        self.manifest['requires']['ports'] = [43210]
+        self.make_release(code='\n'.join(f'print("line-{i}", flush=True)' for i in range(20)) + '\n' + FAKE_APP)
+        self.install()
+        with patch('farm.farm.socket.create_connection', side_effect=ConnectionRefusedError()):
+            with patch('farm.farm.START_TIMEOUT', 0.5):
+                with self.assertRaisesRegex(FarmError, 'timed out') as error:
+                    self.farm.start('fake-app')
+        self.assertIn('line-19', str(error.exception))
+        self.assertNotIn('line-9\n', str(error.exception))
+        self.assertEqual(len(str(error.exception).splitlines()[1:]), 10)
+        self.assertIsNone(self.farm.active('fake-app'))
+        self.assertFalse((self.app / 'process.json').exists())
+        self.assertNotIn('Started', self.output.getvalue())
+
+    def test_delayed_exit_is_not_success(self):
+        self.manifest['requires']['ports'] = [43210]
+        self.make_release(code='import time\ntime.sleep(0.3)\nprint("bind failed", flush=True)\nraise SystemExit(2)\n')
+        self.install()
+        with patch('farm.farm.socket.create_connection', side_effect=ConnectionRefusedError()):
+            with self.assertRaisesRegex(FarmError, 'bind failed'):
+                self.farm.start('fake-app')
+        self.assertNotIn('Started', self.output.getvalue())
+        self.assertFalse((self.app / 'farm.pid').exists())
+
+    def test_health_retries_and_status_uses_live_version_and_override(self):
+        self.manifest['requires']['ports'] = [43210]
+        self.manifest['health'] = '/api/health'
+        self.save_manifest()
+        self.install()
+        with patch('farm.farm.socket.create_connection', side_effect=ConnectionRefusedError()):
+            with patch('farm.farm.urlopen', side_effect=[
+                    OSError(), io.BytesIO(b'{"version":"0.1.0"}')]) as request:
+                self.farm.start('fake-app', port=43211)
+        self.assertEqual(request.call_args.args[0], 'http://127.0.0.1:43211/api/health')
+        info = json.loads((self.app / 'process.json').read_text())
+        self.assertEqual(info['ports'], [43211])
+        with patch('farm.farm.urlopen', return_value=io.BytesIO(b'{"version":"0.0.9"}')):
+            self.farm.status()
+        self.assertIn('43211', self.output.getvalue())
+        self.assertIn('running 0.0.9, installed 0.1.0: restart to update', self.output.getvalue())
+        with patch('farm.farm.urlopen', side_effect=OSError()):
+            self.farm.status()
+        self.assertIn('health unavailable', self.output.getvalue())
+
+    def test_port_override_reaches_child(self):
+        self.make_release(code='import os\nprint("port=" + os.environ["TINYAPP_PORT"], flush=True)\n' + FAKE_APP)
+        self.install()
+        with patch('farm.farm.socket.create_connection', side_effect=[
+                ConnectionRefusedError(), contextlib.nullcontext()]):
+            self.farm.start('fake-app', port=43211)
+        self.wait_for(lambda: 'port=43211' in (self.app / 'farm.log').read_text())
+
+    def test_invalid_port_and_health_are_rejected(self):
+        from farm.farm import validate_manifest
+        for port in (0, -1, 65536, True):
+            with self.subTest(port=port), self.assertRaises(FarmError):
+                self.farm.start('fake-app', port=port)
+        for health in ('https://example.com', '//example.com', '/bad?key=x', '/bad\npath', True):
+            manifest = copy.deepcopy(self.manifest)
+            manifest['health'] = health
+            with self.subTest(health=health), self.assertRaises(FarmError):
+                validate_manifest(manifest, 'fake-app')
+
+    def test_start_cli_failure_exits_one_with_log_tail(self):
+        self.make_release(code='print("startup exploded", flush=True)\nraise SystemExit(2)\n')
+        self.install()
+        result = subprocess.run([sys.executable, str(ROOT / 'farm/farm.py'), 'start', 'fake-app'],
+                                env=os.environ | {'HOME': str(self.root)}, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('startup exploded', result.stderr)
+        self.assertNotIn('Started', result.stdout)
+        self.assertFalse((self.app / 'farm.pid').exists())
+
+    def test_lite_override_replaces_manifest_argument_and_sets_both_env_vars(self):
+        self.install()
+        lite = copy.deepcopy(self.manifest)
+        lite['id'] = 'titanium-tiiny-bot'
+        lite['entry']['args'] = ['--port', '7788']
+        lite['requires']['ports'] = [7788]
+        root = self.app / '0.1.0'
+        root.joinpath('fake.py').write_text('import os, sys\nprint(sys.argv[1:])\n'
+                                          'print(os.environ["TINYAPP_PORT"], os.environ["TIINY_PORT"])\n' + FAKE_APP)
+        with patch.object(self.farm, 'installed', return_value=(root, lite)), \
+                patch.object(self.farm, 'app_dir', return_value=self.app), \
+                patch('farm.farm.socket.create_connection', side_effect=[
+                    ConnectionRefusedError(), contextlib.nullcontext()]):
+            self.farm.start('titanium-tiiny-bot', port=7790)
+        self.wait_for(lambda: 'ready' in (self.app / 'farm.log').read_text())
+        self.assertIn("['--port', '7790']", (self.app / 'farm.log').read_text())
+        self.assertIn('7790 7790', (self.app / 'farm.log').read_text())
+
+    def test_cli_port_option_dispatches_to_start(self):
+        with patch('farm.farm.Farm', return_value=self.farm), patch.object(self.farm, 'start') as start:
+            self.assertEqual(main(['start', 'fake-app', '--port', '43211']), 0)
+        start.assert_called_once_with('fake-app', port=43211)
+
+    def test_status_legacy_record_uses_manifest_health(self):
+        self.install()
+        self.farm.start('fake-app')
+        installed = self.app / '0.1.0/.farm-manifest.json'
+        manifest = json.loads(installed.read_text())
+        manifest.update(health='/api/health')
+        manifest['requires']['ports'] = [43210]
+        installed.write_text(json.dumps(manifest))
+        info = json.loads((self.app / 'process.json').read_text())
+        info.pop('health', None)
+        info['ports'] = [43211]
+        (self.app / 'process.json').write_text(json.dumps(info))
+        with patch('farm.farm.urlopen', return_value=io.BytesIO(b'{"version":"0.0.9"}')):
+            self.farm.status()
+        self.assertIn('running 0.0.9, installed 0.1.0: restart to update', self.output.getvalue())
+
+    def test_health_invalid_responses_are_not_ready(self):
+        for body in (b'bad json', b'[]', b'{"ok":false}', b'{"version":'):
+            with self.subTest(body=body), patch('farm.farm.urlopen', return_value=io.BytesIO(body)):
+                self.assertIsNone(self.farm.health(43210, '/api/health'))
+
+    def test_all_declared_ports_must_be_ready(self):
+        self.manifest['requires']['ports'] = [43210, 43211]
+        self.save_manifest()
+        self.install()
+        calls = []
+
+        def probe(address, timeout):
+            calls.append(address[1])
+            if len(calls) <= 2 or (len(calls) == 4):
+                raise ConnectionRefusedError()
+            return contextlib.nullcontext()
+
+        with patch('farm.farm.socket.create_connection', side_effect=probe):
+            self.farm.start('fake-app')
+        self.assertEqual(calls, [43210, 43211, 43210, 43211, 43210, 43211])
+
+    def test_broken_http_response_retries_instead_of_crashing(self):
+        for error in (BadStatusLine("bad status"), IncompleteRead(b"partial")):
+            with self.subTest(error=error), patch('farm.farm.urlopen', side_effect=error):
+                self.assertIsNone(self.farm.health(43210, '/api/health'))
+
+    def test_startup_log_tail_preserves_ten_long_lines(self):
+        self.install()
+        lines = [str(i) + ':' + 'x' * 8000 for i in range(15)]
+        (self.app / 'farm.log').write_text('\n'.join(lines) + '\n')
+        error = self.farm.startup_error(self.app, 'failed')
+        self.assertEqual(str(error).splitlines()[1:], lines[-10:])
+
+    def test_health_trickling_response_cannot_exceed_readiness_deadline(self):
+        self.manifest['requires']['ports'] = [43210]
+        self.manifest['health'] = '/api/health'
+        self.save_manifest()
+        self.install()
+
+        def slow_response(*args, **kwargs):
+            time.sleep(0.5)
+            return io.BytesIO(b'{"version":"0.1.0"}')
+
+        with patch('farm.farm.socket.create_connection', side_effect=ConnectionRefusedError()), \
+                patch('farm.farm.urlopen', side_effect=slow_response), \
+                patch('farm.farm.START_TIMEOUT', 0.25):
+            started = time.monotonic()
+            with self.assertRaisesRegex(FarmError, 'timed out'):
+                self.farm.start('fake-app')
+            self.assertLess(time.monotonic() - started, 0.45)
+        self.assertFalse((self.app / 'farm.pid').exists())

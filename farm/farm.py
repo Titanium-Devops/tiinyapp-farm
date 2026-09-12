@@ -8,6 +8,7 @@ import fcntl
 import getpass
 import hashlib
 from html.parser import HTMLParser
+from http.client import HTTPException
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -15,6 +16,7 @@ import re
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tarfile
@@ -28,6 +30,7 @@ import warnings
 CATALOG = "https://tinyapp.farm/manifests/"
 ID = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*\Z")
 VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
+START_TIMEOUT = 10.0
 MAX_DOWNLOAD = 512 * 1024 * 1024
 MAX_UNPACKED = 2 * 1024 * 1024 * 1024
 
@@ -86,6 +89,11 @@ def validate_manifest(manifest, ident):
         raise FarmError("Manifest needs its requirements and ports.")
     if any(type(p) is not int or not 1 <= p <= 65535 for p in requires["ports"]):  # noqa: E721 - JSON integers exclude booleans.
         raise FarmError("Invalid port.")
+    health = manifest.get("health")
+    if "health" in manifest and (not isinstance(health, str)
+                               or not re.fullmatch(r"/[A-Za-z0-9_./-]+", health)
+                               or health.startswith("//") or not requires["ports"]):
+        raise FarmError("Health must be a local HTTP path with a declared port.")
     py = requires.get("python")
     if py is not None and (not isinstance(py, str) or not re.fullmatch(r"[0-9]+\.[0-9]+", py)):
         raise FarmError("Invalid Python requirement.")
@@ -311,12 +319,20 @@ class Farm:
                   ("Library only; copy onelane.py into your app." if manifest["entry"] is None
                    else f"Run: farm start {ident}"))
 
-    def device(self):
-        # Refuse getpass's echoing fallback when no secure terminal is available.
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", getpass.GetPassWarning)
-            base = getpass.getpass("Device base URL (hidden): ").strip()
-            key = getpass.getpass("Device API key (hidden): ").strip()
+    def device(self, base=None, key_stdin=False):
+        scripted = base is not None or key_stdin or any(
+            name in os.environ for name in ("TIINY_BASE", "TIINY_KEY"))
+        if scripted:
+            base = (base if base is not None else os.environ.get("TIINY_BASE", "")).strip()
+            key = (sys.stdin.read() if key_stdin else os.environ.get("TIINY_KEY", "")).strip()
+            if not base:
+                raise FarmError("Provide --base or TIINY_BASE for device import.")
+        else:
+            # Refuse getpass's echoing fallback when no secure terminal is available.
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", getpass.GetPassWarning)
+                base = getpass.getpass("Device base URL (hidden): ").strip()
+                key = getpass.getpass("Device API key (hidden): ").strip()
         parsed = urlsplit(base)
         if (parsed.scheme not in ("http", "https") or not parsed.hostname
                 or parsed.username or parsed.password or parsed.query or parsed.fragment):
@@ -374,7 +390,60 @@ class Farm:
         except (FileNotFoundError, ProcessLookupError, ValueError):
             return None
 
-    def start(self, ident):
+    @staticmethod
+    def tcp_ready(port, timeout=0.2):
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=timeout):
+                return True
+        except PermissionError:
+            # Permission errors must not masquerade as an available port.
+            raise
+        except OSError:
+            return False
+
+    @staticmethod
+    def health(port, path, timeout=0.5):
+        result = []
+
+        def request():
+            try:
+                with urlopen(f"http://127.0.0.1:{port}{path}", timeout=timeout) as response:
+                    payload = json.loads(response.read(65537))
+                if isinstance(payload, dict) and payload.get("ok") is not False:
+                    result.append(payload)
+            except (OSError, ValueError, HTTPException):
+                pass
+
+        # Socket timeouts alone do not bound a peer trickling headers/body bytes.
+        # A daemon probe cannot hold the CLI open past this wall-clock deadline.
+        probe = threading.Thread(target=request, daemon=True)
+        probe.start()
+        probe.join(timeout)
+        return result[0] if not probe.is_alive() and result else None
+
+    @staticmethod
+    def startup_error(app, message):
+        # Read backwards so old log history need not be loaded or scanned.
+        log = app / "farm.log"
+        tail = ""
+        if log.exists():
+            with log.open("rb") as source:
+                position = source.seek(0, os.SEEK_END)
+                chunks = []
+                newlines = 0
+                while position and newlines <= 10:
+                    size = min(position, 8192)
+                    position -= size
+                    source.seek(position)
+                    chunk = source.read(size)
+                    chunks.append(chunk)
+                    newlines += chunk.count(b"\n")
+                tail = "\n".join(b"".join(reversed(chunks)).decode("utf-8", errors="replace").splitlines()[-10:])
+        return FarmError(message + ("\n" + tail if tail else ""))
+
+    def start(self, ident, port=None):
+        if port is not None and (type(port) is not int or not 1 <= port <= 65535):  # noqa: E721
+            raise FarmError("Port must be an integer between 1 and 65535.")
         with self.guard(ident):
             root, manifest = self.installed(ident)
             app = self.app_dir(ident)
@@ -388,7 +457,25 @@ class Farm:
                        if "python" in entry else shlex.split(entry["command"]))
             if command[0] in ("python", "python3"):
                 command[0] = sys.executable
+            ports = list(manifest["requires"]["ports"])
+            if port is not None:
+                ports = [port, *ports[1:]]
+            for candidate in ports:
+                if self.tcp_ready(candidate):
+                    raise self.startup_error(app, f"Port {candidate} is already in use; use farm start {ident} --port N.")
             env = self.environment(ident, manifest)
+            if ports:
+                env["TINYAPP_PORT"] = str(ports[0])
+                if ident == "titanium-tiiny-bot":
+                    env["TIINY_PORT"] = str(ports[0])
+                    # Lite's manifest supplies --port, which takes precedence over env.
+                    for index, argument in enumerate(command):
+                        if argument == "--port" and index + 1 < len(command):
+                            command[index + 1] = str(ports[0])
+                        elif argument.startswith("--port="):
+                            command[index] = f"--port={ports[0]}"
+                elif ident == "story-lantern":
+                    env["PORT"] = str(ports[0])
             with (app / ".run.lock").open("a") as lock:
                 try:
                     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -401,13 +488,37 @@ class Farm:
                 try:
                     atomic_write(app / "farm.pid", str(process.pid) + "\n")
                     atomic_write(app / "process.json", json.dumps({"started": time.time(),
-                                 "ports": manifest["requires"]["ports"], "version": manifest["version"]}) + "\n")
-                    time.sleep(0.2)
-                    if process.poll() is not None:
-                        raise FarmError(f"{ident} exited at startup; inspect {app / 'farm.log'}.")
+                                 "ports": ports, "version": manifest["version"], "health": manifest.get("health")}) + "\n")
+                    deadline = time.monotonic() + START_TIMEOUT
+                    while True:
+                        time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+                        if process.poll() is not None:
+                            raise self.startup_error(app, f"{ident} exited at startup (exit {process.returncode}).")
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise self.startup_error(app, f"{ident} timed out waiting for readiness after {START_TIMEOUT:g} s.")
+                        ready = True
+                        for index, candidate in enumerate(ports):
+                            remaining = deadline - time.monotonic()
+                            if remaining <= 0:
+                                ready = False
+                                break
+                            if index == 0 and manifest.get("health"):
+                                ready = self.health(candidate, manifest["health"], min(0.5, remaining)) is not None
+                            else:
+                                ready = self.tcp_ready(candidate, min(0.2, remaining))
+                            if not ready:
+                                break
+                        if ready:
+                            # Check again after I/O: the child may have exited during a probe.
+                            if process.poll() is not None:
+                                raise self.startup_error(app, f"{ident} exited at startup (exit {process.returncode}).")
+                            break
                 except BaseException:
-                    if process.poll() is None:
+                    try:
                         os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
                     process.wait()
                     (app / "farm.pid").unlink(missing_ok=True)
                     (app / "process.json").unlink(missing_ok=True)
@@ -442,7 +553,7 @@ class Farm:
             print(f"Stopped {ident}." if self._stop(ident) else f"{ident} is not running.")
 
     def status(self):
-        print("APP PID PORT UPTIME")
+        print("APP PID PORT UPTIME VERSION")
         for path in sorted(self.home.glob("*/farm.pid")):
             ident = path.parent.name
             with self.guard(ident):
@@ -450,7 +561,22 @@ class Farm:
                 if pid:
                     info = read_json(path.parent / "process.json")
                     ports = ",".join(map(str, info["ports"])) or "-"
-                    print(f"{ident} {pid} {ports} {max(0, int(time.time() - info['started']))}s")
+                    _, manifest = self.installed(ident)
+                    version = info.get("version", "unknown")
+                    note = ""
+                    health_path = info.get("health", manifest.get("health"))
+                    if health_path and info["ports"]:
+                        health = self.health(info["ports"][0], health_path)
+                        if health is None:
+                            note = " (health unavailable)"
+                        elif isinstance(health.get("version"), str) and VERSION.fullmatch(health["version"]):
+                            version = health["version"]
+                        else:
+                            note = " (health version unavailable)"
+                    detail = f"running {version}"
+                    if version != manifest["version"]:
+                        detail += f", installed {manifest['version']}: restart to update"
+                    print(f"{ident} {pid} {ports} {max(0, int(time.time() - info['started']))}s {detail}{note}")
 
     def remove(self, ident, purge=False):
         with self.guard(ident):
@@ -478,19 +604,28 @@ def main(argv=None):
         command.add_argument("id")
         if name in ("install", "update"):
             command.add_argument("--yes", "-y", action="store_true", help="Accept the install prompt")
+        if name == "start":
+            command.add_argument("--port", type=int, help="Override the app's primary listening port")
         if name == "remove":
             command.add_argument("--purge", action="store_true", help="Also delete saved data")
-    for name in ("device", "status", "list"):
+    device = commands.add_parser("device")
+    device.add_argument("--base", help="Device HTTP(S) base URL (or TIINY_BASE)")
+    device.add_argument("--key-stdin", action="store_true", help="Read the device API key from stdin (or TIINY_KEY)")
+    for name in ("status", "list"):
         commands.add_parser(name)
     args = parser.parse_args(argv)
     farm = Farm()
     try:
         if args.command in ("install", "update"):
             farm.install(args.id, yes=args.yes, update=args.command == "update")
+        elif args.command == "device":
+            farm.device(base=args.base, key_stdin=args.key_stdin)
         elif args.command == "remove":
             farm.remove(args.id, purge=args.purge)
-        elif args.command in ("start", "stop"):
-            getattr(farm, args.command)(args.id)
+        elif args.command == "start":
+            farm.start(args.id, port=args.port)
+        elif args.command == "stop":
+            farm.stop(args.id)
         else:
             getattr(farm, args.command)()
     except (FarmError, OSError, ValueError, KeyError, TypeError, tarfile.TarError, getpass.GetPassWarning) as error:

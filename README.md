@@ -25,9 +25,10 @@ farm status
 farm stop titanium-tiiny-bot
 ```
 
-The bundled catalog entries are **pending release drafts**. They can be validated
-with `--allow-pending`, but installation is refused until a maintainer publishes the
-archive and records its actual SHA-256 and byte size. Nothing is downloaded or run
+Story Lantern and OneLane are **pending release drafts**. They can be validated
+with `--allow-pending`, but installation is refused until their checksums are set.
+The Lite manifest records the included local archive's checksum and size; its
+public release URL remains unverified. Nothing is downloaded or run
 by manifest validation. The installer displays permissions and requirements and
 asks once; `--yes` explicitly accepts that prompt for automation.
 
@@ -54,12 +55,31 @@ file descriptors is not supported by this launcher.
 
 `farm device` reads both the base URL and API key without echo and atomically saves
 `~/tinyapps/device.json` with mode `0600`. If a secure terminal is unavailable, it
-refuses to fall back to echoed input. The launcher passes `TIINY_BASE`, `TIINY_KEY`,
+refuses to fall back to echoed input. Scripts can import settings with
+`farm device --base http://device:8800/v1 --key-stdin < private-key-file`, or run
+`farm device` with `TIINY_BASE` and `TIINY_KEY` in the environment. Both forms save
+the configuration for later launches. Explicit options take precedence over the
+environment; incomplete scripted input fails without prompting. Keys never need
+to appear in command arguments. The launcher passes `TIINY_BASE`, `TIINY_KEY`,
 and the derived `TIINY_HOST`. Cooperating apps share `ONELANE_DIR=~/tinyapps/.onelane`.
 Story Lantern additionally receives `LANTERN_HOME`, its database/log paths, and
 `PORT`; its upstream device management still expects plain HTTP port 8800.
 Story Lantern currently retries contention but has not adopted OneLane, so merely
 setting the shared path cannot guarantee cross-app serialization for that app.
+
+`farm start <id>` rejects already-listening ports, then waits up to ten seconds
+for all declared ports while checking that the child remains alive. A manifest's
+optional `"health": "/api/health"` requests HTTP GET on its first port, returning
+a JSON object (with `version`, and optional `ok`); other ports use TCP connections.
+Failed startup exits 1, prints the last ten log lines, and removes process records.
+Apps without declared ports receive a short process-liveness check.
+
+`farm start <id> --port 7790` overrides the primary port and exports `TINYAPP_PORT`.
+Lite also receives `TIINY_PORT` and an updated `--port` argument; Story Lantern
+receives `PORT`. Other apps must honor `TINYAPP_PORT`. `farm status` displays the
+recorded ports and compares the health-reported version with the installed
+manifest, suggesting a restart on mismatch. Without health version data it uses
+the launch record and labels unavailable health data.
 
 `farm update <id>` installs only a newer version, preserves data and previous code,
 and stops a running old version after the new archive is verified and unpacked.

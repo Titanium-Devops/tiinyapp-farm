@@ -223,6 +223,11 @@
     "updatedAt": {
       "type": "string",
       "format": "date"
+    },
+    "health": {
+      "type": "string",
+      "pattern": "^/(?!/)[A-Za-z0-9_./-]+(?![\\s\\S])",
+      "description": "Optional HTTP health path on the first declared port; GET returns a JSON object with version and optional ok."
     }
   },
   "$defs": {
