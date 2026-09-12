@@ -170,11 +170,31 @@ refreshAccount().catch(error => status(error.message));
 
 // The server names the field in its message ("tags: must not be empty", "A null entry requires the library tag").
 const FIELD_WORDS = { entry: 'command', tags: 'tags', version: 'version', license: 'license', id: 'id', name: 'name', description: 'description', release: 'releaseUrl', ports: 'ports', python: 'python' };
-function markField(text) {
+function clearMarks() {
   for (const input of document.querySelectorAll('#seed-form [aria-invalid]')) input.removeAttribute('aria-invalid');
+  for (const note of document.querySelectorAll('#seed-form .field-error')) note.remove();
+}
+function flag(input, text) {
+  input.setAttribute('aria-invalid', 'true');
+  const note = document.createElement('p'); note.className = 'field-error'; note.textContent = text;
+  (input.closest('.seed-field') || input.parentElement).append(note);
+}
+function markField(text) {
+  clearMarks();
   const word = Object.keys(FIELD_WORDS).find(key => new RegExp('\\b' + key + '\\b', 'i').test(text));
   const input = word && byId(FIELD_WORDS[word]);
-  if (input) { input.setAttribute('aria-invalid', 'true'); input.focus({ preventScroll: true }); }
+  if (input) { flag(input, text); input.scrollIntoView({ block: 'center' }); input.focus({ preventScroll: true }); }
+}
+// Browser validation: mark every empty required field and say so under it, then jump to the first.
+const seedForm = byId('seed-form');
+if (seedForm) {
+  seedForm.addEventListener('invalid', event => {
+    const input = event.target; event.preventDefault();
+    if (!input.hasAttribute('aria-invalid')) flag(input, input.validity.valueMissing ? 'This one is needed.' : (input.validationMessage || 'Check this value.'));
+    const first = seedForm.querySelector('[aria-invalid]'); if (first === input) { input.scrollIntoView({ block: 'center' }); input.focus({ preventScroll: true }); }
+  }, true);
+  seedForm.addEventListener('input', event => { const input = event.target; if (input.hasAttribute('aria-invalid') && input.checkValidity()) { input.removeAttribute('aria-invalid'); input.closest('.seed-field')?.querySelector('.field-error')?.remove(); } });
+  seedForm.addEventListener('submit', clearMarks, true);
 }
 // A draft of the seed form survives reloads and failed sends. ponytail: localStorage, one key, no expiry.
 const DRAFT = 'farm-seed-draft';

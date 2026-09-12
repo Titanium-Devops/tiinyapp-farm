@@ -65,3 +65,4 @@ button:disabled{cursor:wait;opacity:.65}.seed-card fieldset{border:0;padding:0;m
 .badge.sprouting{color:var(--hay);background:rgba(242,196,98,.1);opacity:.8}
 
 #seed-form [aria-invalid=true]{border-color:#E5533D;box-shadow:0 0 0 2px rgba(229,83,61,.35)}.card-state.error{border-left-color:#E5533D}
+.field-error{color:#F0A08F;font-size:13px;margin:6px 0 0}
