@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://tinyapp.farm/docs/manifest.schema.json",
-  "title": "tinyapp.farm app manifest",
+  "$id": "https://tiinyapp.farm/docs/manifest.schema.json",
+  "title": "tiinyapp.farm app manifest",
   "type": "object",
   "additionalProperties": false,
   "required": [

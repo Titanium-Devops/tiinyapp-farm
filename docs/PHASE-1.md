@@ -16,11 +16,11 @@ by your sandbox; then leave the tree with only your changes):
    validator accept "pending" only with `--allow-pending`.
 3. farm/farm.py: the installer in SPEC.md, stdlib only, one file, with `python3 farm/farm.py` as
    the entry and a `[project.scripts] farm = ...` in pyproject.toml for `pip install`. The catalog
-   URL defaults to https://tinyapp.farm/manifests/ and is overridable with FARM_CATALOG (a local
+   URL defaults to https://tiinyapp.farm/manifests/ and is overridable with FARM_CATALOG (a local
    directory path works too, for tests and for this repo). Device config at
-   ~/tinyapps/device.json 0600, written by `farm device` which prompts for the base URL and key
-   without echo. Launcher: `farm start <id>` runs the entry with the data dir ~/tinyapps/<id>/data,
-   logs to ~/tinyapps/<id>/farm.log, writes ~/tinyapps/<id>/farm.pid; `farm stop` sends SIGINT
+   ~/tiinyapps/device.json 0600, written by `farm device` which prompts for the base URL and key
+   without echo. Launcher: `farm start <id>` runs the entry with the data dir ~/tiinyapps/<id>/data,
+   logs to ~/tiinyapps/<id>/farm.log, writes ~/tiinyapps/<id>/farm.pid; `farm stop` sends SIGINT
    then SIGKILL after 5 s; `farm status` lists running apps with pid, port and uptime.
 4. tests/ with unittest: schema validation of the three manifests; install from a local catalog
    directory with a local archive (build one from a temp dir), checksum mismatch refused, start

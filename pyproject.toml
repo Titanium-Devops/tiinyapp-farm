@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tinyapp-farm"
+name = "tiinyapp-farm"
 version = "0.1.0"
 description = "Install and run community apps beside your Tiiny AI Pocket Lab"
 readme = "README.md"

@@ -28,20 +28,20 @@ patch fallback. No browser or GUI was launched. No release was published.
 
 Installer behavior:
 
-- Default catalog: `https://tinyapp.farm/manifests/`; `FARM_CATALOG` supports local
+- Default catalog: `https://tiinyapp.farm/manifests/`; `FARM_CATALOG` supports local
   directories and file URLs as well as HTTP(S).
 - Installation displays name, pitch, permissions and requirements, then prompts
   once. `--yes` is available for explicit automation. Pending checksums cannot install.
 - Downloaded SHA-256 and exact byte size are verified before extraction. Extraction
   refuses path traversal, links, special files and duplicate file entries, with
   download/extraction limits. GitHub archive wrapper directories are handled.
-- Code lives in `~/tinyapps/<id>/<version>`, with atomic `current` and launcher
-  registration in `launcher.json`. Data lives separately in `~/tinyapps/<id>/data`.
+- Code lives in `~/tiinyapps/<id>/<version>`, with atomic `current` and launcher
+  registration in `launcher.json`. Data lives separately in `~/tiinyapps/<id>/data`.
 - Device base URL and key are both read without echo; configuration is written
-  atomically as `~/tinyapps/device.json`, mode `0600`. Echoing input fallback is
+  atomically as `~/tiinyapps/device.json`, mode `0600`. Echoing input fallback is
   refused, and installer error output does not expose raw credential-bearing errors.
 - Launchers set `TIINY_BASE`, `TIINY_KEY`, `TIINY_HOST`, `FARM_DATA_DIR`,
-  `TIINY_DATA_DIR`, and shared `ONELANE_DIR=~/tinyapps/.onelane`. Story Lantern's
+  `TIINY_DATA_DIR`, and shared `ONELANE_DIR=~/tiinyapps/.onelane`. Story Lantern's
   existing data, database, safety-log and port environment variables are also set.
 - Entries run without a shell, append stdout/stderr to `farm.log`, and record
   `farm.pid` plus timing/port metadata. A held runtime file lock distinguishes a
@@ -252,7 +252,7 @@ or GUI was launched and no commit was attempted, as required by the brief.
   records. HTTP probes have a wall-clock bound as well as socket timeouts, including
   malformed, truncated and trickling-response handling.
 - `farm start <id> --port N` overrides the primary port, validates its range, and
-  exports `TINYAPP_PORT`. Lite also receives `TIINY_PORT` and a corrected explicit
+  exports `TIINYAPP_PORT`. Lite also receives `TIINY_PORT` and a corrected explicit
   `--port` argument; Story Lantern receives `PORT`. Secondary ports remain declared.
   `process.json` records effective ports, and status displays those values.
 - Status queries health for the running version, compares with the currently
@@ -262,7 +262,7 @@ or GUI was launched and no commit was attempted, as required by the brief.
   the recorded launch version. Apps without health use their launch version.
 - Lite already returned its packaged version from `/api/health`; that behavior now
   has explicit regression coverage and a manifest declaration. The refreshed Lite
-  patch adds `TINYAPP_PORT` fallback below `TIINY_PORT` and explicit CLI options.
+  patch adds `TIINYAPP_PORT` fallback below `TIINY_PORT` and explicit CLI options.
   Both a cumulative patch for original `0.1.8` and an incremental Phase 1b patch
   for the inspected external `0.1.9` checkout are supplied. External sources were
   not modified. Application instructions are in `farm-lite-patch/README.md`.
@@ -312,6 +312,6 @@ not be performed here. No real Tiiny device, inference, microphone or GUI was us
 The public release remains unpublished/unverified; the manifest identifies the
 local artifact, not a verified remote download. Port preflight cannot atomically
 reserve a port until an independently launched app binds it; readiness additionally
-checks the launched process remains alive. Other apps must honor `TINYAPP_PORT`
+checks the launched process remains alive. Other apps must honor `TIINYAPP_PORT`
 to support an override. HTTP probe threads are daemonized so a pathological response
 cannot prevent the CLI from exiting at its deadline.

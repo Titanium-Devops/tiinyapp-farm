@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install and run tinyapp.farm apps. Python 3.11+, standard library, POSIX."""
+"""Install and run tiinyapp.farm apps. Python 3.11+, standard library, POSIX."""
 from __future__ import annotations
 
 import argparse
@@ -27,7 +27,7 @@ from urllib.parse import unquote, urlsplit
 from urllib.request import urlopen
 import warnings
 
-CATALOG = "https://tinyapp.farm/manifests/"
+CATALOG = "https://tiinyapp.farm/manifests/"
 ID = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*\Z")
 VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 START_TIMEOUT = 10.0
@@ -134,7 +134,7 @@ class CatalogLinks(HTMLParser):
 
 class Farm:
     def __init__(self, home=None, catalog=None):
-        self.home = Path(home) if home is not None else Path.home() / "tinyapps"
+        self.home = Path(home) if home is not None else Path.home() / "tiinyapps"
         self.catalog = str(catalog or os.environ.get("FARM_CATALOG", CATALOG))
         parsed = urlsplit(self.catalog)
         self.local_catalog = (Path(unquote(parsed.path)) if parsed.scheme == "file"
@@ -465,7 +465,7 @@ class Farm:
                     raise self.startup_error(app, f"Port {candidate} is already in use; use farm start {ident} --port N.")
             env = self.environment(ident, manifest)
             if ports:
-                env["TINYAPP_PORT"] = str(ports[0])
+                env["TIINYAPP_PORT"] = str(ports[0])
                 if ident == "titanium-tiiny-bot":
                     env["TIINY_PORT"] = str(ports[0])
                     # Lite's manifest supplies --port, which takes precedence over env.

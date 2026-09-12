@@ -1,1 +1,1 @@
-"""tinyapp.farm's standard-library installer."""
+"""tiinyapp.farm's standard-library installer."""

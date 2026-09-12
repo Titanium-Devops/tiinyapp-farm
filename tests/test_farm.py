@@ -97,7 +97,7 @@ class FarmTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="farm-test-")
         self.root = Path(self.temp.name)
-        self.home = self.root / "tinyapps"
+        self.home = self.root / "tiinyapps"
         self.catalog = self.root / "catalog"
         self.catalog.mkdir()
         self.farm = Farm(self.home, self.catalog)
@@ -497,7 +497,7 @@ while True: time.sleep(0.1)
         self.assertIn('health unavailable', self.output.getvalue())
 
     def test_port_override_reaches_child(self):
-        self.make_release(code='import os\nprint("port=" + os.environ["TINYAPP_PORT"], flush=True)\n' + FAKE_APP)
+        self.make_release(code='import os\nprint("port=" + os.environ["TIINYAPP_PORT"], flush=True)\n' + FAKE_APP)
         self.install()
         with patch('farm.farm.socket.create_connection', side_effect=[
                 ConnectionRefusedError(), contextlib.nullcontext()]):
@@ -533,7 +533,7 @@ while True: time.sleep(0.1)
         lite['requires']['ports'] = [7788]
         root = self.app / '0.1.0'
         root.joinpath('fake.py').write_text('import os, sys\nprint(sys.argv[1:])\n'
-                                          'print(os.environ["TINYAPP_PORT"], os.environ["TIINY_PORT"])\n' + FAKE_APP)
+                                          'print(os.environ["TIINYAPP_PORT"], os.environ["TIINY_PORT"])\n' + FAKE_APP)
         with patch.object(self.farm, 'installed', return_value=(root, lite)), \
                 patch.object(self.farm, 'app_dir', return_value=self.app), \
                 patch('farm.farm.socket.create_connection', side_effect=[

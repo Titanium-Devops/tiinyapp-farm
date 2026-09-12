@@ -1,7 +1,7 @@
-# tinyapp.farm, the spec
+# tiinyapp.farm, the spec
 
-Status: draft 2026-09-12, owner Jason Brashear. Domain tinyapp.farm is registered and on
-Cloudflare. Repo: Titanium-Devops/tinyapp-farm (private until launch).
+Status: draft 2026-09-12, owner Jason Brashear. Domain tiinyapp.farm is registered and on
+Cloudflare. Repo: Titanium-Devops/tiinyapp-farm (private until launch).
 
 ## What it is
 A catalog of community apps for the Tiiny AI Pocket Lab that run BESIDE the device on the
@@ -19,11 +19,11 @@ ports: [7788], device: {models: ["chat", "tts"], npuUnits: 57}}, permissions [mi
 network, device], tags, verified (set only by the farm's CI and a human), addedAt, updatedAt.
 A JSON schema in docs/manifest.schema.json validates it; the site renders it in plain words.
 
-## The installer (farm/farm.py, stdlib Python 3.11+, one file, `pip install tinyapp-farm` later)
-- `farm install <id>`: fetch manifests/<id>.json from the catalog (https://tinyapp.farm/manifests/<id>.json),
+## The installer (farm/farm.py, stdlib Python 3.11+, one file, `pip install tiinyapp-farm` later)
+- `farm install <id>`: fetch manifests/<id>.json from the catalog (https://tiinyapp.farm/manifests/<id>.json),
   show name, pitch, permissions and what it needs, ask once, download the release archive, verify
-  sha256, unpack to ~/tinyapps/<id>/<version>, write ~/tinyapps/<id>/current, register a launcher.
-- One shared device config at ~/tinyapps/device.json (0600): base URL and key pasted once; every
+  sha256, unpack to ~/tiinyapps/<id>/<version>, write ~/tiinyapps/<id>/current, register a launcher.
+- One shared device config at ~/tiinyapps/device.json (0600): base URL and key pasted once; every
   app reads it through the env the launcher sets (TIINY_BASE, TIINY_KEY). OneLane's lock lives at
   a shared path so apps take turns on the device.
 - `farm start <id>`, `farm stop <id>` (pid file; SIGINT then SIGKILL after 5 s), `farm status`,
