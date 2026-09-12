@@ -10,6 +10,17 @@ export function refreshSession() {
         anchor.textContent = user ? 'My farm' : 'Bring your seeds';
         anchor.href = user ? '/farm/' : '/seeds/';
       });
+      const update = document.querySelector('[data-seed-update]');
+      if (update) {
+        update.hidden = true;
+        if (user?.tiinyverse) {
+          const response = await fetch('/api/seeds/mine', { credentials: 'same-origin', cache: 'no-store' });
+          if (response.ok) {
+            const { seeds } = await response.json();
+            update.hidden = !seeds.some(seed => seed.id === update.dataset.seedUpdate && seed.canUpdate);
+          }
+        }
+      }
       return user;
     }).finally(() => { pending = null; });
   return pending;

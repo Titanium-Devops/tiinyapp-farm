@@ -54,6 +54,20 @@ class ManifestTests(unittest.TestCase):
         self.manifest["release"]["sha256"] = "a" * 64
         validator.check_manifest(self.manifest)
 
+    def test_sprouting_manifest_still_requires_other_fields(self):
+        del self.manifest['release']
+        self.manifest['description'] = 'A seed taking shape.'
+        validator.check_manifest(self.manifest)
+        for field in ('entry', 'version', 'requires', 'author'):
+            with self.subTest(field=field):
+                manifest = copy.deepcopy(self.manifest)
+                del manifest[field]
+                with self.assertRaises(ValueError):
+                    validator.check_manifest(manifest)
+        for release in (None, {}, {'url': 'https://example.com/seed.tar.gz'}):
+            with self.subTest(release=release), self.assertRaises(ValueError):
+                validator.check_manifest(dict(self.manifest, release=release))
+
     def test_validator_cli(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "pending.json"
@@ -165,6 +179,25 @@ class FarmTests(unittest.TestCase):
         self.assertTrue((self.app / "data").is_dir())
         self.assertEqual(json.loads((self.app / "launcher.json").read_text())["entry"], self.manifest["entry"])
         self.assertFalse((self.app / "farm.pid").exists())
+
+    def test_sprouting_seed_lists_but_refuses_install_without_download(self):
+        del self.manifest['release']
+        self.save_manifest()
+        self.farm.list()
+        self.assertIn('fake-app 0.1.0', self.output.getvalue())
+        self.assertIn('[sprouting]', self.output.getvalue())
+        with patch.object(self.farm, 'download') as download:
+            with self.assertRaisesRegex(FarmError, 'sprouting and has no release'):
+                self.install()
+        download.assert_not_called()
+        self.assertFalse((self.app / 'current').exists())
+
+    def test_explicit_invalid_release_is_not_sprouting(self):
+        for release in (None, {}):
+            self.manifest['release'] = release
+            self.save_manifest()
+            with self.subTest(release=release), self.assertRaisesRegex(FarmError, 'release URL'):
+                self.farm.list()
 
     def test_install_prompt_once_and_decline(self):
         with patch("builtins.input", return_value="n") as prompt:

@@ -40,7 +40,7 @@ export function checkManifest(manifest) {
     const url = new URL(manifest.links.video);
     if (url.hostname !== 'youtu.be' && (url.searchParams.getAll('v').length !== 1 || !/^[A-Za-z0-9_-]{11}$/.test(url.searchParams.get('v')))) fail(400, 'Use one YouTube video ID.');
   }
-  if (manifest.release.sha256 === 'pending') fail(400, 'A published release checksum is required.');
+  if (manifest.release?.sha256 === 'pending') fail(400, 'A published release checksum is required.');
   if (manifest.selfcheck && manifest.entry === null) fail(400, 'A selfcheck needs a runnable entry.');
   if (manifest.health && !manifest.requires.ports.length) fail(400, 'A health check needs a declared port.');
   if (manifest.entry === null && !manifest.tags.includes('library')) fail(400, 'A null entry requires the library tag.');

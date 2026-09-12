@@ -105,6 +105,11 @@ def check_one(repository, relative, rows):
             row('Tiiny owner', False, 'The seed must name a verified TiinyVerse owner and their current farm display name.')
             return
         row('Tiiny owner', True, 'The farm confirmed the TiinyVerse owner and display name')
+        if 'release' not in manifest:
+            for check in ('download', 'archive', 'static scan', 'selfcheck'):
+                rows.append({'check': f'{relative}: {check}', 'result': 'SKIP',
+                             'detail': 'Sprouting seed; no release yet'})
+            return
         with tempfile.TemporaryDirectory(prefix='farm-submission-') as temporary:
             temp = Path(temporary)
             archive = temp / 'release.tar'

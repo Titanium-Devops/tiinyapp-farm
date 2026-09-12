@@ -3,6 +3,38 @@ const byId = id => document.getElementById(id);
 const status = message => { byId('farm-status').textContent = message; };
 let currentUser = null;
 let codeEmail = '';
+const updateId = new URLSearchParams(window.location.search).get('update');
+let originalSeed = null;
+let originalCommand = '';
+async function prefillSeed() {
+  if (!updateId || originalSeed || !currentUser?.tiinyverse) return;
+  byId('seed-fields').disabled = true;
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(updateId)) throw new Error('Invalid seed ID.');
+  const { seeds } = await api('/api/seeds/mine');
+  if (!seeds.some(seed => seed.id === updateId && seed.canUpdate)) throw new Error('Only the maker can update this seed.');
+  const seed = await api('/manifests/' + encodeURIComponent(updateId) + '.json');
+  const form = byId('seed-form');
+  const values = {
+    id: seed.id, name: seed.name, pitch: seed.pitch, description: seed.description,
+    version: seed.version, license: seed.license, homepage: seed.links?.homepage ?? seed.homepage,
+    repo: seed.links?.repo ?? seed.repo, video: seed.links?.video,
+    command: seed.entry?.command ?? (seed.entry?.python ? 'python -m ' + seed.entry.python + ' ' + seed.entry.args.map(arg => JSON.stringify(arg)).join(' ') : ''),
+    python: seed.requires.python, ports: seed.requires.ports.join(','),
+    models: seed.requires.device.models.join(','), npuUnits: seed.requires.device.npuUnits,
+    tags: seed.tags.join(','), health: seed.health,
+  };
+  for (const [key, value] of Object.entries(values)) form.elements.namedItem(key).value = value ?? '';
+  form.elements.namedItem('id').readOnly = true;
+  form.elements.namedItem('selfcheck').checked = !!seed.selfcheck;
+  for (const option of byId('permissions').options) option.selected = seed.permissions.includes(option.value);
+  originalCommand = values.command;
+  originalSeed = seed;
+  byId('release-heading').textContent = seed.release ? 'Replace your release (optional)' : 'Add your first release';
+  byId('release-help').textContent = seed.release ? 'Leave these fields empty to keep the current release. A replacement needs a higher version.' : 'Leave these fields empty to keep your seed sprouting.';
+  byId('seed-state').textContent = 'Updating ' + seed.name + '. Existing images stay unless you upload replacements.';
+  byId('seed-fields').disabled = false;
+  showStep(2);
+}
 const tabs = [...document.querySelectorAll('.seed-tabs [role=tab]')];
 function showStep(index, focus = false) {
   tabs.forEach((tab, position) => {
@@ -26,9 +58,9 @@ tabs.forEach((tab, index) => {
     showStep(next, true);
   });
 });
-async function api(path, data) {
+async function api(path, data, method = 'POST') {
   const response = await fetch(path, { credentials: 'same-origin', cache: 'no-store',
-    ...(data === undefined ? {} : { method: 'POST',
+    ...(data === undefined ? {} : { method,
       ...(data instanceof FormData ? { body: data } : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }) }) });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || 'The farm could not finish that request.');
@@ -73,6 +105,7 @@ async function refreshAccount(step, focus = false) {
     tab.classList.toggle('locked', index === 1 ? !user : index === 2 && !proof);
   });
   showStep(step ?? (proof ? 2 : user ? 1 : 0), focus);
+  await prefillSeed();
 }
 onSubmit('email-start', async () => {
   codeEmail = byId('email').value.trim();
@@ -94,9 +127,17 @@ byId('tiiny-verify')?.addEventListener('click', event => working(event.currentTa
   await api('/api/tiinyverse/verify', {}); await refreshAccount(2, true); status('Your Tiiny proof is done. Time to plant.');
 }));
 onSubmit('seed-form', async () => {
+  if (updateId && !originalSeed) throw new Error('Load your seed before updating it.');
   const form = new FormData(byId('seed-form'));
+  if (originalSeed) {
+    form.set('screenshots', JSON.stringify(originalSeed.screenshots));
+    if (byId('command').value === originalCommand) {
+      form.set('entry', JSON.stringify(originalSeed.entry));
+      form.delete('command');
+    }
+  }
   form.set('permissions', [...byId('permissions').selectedOptions].map(option => option.value).join(','));
-  if (!!byId('releaseUrl').value.trim() === !!byId('archive').files.length) throw new Error('Choose either a release URL or one tar.gz upload.');
+  if (byId('releaseUrl').value.trim() && byId('archive').files.length) throw new Error('Choose either a release URL or one tar.gz upload.');
   if (byId('archive').files[0]?.size > 50 * 1024 * 1024) throw new Error('Choose an archive no larger than 50 MB.');
   const gallery = [...byId('seed-gallery').files];
   if (gallery.length > 8) throw new Error('Choose up to eight gallery images.');
@@ -104,7 +145,7 @@ onSubmit('seed-form', async () => {
   for (const file of Object.values(groups).flat()) {
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 2 * 1024 * 1024) throw new Error('Choose PNG, JPEG or WebP images no larger than 2 MiB each.');
   }
-  const media = {};
+  const media = { ...originalSeed?.media };
   for (const [kind, files] of Object.entries(groups)) {
     const urls = [];
     for (const file of files) {
@@ -118,7 +159,7 @@ onSubmit('seed-form', async () => {
   }
   form.set('media', JSON.stringify(media));
   status('Sending your seed to the farmhands…');
-  const result = await api('/api/seeds', form);
+  const result = await api(updateId ? '/api/seeds/' + encodeURIComponent(updateId) : '/api/seeds', form, updateId ? 'PUT' : 'POST');
   if (result.warning) { status(result.warning); return; }
   window.location.assign(result.statusUrl);
 });

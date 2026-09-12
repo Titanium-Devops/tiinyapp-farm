@@ -79,7 +79,7 @@ def wrapped(draw, text, face, width, limit):
     return lines
 
 
-def render_card(source, target, *, name, pitch, maker, media=None, avatar=None, verified=False):
+def render_card(source, target, *, name, pitch, maker, media=None, avatar=None, verified=False, sprouting=False):
     source, target = Path(source), Path(target)
     sprout = picture(source, '/brand/icon-512.png')
     media = media or {}
@@ -101,9 +101,11 @@ def render_card(source, target, *, name, pitch, maker, media=None, avatar=None, 
         draw.text((640, y), line, font=heading, fill=INK)
         y += 64
     y += 18
-    for line in wrapped(draw, pitch, body, 510, 3):
+    for line in wrapped(draw, pitch, body, 510, 2 if sprouting else 3):
         draw.text((644, y), line, font=body, fill='#9AA7B4')
         y += 36
+    if sprouting:
+        draw.text((644, y + 4), 'Sprouting', font=small, fill='#C5AF7D')
     portrait = ImageOps.fit(picture(source, avatar) or sprout, (52, 52), method=Image.Resampling.LANCZOS)
     circle = Image.new('L', (52, 52))
     ImageDraw.Draw(circle).ellipse((0, 0, 51, 51), fill=255)

@@ -57,6 +57,10 @@ async function refreshSeeds() {
     if (seed.url && (seed.url.startsWith('/apps/') || seed.url.startsWith('https://'))) {
       const anchor = element('a', 'Visit seed page'); anchor.href = seed.url; card.append(anchor);
     }
+    if (seed.canUpdate) {
+      const update = element('a', 'Update'); update.className = 'btn hay';
+      update.href = '/seeds/?update=' + encodeURIComponent(seed.id); card.append(update);
+    }
     if (!seed.url) card.append(element('p', 'Your seed page grows here once the seed joins the field.'));
     byId('my-seeds').append(card);
   }

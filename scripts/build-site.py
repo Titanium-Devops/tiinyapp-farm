@@ -61,6 +61,8 @@ def command(value):
 
 def badges(app, today):
     result = []
+    if "release" not in app:
+        result.append('<span class="badge sprouting">Sprouting</span>')
     if app["verified"]:
         result.append('<span class="badge verified">Verified</span>')
     if 0 <= (today - date.fromisoformat(app["addedAt"])).days < 30:
@@ -141,9 +143,11 @@ def seed_media(app):
 def plot(app, today):
     models = ", ".join(app["requires"]["device"]["models"]) or "no named models"
     permissions = "".join(f'<span>{e(p)}</span>' for p in app["permissions"]) or '<span>asks for nothing</span>'
+    planting = (f'<code>farm install {e(app["id"])}</code><a class="btn hay" href="/apps/{e(app["id"])}/" aria-label="Plant {e(app["name"])}">Plant it</a>'
+                if 'release' in app else f'<a class="btn hay" href="/apps/{e(app["id"])}/">Visit seed</a>')
     return f'''<article class="plot"><div class="plot-top">{badges(app, today)}<span class="ver">v{e(app['version'])}</span></div>
 <div class="seed-title">{seed_icon(app)}<h3>{e(app['name'])}</h3></div><p class="pitch">{e(app['pitch'])}</p><p class="by">by {e(app['author']['name'])} · needs {e(models)}</p>
-<div class="perms">{permissions}</div><div class="plant"><code>farm install {e(app['id'])}</code><a class="btn hay" href="/apps/{e(app['id'])}/" aria-label="Plant {e(app['name'])}">Plant it</a></div></article>'''
+<div class="perms">{permissions}</div><div class="plant">{planting}</div></article>'''
 
 
 def social_strip(app):
@@ -164,7 +168,7 @@ def app_page(app, today):
     req = app["requires"]
     device = req["device"]
     entry = app["entry"]
-    release = app["release"]
+    release = app.get("release")
     if entry is None:
         start = '<p>This is a library. There is no app to start. Use it from your own application.</p>'
     else:
@@ -181,19 +185,24 @@ def app_page(app, today):
         "Farmhand review": "Verified: farmhands ran it and read it." if app["verified"] else "Not verified by the farmhands.",
     }
     details = "".join(f'<dt>{e(k)}</dt><dd>{e(v)}</dd>' for k, v in rows.items())
+    planting = (f'<section><h2>Plant it</h2><p>Read the release notes below before installing. {link("/plant/", "Set up the farmhand")}.</p>{command("farm install " + app["id"])}{start}</section>'
+                if release else '<p>No release yet. Follow the maker for the first planting.</p>')
+    release_details = f'''<section><h2>Release</h2><p>{link(release['url'], 'Release archive')}</p><dl><dt>SHA-256 checksum</dt><dd><code>{e(release['sha256'])}</code></dd><dt>Archive size</dt><dd>{str(release['size']) + ' bytes' if release['size'] else '0 bytes recorded (size unknown)'}</dd></dl>
+{'<p>Release pending: the installer cannot install this seed until its checksum is published.</p>' if release['sha256'] == 'pending' else ''}
+<p>Release notes: {e(app['description'])}</p></section>''' if release else ''
+
     return f'''<section class="sect"><p>{link('/#field', 'Back to the field')}</p>{header}{badges(app, today)}<div class="seed-title">{seed_icon(app)}<h1>{e(app['name'])}</h1></div><p class="lede">{e(app['pitch'])}</p>
+<a hidden data-seed-update="{e(app['id'])}" href="/seeds/?update={e(app['id'])}">Update this seed</a>
 <button type="button" class="btn ghost" data-share data-share-title="{e(app['name'])}" data-share-text="{e(app['pitch'])}">Share</button><span data-share-status role="status" aria-live="polite"></span>
 <section><h2>What it does</h2><p>{e(app['description'])}</p></section>
 <section><h2>What it needs</h2><ul><li>Python: {e(req.get('python', 'minimum not specified'))}. The farmhand itself needs Python 3.11 or newer.</li>
 <li>Local ports: {e(', '.join(map(str, req['ports'])) or 'none')}.</li><li>Tiiny models: {e(', '.join(device['models']) or 'none specified')}.</li><li>NPU units: {device['npuUnits']}.</li></ul></section>
 <section><h2>What it asks for</h2>{'<ul>' + perms + '</ul>' if perms else '<p>Asks for nothing.</p>'}<p>These are declared permissions, not sandbox restrictions.</p></section>
-<section><h2>Plant it</h2><p>Read the release notes below before installing. {link('/plant/', 'Set up the farmhand')}.</p>{command('farm install ' + app['id'])}{start}</section>
+{planting}
 {visual_media}<section><h2>Screenshots</h2>{screenshots}</section>
 <section><h2>The maker and the seed</h2><p>Author: {link(app['author']['url'], app['author']['name'])}</p><dl>{details}</dl>
-<p>{link(homepage, 'App home') if homepage else ''} {link(repo, 'Source repository') if repo else 'Source supplied in the release archive.'} {link('/manifests/' + app['id'] + '.json', 'Original manifest')}</p></section>
-<section><h2>Release</h2><p>{link(release['url'], 'Release archive')}</p><dl><dt>SHA-256 checksum</dt><dd><code>{e(release['sha256'])}</code></dd><dt>Archive size</dt><dd>{str(release['size']) + ' bytes' if release['size'] else '0 bytes recorded (size unknown)'}</dd></dl>
-{'<p>Release pending: the installer cannot install this seed until its checksum is published.</p>' if release['sha256'] == 'pending' else ''}
-<p>Release notes: {e(app['description'])}</p></section>
+<p>{link(homepage, 'App home') if homepage else ''} {link(repo, 'Source repository') if repo else 'Source supplied in the release archive.' if release else ''} {link('/manifests/' + app['id'] + '.json', 'Original manifest')}</p></section>
+{release_details}
 {'<section><h2>Health check</h2><p>HTTP GET <code>' + e(app['health']) + '</code> on the first declared port; expects a JSON object with version and optional ok.</p></section>' if 'health' in app else ''}{social_strip(app)}</section><script type="module" src="/assets/share.js"></script><script type="module" src="/assets/seed-media.js"></script><script type="module" src="/assets/social.js"></script>'''
 
 
@@ -241,8 +250,9 @@ def seeds():
 <div class="seed-field seed-wide"><label for="seed-gallery">Gallery (optional)</label><input id="seed-gallery" type="file" accept="image/png,image/jpeg,image/webp" multiple aria-describedby="seed-media-help"></div>
 <div class="seed-field"><label for="repo">Source repository URL (optional)</label><input id="repo" name="repo" type="url" pattern="https://.*" placeholder="https://…"></div>
 <div class="seed-field"><label for="video">YouTube video (optional)</label><input id="video" name="video" type="url" pattern="https://.*" placeholder="https://www.youtube.com/watch?v=…"></div>
+<h3 id="release-heading" class="seed-wide">Release (optional)</h3><p id="release-help" class="fine seed-wide">Leave the release empty to share a sprouting seed.</p>
 <div class="seed-field"><label for="releaseUrl">Direct release URL</label><input id="releaseUrl" name="releaseUrl" type="url" placeholder="https://…/release.tar.gz"></div>
-<p class="fine seed-wide">Either a direct HTTPS tar.gz link without redirects, or an upload below. The archive must include the source for review.</p>
+<p class="fine seed-wide">Optionally provide a direct HTTPS tar.gz link or an upload below. The archive must include the source for review.</p>
 <div class="seed-field seed-wide"><label for="archive">Or upload a tar.gz (up to 50 MB)</label><input id="archive" name="archive" type="file" accept=".tar.gz,application/gzip"></div>
 <div class="seed-field seed-wide"><label for="permissions">What it asks for</label><select id="permissions" name="permissionChoices" multiple size="4" aria-describedby="permission-help"><option value="microphone">Microphone</option><option value="files">Files</option><option value="network">Network</option><option value="device">Tiiny device</option></select></div>
 <p class="fine seed-wide" id="permission-help">Choose all access your app uses. Leave empty if it asks for nothing. Use Control or Command to select several.</p>
@@ -333,7 +343,8 @@ def build(source=ROOT, output=None, today=None):
             owner = next((maker for maker in makers if maker.get('tiinyverse') and maker['tiinyverse'] == app['author'].get('tiinyverse')), {})
             render_card(source, dest / 'apps' / app['id'] / 'card.png', name=app['name'],
                         pitch=app['pitch'], maker=app['author']['name'], media=app.get('media'),
-                        avatar=owner.get('avatar'), verified=bool(app['author'].get('tiinyverse')))
+                        avatar=owner.get('avatar'), verified=bool(app['author'].get('tiinyverse')),
+                        sprouting='release' not in app)
             write(f"manifests/{app['id']}.json", "")
             shutil.copyfile(path, dest / "manifests" / path.name)
             listing += '<li>' + link(path.name, app['name']) + '</li>'

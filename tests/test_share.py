@@ -2,6 +2,10 @@
 
 from pathlib import Path
 import subprocess
+import runpy
+import tempfile
+from unittest.mock import patch
+from PIL import ImageDraw
 import unittest
 
 
@@ -42,6 +46,20 @@ class ShareTests(unittest.TestCase):
             cwd=ROOT, text=True, capture_output=True, timeout=15,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_sprouting_card_places_state_under_pitch(self):
+        render = runpy.run_path(str(ROOT / 'scripts/share-cards.py'))['render_card']
+        drawn = []
+        original = ImageDraw.ImageDraw.text
+        def capture(draw, xy, text, *args, **kwargs):
+            drawn.append((xy, text))
+            return original(draw, xy, text, *args, **kwargs)
+        with tempfile.TemporaryDirectory() as directory, patch.object(ImageDraw.ImageDraw, 'text', capture):
+            render(ROOT, Path(directory) / 'card.png', name='Test seed', pitch='A growing seed', maker='Fern', sprouting=True)
+        pitch = next(xy for xy, text in drawn if text == 'A growing seed')
+        state = next(xy for xy, text in drawn if text == 'Sprouting')
+        self.assertGreater(state[1], pitch[1])
+        self.assertLess(state[1], 459)
 
     def test_native_share_uses_title_text_and_canonical_url(self):
         self.run_js(r"""

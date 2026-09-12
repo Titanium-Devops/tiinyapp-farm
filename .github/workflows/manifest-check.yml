@@ -25,10 +25,36 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Select release selfchecks
+        id: selfchecks
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os, runpy
+          from pathlib import Path
+          checker = runpy.run_path('trusted/scripts/check-submission.py')
+          repository = Path('submission')
+          needed = False
+          for relative in checker['changed_manifests'](repository, os.environ['BASE_SHA'], os.environ['HEAD_SHA']):
+              path = repository / relative
+              if path.is_symlink() or path.suffix != '.json':
+                  continue
+              try:
+                  manifest = json.loads(path.read_text())
+                  needed |= isinstance(manifest, dict) and bool(manifest.get('release')) and manifest.get('selfcheck') is True
+              except (OSError, ValueError):
+                  pass  # The trusted validation step reports invalid manifests.
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'needed={str(needed).lower()}\n')
+          PY
       - name: Prepare the selfcheck image before offline execution
+        if: steps.selfchecks.outputs.needed == 'true'
         run: docker pull python:3.11-slim
       # Trusted checker requires author.tiinyverse and calls
       # https://tiinyapp.farm/api/owners?profile=<url>, failing closed.
+      # Sprouting seeds still pass schema/ownership; archive checks are skipped.
       - name: Validate submissions and TiinyVerse ownership
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}

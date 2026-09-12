@@ -89,6 +89,109 @@ class SiteTests(unittest.TestCase):
                     self.assertIn(app['health'], visible)
                 self.assertIn('Not verified by the farmhands.', visible)
 
+    def test_sprouting_seed_keeps_story_and_social_without_install_or_release(self):
+        app = copy.deepcopy(self.apps[0])
+        del app['release']
+        page = SITE['app_page'](app, TODAY)
+        plot = SITE['plot'](app, TODAY)
+        for html in (page, plot):
+            self.assertIn('>Sprouting<', html)
+            self.assertIn(app['pitch'], ' '.join(Document(html).text))
+            self.assertNotIn('farm install', html)
+        self.assertIn('No release yet. Follow the maker for the first planting.', page)
+        self.assertNotIn('<h2>Release</h2>', page)
+        self.assertNotIn('SHA-256', page)
+        self.assertIn('seed-comments', page)
+        self.assertIn(app['author']['url'], Document(page).references)
+        owner_link = next(attrs for tag, attrs in Document(page).tags if 'data-seed-update' in attrs)
+        self.assertIn('hidden', owner_link)
+        self.assertEqual(owner_link['href'], '/seeds/?update=' + app['id'])
+
+    def test_update_prefill_and_put_preserve_python_entry_images_and_screenshots(self):
+        script = r'''
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+const fs = require('node:fs');
+class Element {
+  value = ''; files = []; hidden = false; disabled = false; checked = false;
+  listeners = {}; options = [{ value: 'network' }, { value: 'files' }];
+  classList = { toggle() {} };
+  addEventListener(name, fn) { this.listeners[name] = fn; }
+  append() {} setAttribute() {} focus() {}
+  get selectedOptions() { return this.options.filter(option => option.selected); }
+  querySelector() { return new Element(); }
+}
+const controls = new Map();
+const control = id => { if (!controls.has(id)) controls.set(id, new Element()); return controls.get(id); };
+control('seed-form').elements = { namedItem: control };
+const seed = { id: 'test-seed', name: 'My seed', pitch: 'Pitch', description: 'Story', version: '1.0.0',
+  license: 'MIT', homepage: 'https://example.org', entry: { python: 'my.module', args: ['a b', 'x'] },
+  requires: { python: '3.11', ports: [8080], device: { models: ['test'], npuUnits: 1 } },
+  tags: ['test'], permissions: ['network'], media: { icon: '/media/u/icon.png', gallery: ['/media/u/pic.png'] },
+  screenshots: ['https://example.org/shot.png'] };
+class Data extends Map { constructor() { super(); for (const [id, el] of controls) this.set(id, el.value); } }
+let submitted, redirected;
+const context = {
+  URLSearchParams, FormData: Data, console,
+  document: { getElementById: control, querySelectorAll: () => [], createElement: () => new Element() },
+  window: { location: { search: '?update=test-seed', assign: url => { redirected = url; } } },
+  refreshSession: async () => ({ email: 'maker@example.org', tiinyverse: { name: 'Maker', profileUrl: 'https://example.org/maker' } }),
+  fetch: async (path, options) => {
+    let result;
+    if (path === '/api/seeds/mine') result = { seeds: [{ id: seed.id, canUpdate: true }] };
+    else if (path === '/manifests/test-seed.json') result = seed;
+    else { submitted = { path, ...options }; result = { statusUrl: '/farm/' }; }
+    return { ok: true, json: async () => result };
+  },
+};
+vm.runInNewContext(fs.readFileSync('site/assets/seeds.js', 'utf8').replace(/^import[^\n]+\n/, ''), context);
+(async () => {
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(control('id').value, 'test-seed');
+  assert.equal(control('id').readOnly, true);
+  assert.equal(control('release-heading').textContent, 'Add your first release');
+  assert.equal(control('ports').value, '8080');
+  assert.equal(control('releaseUrl').value, '');
+  control('seed-form').listeners.submit({ preventDefault() {}, currentTarget: control('seed-form') });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(submitted.path, '/api/seeds/test-seed');
+  assert.equal(submitted.method, 'PUT');
+  assert.deepEqual(JSON.parse(submitted.body.get('entry')), seed.entry);
+  assert.equal(submitted.body.has('command'), false);
+  assert.deepEqual(JSON.parse(submitted.body.get('media')), seed.media);
+  assert.deepEqual(JSON.parse(submitted.body.get('screenshots')), seed.screenshots);
+  assert.equal(redirected, '/farm/');
+})().catch(error => { console.error(error); process.exitCode = 1; });
+'''
+        result = subprocess.run(['node', '-e', script], cwd=ROOT, text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_seed_update_link_only_shows_for_verified_published_owner(self):
+        script = r'''
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+const fs = require('node:fs');
+const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export function', 'function');
+(async () => {
+  for (const [user, seeds, visible] of [
+    [null, [], false], [{}, [{ id: 'seed', canUpdate: true }], false],
+    [{ tiinyverse: {} }, [{ id: 'seed', canUpdate: false }], false],
+    [{ tiinyverse: {} }, [{ id: 'other', canUpdate: true }], false],
+    [{ tiinyverse: {} }, [{ id: 'seed', canUpdate: true }], true],
+  ]) {
+    const link = { hidden: true, dataset: { seedUpdate: 'seed' } };
+    vm.runInNewContext(source, {
+      document: { querySelectorAll: () => [], querySelector: () => link },
+      fetch: async path => ({ ok: true, json: async () => path === '/api/me' ? { user } : { seeds } }),
+    });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(link.hidden, !visible);
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; });
+'''
+        result = subprocess.run(['node', '-e', script], cwd=ROOT, text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_required_pages_and_byte_identical_manifests(self):
         for path in ('index.html', 'plant/index.html', 'seeds/index.html', 'seeds/mine/index.html', 'farm/index.html', 'catalog.json', 'manifests/index.html', 'sitemap.xml', 'robots.txt', '404.html'):
             self.assertTrue((self.output / path).is_file(), path)

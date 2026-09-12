@@ -182,6 +182,60 @@ class SubmissionTests(unittest.TestCase):
         download.assert_not_called()
         self.assertEqual(rows[0]['result'], 'FAIL')
 
+    def test_sprouting_skips_archive_checks_after_schema_and_owner(self):
+        del self.manifest['release']
+        self.manifest['selfcheck'] = True
+        self.write()
+        for owner_valid in (True, False):
+            rows = []
+            with self.subTest(owner_valid=owner_valid), patch.object(CHECK['Farm'], 'download') as download, patch.dict(
+                    CHECK['check_one'].__globals__, check_owner=lambda _: owner_valid,
+                    scan_tree=lambda *_: self.fail('Sprouting seed was scanned'),
+                    run_selfcheck=lambda *_: self.fail('Sprouting seed was executed')):
+                CHECK['check_one'](self.root, 'manifests/' + self.path.name, rows)
+            download.assert_not_called()
+            checks = {r['check'].split(': ')[-1]: r['result'] for r in rows}
+            self.assertEqual(checks['schema'], 'PASS')
+            self.assertEqual(checks['Tiiny owner'], 'PASS' if owner_valid else 'FAIL')
+            if owner_valid:
+                for check in ('download', 'archive', 'static scan', 'selfcheck'):
+                    self.assertEqual(checks[check], 'SKIP')
+            else:
+                self.assertNotIn('download', checks)
+
+    def test_sprouting_schema_failure_still_blocks_submission(self):
+        del self.manifest['release']
+        del self.manifest['version']
+        self.write()
+        rows = []
+        with patch.object(CHECK['Farm'], 'download') as download:
+            CHECK['check_one'](self.root, 'manifests/' + self.path.name, rows)
+        download.assert_not_called()
+        self.assertEqual(rows[0]['result'], 'FAIL')
+
+    def test_workflow_only_prepares_image_for_release_selfchecks(self):
+        workflow = (ROOT / '.github/workflows/manifest-check.yml').read_text()
+        source = workflow.split("python3 - <<'PY'\n", 1)[1].split('\n          PY', 1)[0]
+        source = '\n'.join(line[10:] for line in source.splitlines())
+        self.assertIn("if: steps.selfchecks.outputs.needed == 'true'", workflow)
+        self.assertIn('Validate submissions and TiinyVerse ownership', workflow)
+        release = self.manifest['release']
+        for has_release, selfcheck, expected in ((False, True, 'false'), (True, False, 'false'), (True, True, 'true')):
+            with self.subTest(has_release=has_release, selfcheck=selfcheck):
+                self.manifest.pop('release', None)
+                if has_release:
+                    self.manifest['release'] = release
+                self.manifest['selfcheck'] = selfcheck
+                self.write()
+                output = self.root / 'workflow-output'
+                output.write_text('')
+                # An absolute selection keeps this fixture independent of the workflow checkout path.
+                selection = {'changed_manifests': lambda *_: [str(self.path)]}
+                with patch('runpy.run_path', return_value=selection), patch.dict(os.environ, {
+                        'BASE_SHA': 'base', 'HEAD_SHA': 'head', 'GITHUB_OUTPUT': str(output)}):
+                    exec(compile(source, 'manifest-check workflow', 'exec'), {})
+                self.assertEqual(output.read_text(), f'needed={expected}\n')
+
     def test_identity_and_duplicate_fail(self):
         for duplicate in (False, True):
             with self.subTest(duplicate=duplicate):

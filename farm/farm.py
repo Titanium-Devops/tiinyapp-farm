@@ -73,14 +73,15 @@ def validate_manifest(manifest, ident):
     for field in ("name", "pitch", "description"):
         if not isinstance(manifest.get(field), str) or not manifest[field].strip():
             raise FarmError(f"Manifest needs {field}.")
-    release = manifest.get("release")
-    if not isinstance(release, dict) or not isinstance(release.get("url"), str) or not release["url"]:
-        raise FarmError("Manifest needs a release URL.")
-    sha = release.get("sha256")
-    if not isinstance(sha, str) or not re.fullmatch(r"[a-f0-9]{64}|pending", sha):
-        raise FarmError("Invalid release checksum.")
-    if type(release.get("size")) is not int or release["size"] < 0:  # noqa: E721 - JSON integers exclude booleans.
-        raise FarmError("Invalid release size.")
+    if "release" in manifest:
+        release = manifest.get("release")
+        if not isinstance(release, dict) or not isinstance(release.get("url"), str) or not release["url"]:
+            raise FarmError("Manifest needs a release URL.")
+        sha = release.get("sha256")
+        if not isinstance(sha, str) or not re.fullmatch(r"[a-f0-9]{64}|pending", sha):
+            raise FarmError("Invalid release checksum.")
+        if type(release.get("size")) is not int or release["size"] < 0:  # noqa: E721 - JSON integers exclude booleans.
+            raise FarmError("Invalid release size.")
     permissions = manifest.get("permissions")
     if not isinstance(permissions, list) or any(p not in ("microphone", "files", "network", "device") for p in permissions):
         raise FarmError("Invalid permissions.")
@@ -205,7 +206,8 @@ class Farm:
         print("Catalog:")
         for ident in self.catalog_ids():
             manifest = self.manifest(ident)
-            draft = " [release pending]" if manifest["release"]["sha256"] == "pending" else ""
+            draft = (" [sprouting]" if "release" not in manifest else
+                     " [release pending]" if manifest["release"]["sha256"] == "pending" else "")
             print(f"  {ident} {manifest['version']} — {manifest['pitch']}{draft}")
 
     def download(self, release, destination):
@@ -274,6 +276,8 @@ class Farm:
     def install(self, ident, yes=False, update=False):
         with self.guard(ident):
             manifest = self.manifest(ident)
+            if "release" not in manifest:
+                raise FarmError("This seed is sprouting and has no release to install yet.")
             app = self.app_dir(ident)
             if update:
                 _, previous = self.installed(ident)

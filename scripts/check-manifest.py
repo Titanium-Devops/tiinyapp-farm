@@ -105,7 +105,7 @@ def check_manifest(manifest, allow_pending=False):
         raise ValueError("$.health: needs a declared port")
     if manifest["entry"] is None and "library" not in manifest["tags"]:
         raise ValueError("$.tags: a null entry requires the library tag")
-    if manifest["release"]["sha256"] == "pending" and "pending" not in manifest["description"].lower():
+    if manifest.get("release", {}).get("sha256") == "pending" and "pending" not in manifest["description"].lower():
         raise ValueError("$.description: explain the pending release")
 
 

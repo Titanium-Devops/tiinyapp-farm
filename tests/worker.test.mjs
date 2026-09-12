@@ -18,14 +18,19 @@ class Store {
 }
 function fixture() {
   let clock = Date.parse('2026-09-12T12:00:00Z');
-  const store = new Store(), objects = new Map(), mails = [], calls = [], manifests = [];
+  const store = new Store(), objects = new Map(), mails = [], calls = [], manifests = [], published = new Map();
   let html = '<h1>Aster &amp; Fern</h1>', githubId = 42, githubFail = '', profileStatus = 200, resendStatus = 200;
   const env = { FARM: store, SESSION_SECRET: 'test-secret-with-at-least-32-characters', RESEND_API_KEY: 'resend-secret',
     GITHUB_CLIENT_ID: 'client', GITHUB_CLIENT_SECRET: 'client-secret', FARM_GITHUB_TOKEN: 'farm-only-secret',
     SEEDS: { async put(key, value, options) { objects.set(key, { value, options }); },
       async get(key) { const object = objects.get(key); return object && { body: object.value, size: object.value.length, httpEtag: '"fixture"' }; },
       async delete(key) { objects.delete(key); } },
-    ASSETS: { fetch: async () => new Response('static farm') } };
+    ASSETS: { fetch: async request => {
+      const path = new URL(request.url).pathname;
+      if (path === '/catalog.json') return Response.json([...published.values()]);
+      const seed = published.get(path.match(/^\/manifests\/(.+)\.json$/)?.[1]);
+      return seed ? Response.json(seed) : new Response('static farm');
+    } } };
   const fetcher = async (url, options = {}) => {
     calls.push({ url: String(url), ...options });
     const reply = (body, status = 200) => new Response(JSON.stringify(body), { status });
@@ -42,7 +47,10 @@ function fixture() {
       const route = String(url).replace('https://api.github.com/repos/Titanium-Devops/tiinyapp-farm', '');
       if (githubFail && route.includes(githubFail)) return reply({ error: 'fake failure' }, 500);
       if (route === '') return reply({ default_branch: 'main' });
-      if (route.startsWith('/contents/') && options.method === 'GET') return reply({}, 404);
+      if (route.startsWith('/contents/') && options.method === 'GET') {
+        const seed = published.get(route.match(/manifests\/(.+)\.json$/)?.[1]);
+        return seed ? reply({ sha: 'c'.repeat(40), content: Buffer.from(JSON.stringify(seed)).toString('base64') }) : reply({}, 404);
+      }
       if (route.startsWith('/contents/') && options.method === 'PUT') { manifests.push(JSON.parse(Buffer.from(JSON.parse(options.body).content, 'base64').toString())); return reply({ content: {} }); }
       if (route.startsWith('/git/ref/')) return reply({ object: { sha: 'a'.repeat(40) } });
       if (route.startsWith('/git/refs')) return reply({});
@@ -61,8 +69,8 @@ function fixture() {
     throw new Error('Unexpected fetch: ' + url);
   };
   const app = createApp({ fetcher, now: () => clock, proofRoutes, seedRoutes });
-  const call = async (path, body, session = '', extra = {}) => app(new Request(ORIGIN + path, {
-    ...(body === undefined ? {} : { method: 'POST', body: body instanceof FormData ? body : JSON.stringify(body) }),
+  const call = async (path, body, session = '', extra = {}, method = 'POST') => app(new Request(ORIGIN + path, {
+    ...(body === undefined ? {} : { method, body: body instanceof FormData ? body : JSON.stringify(body) }),
     headers: { Origin: ORIGIN, ...(session ? { Cookie: session } : {}), ...(body && !(body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...extra },
   }), env);
   async function email(address = 'grower@example.org', session = '') {
@@ -79,7 +87,7 @@ function fixture() {
     const result = await response.json(); html = `<h1>Aster &amp; Fern</h1><p>${result.code}</p>`;
     assert.equal((await call('/api/tiinyverse/verify', {}, session)).status, 200);
   }
-  return { env, store, objects, mails, manifests, calls, call, email, proof, fetcher,
+  return { env, store, objects, mails, manifests, published, calls, call, email, proof, fetcher,
     advance: n => { clock += n; }, html: s => { html = s; }, githubId: n => { githubId = n; }, githubFail: s => { githubFail = s; },
     profileStatus: n => { profileStatus = n; }, resendStatus: n => { resendStatus = n; } };
 }
@@ -551,4 +559,96 @@ test('a release URL may redirect (GitHub releases do); loops are refused', async
   assert.equal(ok.status, 201, await ok.clone().text());
   const loop = await f.call('/api/seeds', seedForm({ id: 'looping-seed', releaseUrl: 'https://loop.example.org/a' }), first.cookie);
   assert.equal(loop.status, 422);
+});
+
+
+test('sprouting submission creates a schema-valid manifest without release or archive requests', async () => {
+  const f = fixture(), signed = await f.email(); await f.proof(signed.cookie);
+  const response = await f.call('/api/seeds', seedForm({ releaseUrl: '' }), signed.cookie);
+  assert.equal(response.status, 201, await response.clone().text());
+  const manifest = f.manifests[0];
+  assert.equal(Object.hasOwn(manifest, 'release'), false); checkManifest(manifest);
+  assert.equal(f.objects.size, 0);
+  assert.ok(!f.calls.some(call => call.url.includes('releases.example.org')));
+  const python = spawnSync('python3', ['-c', 'import json,sys,runpy; runpy.run_path("scripts/check-manifest.py")["check_manifest"](json.load(sys.stdin))'], { input: JSON.stringify(manifest), encoding: 'utf8' });
+  assert.equal(python.status, 0, python.stderr);
+});
+
+test('owner text updates replace the manifest, preserve release and date, retry once, and allow subsequent edits', async () => {
+  const f = fixture(), signed = await f.email(); await f.proof(signed.cookie);
+  await f.call('/api/seeds', seedForm(), signed.cookie);
+  const current = f.manifests[0]; current.addedAt = '2026-08-01'; f.published.set(current.id, current);
+  const form = () => seedForm({ releaseUrl: '', pitch: 'A greener plot' });
+  const response = await f.call('/api/seeds/little-library', form(), signed.cookie, {}, 'PUT');
+  assert.equal(response.status, 201, await response.clone().text());
+  const updated = f.manifests[1];
+  assert.deepEqual(updated.release, current.release); assert.equal(updated.version, current.version);
+  assert.equal(updated.pitch, 'A greener plot'); assert.equal(updated.addedAt, '2026-08-01');
+  const write = f.calls.filter(call => call.method === 'PUT' && call.url.includes('/contents/')).at(-1);
+  assert.equal(JSON.parse(write.body).sha, 'c'.repeat(40));
+  assert.equal((await f.call('/api/seeds/little-library', form(), signed.cookie, {}, 'PUT')).status, 200);
+  assert.equal(f.manifests.length, 2);
+  assert.equal((await f.call('/api/seeds/little-library', seedForm({ releaseUrl: '', pitch: 'Another edit' }), signed.cookie, {}, 'PUT')).status, 201);
+  const mine = await (await f.call('/api/seeds/mine', undefined, signed.cookie)).json();
+  assert.ok(mine.seeds.every(seed => seed.canUpdate));
+});
+
+test('updates enforce owner, path identity, verification, CSRF and release version ordering', async () => {
+  const f = fixture(), signed = await f.email(); await f.proof(signed.cookie);
+  await f.call('/api/seeds', seedForm({ releaseUrl: '' }), signed.cookie);
+  f.published.set('little-library', f.manifests[0]);
+  const put = (form, cookie = signed.cookie, headers = {}) => f.call('/api/seeds/little-library', form, cookie, headers, 'PUT');
+  assert.equal((await put(seedForm(), '')).status, 401);
+  assert.equal((await put(seedForm(), signed.cookie, { Origin: 'https://evil.example' })).status, 403);
+  const other = await f.email('other@example.org');
+  assert.equal((await put(seedForm(), other.cookie)).status, 403);
+  const otherUser = JSON.parse(f.store.values.get('user:' + other.user.id));
+  otherUser.tiinyverse = { name: 'Other', profileUrl: PROFILE.replace('39628b1e', '49628b1e') };
+  await f.store.put('user:' + other.user.id, JSON.stringify(otherUser));
+  assert.equal((await put(seedForm(), other.cookie)).status, 403);
+  assert.equal((await put(seedForm({ id: 'different-id' }))).status, 400);
+  for (const version of ['0.1.0', '0.0.9']) assert.equal((await put(seedForm({ version }))).status, 400);
+  assert.equal((await put(seedForm({ version: '0.0.9', releaseUrl: '' }))).status, 400);
+  assert.equal((await put(seedForm({ version: '0.10.0' }))).status, 201);
+  assert.ok(f.manifests.at(-1).release);
+});
+
+test('hand-added seed owners appear in mine and may update by verified profile; stored owner wins', async () => {
+  const f = fixture(), signed = await f.email(); await f.proof(signed.cookie);
+  await f.call('/api/seeds', seedForm({ releaseUrl: '' }), signed.cookie);
+  const legacy = { ...f.manifests[0], id: 'onelane' }; f.published.set('onelane', legacy);
+  const mine = await (await f.call('/api/seeds/mine', undefined, signed.cookie)).json();
+  assert.ok(mine.seeds.some(seed => seed.id === 'onelane' && seed.canUpdate && seed.state === 'sprouting'));
+  const form = () => seedForm({ id: 'onelane', releaseUrl: '', entry: JSON.stringify({ python: 'onelane', args: ['--serve'] }), screenshots: JSON.stringify(['https://example.org/screen.png']) });
+  assert.equal((await f.call('/api/seeds/onelane', form(), signed.cookie, {}, 'PUT')).status, 201);
+  assert.deepEqual(f.manifests.at(-1).entry, { python: 'onelane', args: ['--serve'] });
+  assert.deepEqual(f.manifests.at(-1).screenshots, ['https://example.org/screen.png']);
+  await f.store.put('seedowner:onelane', JSON.stringify('another-user'));
+  assert.equal((await f.call('/api/seeds/onelane', form(), signed.cookie, {}, 'PUT')).status, 403);
+  f.published.set('unclaimed', { ...legacy, id: 'unclaimed' });
+  assert.equal((await f.call('/api/seeds/unclaimed', seedForm({ id: 'unclaimed', releaseUrl: '' }), signed.cookie, {}, 'PUT')).status, 403);
+});
+
+
+test('pending upload updates keep distinct immutable archives and include bytes in retry identity', async () => {
+  const f = fixture(), signed = await f.email(); await f.proof(signed.cookie);
+  await f.call('/api/seeds', seedForm({ releaseUrl: '' }), signed.cookie);
+  f.published.set('little-library', f.manifests[0]);
+  const form = () => seedForm({ upload: true, version: '0.2.0' });
+  const put = body => f.call('/api/seeds/little-library', body, signed.cookie, {}, 'PUT');
+  assert.equal((await put(form())).status, 201);
+  const first = f.manifests.at(-1).release;
+  assert.equal((await put(form())).status, 200);
+  const different = form(), otherBytes = gzipSync(Buffer.from('different source'));
+  different.set('archive', new Blob([otherBytes]), 'little-library.tar.gz');
+  assert.equal((await put(different)).status, 201);
+  const second = f.manifests.at(-1).release;
+  assert.notEqual(first.url, second.url);
+  assert.equal(f.objects.size, 2);
+  assert.deepEqual(Buffer.from(await (await worker.fetch(new Request(first.url), f.env)).arrayBuffer()), archive);
+  assert.deepEqual(Buffer.from(await (await worker.fetch(new Request(second.url), f.env)).arrayBuffer()), otherBytes);
+  f.githubFail('/git/ref/');
+  // A failed new update cannot remove either earlier PR's source archive.
+  assert.equal((await put(seedForm({ upload: true, version: '0.2.0', pitch: 'Another review' }))).status, 502);
+  assert.equal(f.objects.size, 2);
 });
