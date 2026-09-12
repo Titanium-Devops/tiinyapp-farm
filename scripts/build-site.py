@@ -345,7 +345,7 @@ def my_farm():
 <form id="token-form" class="token-form" hidden><label for="token-name">Token name <small>Use a name that says where you will use it.</small></label><div class="row2"><input id="token-name" name="name" type="text" maxlength="80" autocomplete="off" placeholder="Laptop or assistant" required><button class="btn hay" type="submit">Create</button></div></form>
 <div id="token-reveal" class="token-reveal" hidden><p><b>Copy this token now.</b> It is shown only once.</p><div class="cmd"><code id="new-token"></code><button id="copy-token" type="button" aria-label="Copy API token">{icon("copy")}</button></div></div>
 <p id="token-status" class="small" role="status" aria-live="polite">Loading tokens…</p><div id="api-tokens" class="token-list"></div></section></div>
-<noscript><p>JavaScript is needed to load your profile settings and submission status.</p></noscript></section><script type="module" src="/assets/farm.js"></script>'''
+<noscript><p>JavaScript is needed to load your profile settings and submission status.</p></noscript></section><script type="module" src="/assets/farm.js"></script>'''.replace('{icon("copy")}', icon("copy"))
 
 
 def agent_guide(text):
