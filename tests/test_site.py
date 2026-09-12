@@ -205,8 +205,8 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
                 parsed = urlsplit(urljoin(source_url, reference))
                 if parsed.netloc != 'tiinyapp.farm':
                     continue
-                if parsed.path == '/api/auth/github':
-                    continue  # Worker OAuth route, not a static file.
+                if parsed.path == '/api/auth/github' or parsed.path.startswith('/makers/'):
+                    continue  # Worker routes (OAuth, maker pages), not static files.
                 target = self.output / unquote(parsed.path).lstrip('/')
                 if target.is_dir():
                     target /= 'index.html'

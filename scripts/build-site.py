@@ -160,7 +160,16 @@ def social_strip(app):
 <noscript><p>JavaScript is needed to load thumbs and comments.</p></noscript></section>'''
 
 
-def app_page(app, today):
+def grown_by(app, makers=()):
+    """Author line: the maker page when the seed's TiinyVerse owner is a known maker, else the author URL."""
+    profile = app['author'].get('tiinyverse')
+    maker = next((m for m in makers if profile and m.get('tiinyverse') == profile), None)
+    if maker:
+        return (f"Grown by <a href=\"/makers/{e(maker['handle'])}/\">{e(maker['name'])}</a> <span class=\"badge\">Verified Tiiny</span>"
+                f" · {link(app['author']['url'], app['author']['name'])}")
+    return f"Author: {link(app['author']['url'], app['author']['name'])}"
+
+def app_page(app, today, makers=()):
     header, visual_media = seed_media(app)
     links = app.get("links", {})
     homepage = links.get("homepage") or app.get("homepage")
@@ -200,7 +209,7 @@ def app_page(app, today):
 <section><h2>What it asks for</h2>{'<ul>' + perms + '</ul>' if perms else '<p>Asks for nothing.</p>'}<p>These are declared permissions, not sandbox restrictions.</p></section>
 {planting}
 {visual_media}<section><h2>Screenshots</h2>{screenshots}</section>
-<section><h2>The maker and the seed</h2><p>Author: {link(app['author']['url'], app['author']['name'])}</p><dl>{details}</dl>
+<section><h2>The maker and the seed</h2><p>{grown_by(app, makers)}</p><dl>{details}</dl>
 <p>{link(homepage, 'App home') if homepage else ''} {link(repo, 'Source repository') if repo else 'Source supplied in the release archive.' if release else ''} {link('/manifests/' + app['id'] + '.json', 'Original manifest')}</p></section>
 {release_details}
 {'<section><h2>Health check</h2><p>HTTP GET <code>' + e(app['health']) + '</code> on the first declared port; expects a JSON object with version and optional ok.</p></section>' if 'health' in app else ''}{social_strip(app)}</section><script type="module" src="/assets/share.js"></script><script type="module" src="/assets/seed-media.js"></script><script type="module" src="/assets/social.js"></script>'''
@@ -339,7 +348,7 @@ def build(source=ROOT, output=None, today=None):
                  "/plant/": ("Plant an app", steps()), "/seeds/": ("Bring your seeds", seeds()), "/seeds/mine/": ("My seeds", my_seeds()), "/farm/": ("My farm", my_farm())}
         listing = '<section class="sect"><h1>The seeds</h1><p>The installer catalog at https://tiinyapp.farm/manifests/.</p><ul>'
         for path, app in manifests:
-            pages[f"/apps/{app['id']}/"] = (app["name"], app_page(app, today))
+            pages[f"/apps/{app['id']}/"] = (app["name"], app_page(app, today, makers))
             owner = next((maker for maker in makers if maker.get('tiinyverse') and maker['tiinyverse'] == app['author'].get('tiinyverse')), {})
             render_card(source, dest / 'apps' / app['id'] / 'card.png', name=app['name'],
                         pitch=app['pitch'], maker=app['author']['name'], media=app.get('media'),
