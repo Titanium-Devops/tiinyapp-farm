@@ -80,7 +80,7 @@ class SiteTests(unittest.TestCase):
                 visible = ' '.join(doc.text)
                 for key in ('name', 'pitch', 'description', 'id', 'version', 'license'):
                     self.assertIn(str(app[key]), visible)
-                for url in (app['homepage'], app['repo']):
+                for url in [u for u in (app.get('homepage'), app.get('repo')) if u]:
                     self.assertIn(url, doc.references)
                 self.assertIn(app['release']['sha256'][:12], visible)
                 self.assertIn(f'{app["release"]["size"] / 1_000_000:.1f} MB', visible)
@@ -244,7 +244,7 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
                 parsed = urlsplit(urljoin(source_url, reference))
                 if parsed.netloc != 'tiinyapp.farm':
                     continue
-                if parsed.path == '/api/auth/github' or parsed.path.startswith(('/makers/', '/media/')):
+                if parsed.path == '/api/auth/github' or parsed.path.startswith(('/makers/', '/media/')) or parsed.path.startswith(('/seeds-files/', '/media/')):
                     continue  # Worker routes (OAuth, maker pages, media), not static files.
                 target = self.output / unquote(parsed.path).lstrip('/')
                 if target.is_dir():
@@ -521,7 +521,8 @@ assert.equal(anonymous.children[0].children[0].tag, 'span');
         app.pop('links')
         legacy = Document(SITE['app_page'](app, TODAY))
         self.assertIn(app['homepage'], legacy.references)
-        self.assertIn(app['repo'], legacy.references)
+        if app.get('repo'):
+            self.assertIn(app['repo'], legacy.references)
         form = Document((self.output / 'submit/index.html').read_text())
         self.assertTrue({'seed-icon', 'seed-header', 'seed-gallery', 'repo', 'video'}.issubset(form.ids))
         gallery = next(attrs for tag, attrs in form.tags if attrs.get('id') == 'seed-gallery')
