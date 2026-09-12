@@ -73,6 +73,21 @@ export async function makerRoutes(ctx) {
     if (user.avatarKey === key) { user.avatarKey = null; await put('user:' + user.id, user); }
     return json({ deleted: true });
   }
+  const cardMatch = path.match(/^\/makers\/([a-z0-9]+(?:-[a-z0-9]+)*)\/card\.png$/);
+  if (cardMatch) {
+    if (!['GET', 'HEAD'].includes(request.method)) return json({ error: 'Use GET or HEAD for share cards.' }, 405);
+    // Maker cards are build snapshots; new makers use the farm card until the
+    // next snapshot/build. Reject HTML fallbacks from static asset routing.
+    let response = await env.ASSETS.fetch(new Request(ORIGIN + path));
+    if (!response.ok || !/^image\/png(?:;|$)/i.test(response.headers.get('Content-Type') || '')) {
+      response = await env.ASSETS.fetch(new Request(ORIGIN + '/brand/og-image.png'));
+    }
+    if (!response.ok || !/^image\/png(?:;|$)/i.test(response.headers.get('Content-Type') || '')) fail(404, 'Share card not found.');
+    const headers = new Headers(response.headers);
+    headers.set('Cache-Control', 'public, max-age=300');
+    headers.set('X-Content-Type-Options', 'nosniff');
+    return new Response(request.method === 'HEAD' ? null : response.body, { headers });
+  }
   const match = path.match(/^\/makers\/([a-z0-9]+(?:-[a-z0-9]+)*)\/$/);
   if (match && request.method === 'GET') {
     const id = await get('maker:' + match[1]), user = id && await get('user:' + id);
@@ -80,7 +95,23 @@ export async function makerRoutes(ctx) {
     const seeds = (await catalog(env)).filter(seed => seed.author.tiinyverse === user.tiinyverse.profileUrl);
     const links = Object.entries(user.links || {}).map(([label, url]) => `<a href="${escape(url)}">${escape(label)}</a>`).join(' · ');
     const cards = seeds.map(seed => `<article class="plot"><h2><a href="/apps/${escape(seed.id)}/">${escape(seed.name)}</a></h2><p>${escape(seed.pitch)}</p></article>`).join('');
-    return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(user.tiinyverse.name)} | tiinyapp.farm</title><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,800&amp;family=Nunito:wght@400;600;700&amp;display=swap"><link rel="stylesheet" href="/assets/site.css"><script type="module" src="/assets/session.js"></script></head><body><div class="wrap"><header><a class="brand" href="/">tiinyapp.farm</a><nav aria-label="Main navigation"><a href="/#field">The field</a><a data-farm-nav href="/seeds/">Bring your seeds</a></nav></header><main class="sect">${user.avatarKey ? `<img class="maker-avatar" src="/${escape(user.avatarKey)}" alt="">` : ''}<h1>${escape(user.tiinyverse.name)}</h1><p>@${escape(user.handle)} <span class="badge verified">Verified Tiiny</span></p><p class="maker-bio">${escape(user.bio)}</p><p>${links}</p><h2>Seeds in the field</h2><div class="field">${cards || '<p>No seeds in the field yet.</p>'}</div></main></div></body></html>`, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
+    const title = `${user.tiinyverse.name} | tiinyapp.farm`;
+    const description = user.bio || `Seeds grown by ${user.tiinyverse.name} on tiinyapp.farm.`;
+    const pageURL = `${ORIGIN}/makers/${user.handle}/`;
+    return new Response(`<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="canonical" href="${escape(pageURL)}"><title>${escape(title)}</title><meta name="description" content="${escape(description)}">
+<link rel="icon" href="/brand/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/brand/favicon-192.png">
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest"><meta name="theme-color" content="#090D14">
+<meta property="og:type" content="profile"><meta property="og:title" content="${escape(title)}">
+<meta property="og:description" content="${escape(description)}"><meta property="og:url" content="${escape(pageURL)}">
+<meta property="og:image" content="${escape(pageURL)}card.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,800&amp;family=Nunito:wght@400;600;700&amp;display=swap"><link rel="stylesheet" href="/assets/site.css"><script type="module" src="/assets/session.js"></script><script type="module" src="/assets/share.js"></script>
+</head><body><div class="wrap"><header><a class="brand" href="/"><img class="brand-mark" src="/brand/icon-512.png" width="36" height="36" alt="">tiinyapp.farm</a><nav aria-label="Main navigation"><a href="/#field">The field</a><a data-farm-nav href="/seeds/">Bring your seeds</a></nav></header><main class="sect">${user.avatarKey ? `<img class="maker-avatar" src="/${escape(user.avatarKey)}" alt="">` : ''}<h1>${escape(user.tiinyverse.name)}</h1><p>@${escape(user.handle)} <span class="badge verified">Verified Tiiny</span></p><p class="maker-bio">${escape(description)}</p><p><button class="btn ghost" type="button" data-share data-share-title="${escape(title)}" data-share-text="${escape(description)}">Share</button> <span data-share-status role="status" aria-live="polite"></span></p><p>${links}</p><h2>Seeds in the field</h2><div class="field">${cards || '<p>No seeds in the field yet.</p>'}</div></main></div></body></html>`, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
   }
   if (path.startsWith('/makers/')) fail(404, 'That maker is not in the field.');
   return null;

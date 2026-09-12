@@ -487,3 +487,57 @@ test('private seed cards include live social counts and only published page link
   seeds = (await (await f.call('/api/seeds/mine', undefined, first.cookie)).json()).seeds;
   assert.equal(seeds[0].url, '/apps/little-library/'); assert.equal(seeds[0].thumbs, 1); assert.equal(seeds[0].comments, 1);
 });
+
+test('maker pages carry sprout identity, escaped share metadata and accessible share controls', async () => {
+  const f = fixture(), first = await f.email(); await f.proof(first.cookie);
+  const user = (await (await f.call('/api/me', undefined, first.cookie)).json()).user;
+  const bio = 'A "tiny" garden <with> friends & seeds';
+  await f.call('/api/maker', { bio, links: {} }, first.cookie);
+  f.env.ASSETS.fetch = async () => new Response('[]', { headers: { 'Content-Type': 'application/json' } });
+  const html = await (await f.call(`/makers/${user.handle}/`)).text();
+  for (const file of ['favicon.ico', 'favicon-32.png', 'favicon-192.png', 'apple-touch-icon.png']) assert.ok(html.includes(`/brand/${file}`));
+  assert.match(html, /rel="manifest" href="\/site.webmanifest"/);
+  assert.match(html, /name="theme-color" content="#090D14"/);
+  assert.match(html, /class="brand-mark" src="\/brand\/icon-512.png" width="36" height="36"/);
+  assert.match(html, /property="og:title" content="Aster &amp; Fern \| tiinyapp.farm"/);
+  assert.ok(html.includes(`property="og:url" content="${ORIGIN}/makers/${user.handle}/"`));
+  assert.ok(html.includes(`property="og:image" content="${ORIGIN}/makers/${user.handle}/card.png"`));
+  assert.match(html, /property="og:image:width" content="1200"/);
+  assert.match(html, /property="og:image:height" content="630"/);
+  assert.match(html, /name="twitter:card" content="summary_large_image"/);
+  assert.match(html, /property="og:description" content="A &quot;tiny&quot; garden &lt;with&gt; friends &amp; seeds"/);
+  assert.match(html, /data-share-text="A &quot;tiny&quot; garden &lt;with&gt; friends &amp; seeds"/);
+  assert.match(html, /src="\/assets\/share.js"/);
+  assert.match(html, /<button[^>]*type="button"[^>]*data-share /);
+  assert.match(html, /data-share-status role="status" aria-live="polite"/);
+});
+
+test('maker share cards serve build snapshots, handle HEAD and fall back for missing snapshots', async () => {
+  const f = fixture(), requests = [];
+  const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  f.env.ASSETS.fetch = async request => {
+    const path = new URL(request.url).pathname; requests.push(path);
+    if (path === '/makers/known-grower/card.png' || path === '/brand/og-image.png') {
+      return new Response(png, { headers: { 'Content-Type': 'image/png', ETag: '"build-card"' } });
+    }
+    // Some asset configurations return their HTML fallback with status 200.
+    return new Response('<html>Not a card</html>', { headers: { 'Content-Type': 'text/html' } });
+  };
+  const card = await f.call('/makers/known-grower/card.png');
+  assert.equal(card.status, 200); assert.equal(card.headers.get('Content-Type'), 'image/png');
+  assert.equal(card.headers.get('Cache-Control'), 'public, max-age=300');
+  assert.equal(card.headers.get('X-Content-Type-Options'), 'nosniff');
+  assert.equal(card.headers.get('ETag'), '"build-card"');
+  assert.deepEqual(new Uint8Array(await card.arrayBuffer()), png);
+  assert.deepEqual(requests, ['/makers/known-grower/card.png']);
+  const fallback = await f.call('/makers/new-grower/card.png');
+  assert.equal(fallback.status, 200); assert.deepEqual(new Uint8Array(await fallback.arrayBuffer()), png);
+  assert.deepEqual(requests.slice(-2), ['/makers/new-grower/card.png', '/brand/og-image.png']);
+  const head = await createApp()(new Request(ORIGIN + '/makers/known-grower/card.png', { method: 'HEAD' }), f.env);
+  assert.equal(head.status, 200); assert.equal(await head.text(), '');
+  assert.equal(head.headers.get('Content-Type'), 'image/png');
+  assert.equal((await f.call('/makers/known-grower/card.png', {})).status, 405);
+  assert.equal((await f.call('/makers/INVALID/card.png')).status, 404);
+  f.env.ASSETS.fetch = async () => new Response('Not found', { status: 404 });
+  assert.equal((await f.call('/makers/new-grower/card.png')).status, 404);
+});

@@ -15,6 +15,7 @@ import tomllib
 import unittest
 from urllib.parse import unquote, urljoin, urlsplit
 import xml.etree.ElementTree as ET
+from PIL import Image
 
 from farm.farm import CatalogLinks, Farm
 from unittest.mock import patch
@@ -123,6 +124,7 @@ class SiteTests(unittest.TestCase):
             if path.relative_to(self.output).as_posix() == 'seeds/index.html':
                 expected.append({'type': 'module', 'src': '/assets/seeds.js'})
             elif path.relative_to(self.output).as_posix().startswith('apps/'):
+                expected.append({'type': 'module', 'src': '/assets/share.js'})
                 expected.append({'type': 'module', 'src': '/assets/seed-media.js'})
                 expected.append({'type': 'module', 'src': '/assets/social.js'})
             elif path.relative_to(self.output).as_posix() == 'farm/index.html':
@@ -134,13 +136,56 @@ class SiteTests(unittest.TestCase):
                 self.assertIn(reference, doc.references)
             self.assertIn('Brought to you by Titanium Bot', text)
             self.assertIn('Built for', text)
-            self.assertIn('family=Fraunces', text)
-            self.assertIn('family=Nunito', text)
+            self.assertIn('/assets/site.css', text)
         self.assertIn('/assets/hero.jpg', Document((self.output / 'index.html').read_text()).references)
         self.assertEqual((ROOT / 'site/assets/hero.jpg').read_bytes(), (self.output / 'assets/hero.jpg').read_bytes())
         self.assertTrue((self.output / 'assets/hero.jpg').read_bytes().startswith(b'\xff\xd8'))
         for path in (ROOT / 'brand').glob('*.svg'):
             self.assertEqual(path.read_bytes(), (self.output / 'brand' / path.name).read_bytes())
+
+    def test_share_identity_and_cards(self):
+        for path in self.output.rglob('*.html'):
+            doc = Document(path.read_text())
+            meta = {a.get('property', a.get('name')): a.get('content') for t, a in doc.tags if t == 'meta'}
+            for key in ('og:title', 'og:description', 'og:image', 'og:url'):
+                self.assertTrue(meta[key])
+            self.assertEqual(meta['twitter:card'], 'summary_large_image')
+            self.assertEqual(meta['theme-color'], '#090D14')
+            for file in ('favicon.ico', 'favicon-32.png', 'favicon-192.png', 'apple-touch-icon.png'):
+                self.assertIn('/brand/' + file, doc.references)
+            self.assertIn('/site.webmanifest', doc.references)
+            self.assertIn('/brand/icon-512.png', doc.references)
+        for app in self.apps:
+            with Image.open(self.output / 'apps' / app['id'] / 'card.png') as card:
+                self.assertEqual(card.size, (1200, 630))
+                self.assertEqual(card.format, 'PNG')
+                self.assertGreater(len(card.getcolors(1200 * 630)), 100)
+            doc = Document((self.output / 'apps' / app['id'] / 'index.html').read_text())
+            meta = {a.get('property'): a.get('content') for t, a in doc.tags if t == 'meta'}
+            self.assertEqual(meta['og:image'], 'https://tiinyapp.farm/apps/' + app['id'] + '/card.png')
+            self.assertEqual(meta['og:description'], app['pitch'])
+            self.assertEqual((meta['og:image:width'], meta['og:image:height']), ('1200', '630'))
+            self.assertTrue(any(t == 'button' and 'data-share' in a for t, a in doc.tags))
+        for file in (ROOT / 'brand').iterdir():
+            if file.is_file():
+                self.assertEqual(file.read_bytes(), (self.output / 'brand' / file.name).read_bytes())
+        manifest = json.loads((self.output / 'site.webmanifest').read_text())
+        self.assertEqual(manifest['name'], 'tiinyapp.farm')
+        self.assertEqual(manifest['theme_color'], '#090D14')
+        self.assertEqual({i['sizes'] for i in manifest['icons']}, {'192x192', '512x512'})
+
+    def test_build_known_maker_card(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp)
+            for directory in ('manifests', 'brand', 'docs', 'site/assets', 'site/fonts'):
+                shutil.copytree(ROOT / directory, source / directory)
+            (source / 'site/makers.json').write_text(json.dumps([{
+                'handle': 'test-maker', 'name': 'Test Maker', 'bio': 'Growing little apps.',
+                'avatar': '/brand/icon-512.png', 'tiinyverse': 'https://www.tiinyverse.com/users/test'
+            }]))
+            SITE['build'](source=source, today=TODAY)
+            with Image.open(source / 'site/dist/makers/test-maker/card.png') as card:
+                self.assertEqual(card.size, (1200, 630))
 
     def test_badges_are_independent_and_use_utc_date_boundaries(self):
         app = copy.deepcopy(self.apps[0])
@@ -164,6 +209,7 @@ class SiteTests(unittest.TestCase):
             for directory in ('manifests', 'brand', 'docs'):
                 shutil.copytree(ROOT / directory, source / directory)
             shutil.copytree(ROOT / 'site/assets', source / 'site/assets')
+            shutil.copytree(ROOT / 'site/fonts', source / 'site/fonts')
             fourth = copy.deepcopy(self.apps[0])
             fourth.update(id='fourth-seed', name='Fourth <seed> & friends', entry={'command': 'python run.py --label "A&B"'}, tags=['test'], screenshots=['https://example.org/screenshot.jpg'])
             path = source / 'manifests/fourth-seed.json'

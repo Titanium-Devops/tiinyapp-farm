@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Build the readable farm catalog using only the Python standard library."""
+"""Build the readable farm catalog with Pillow share cards."""
 
 import argparse
 from datetime import date, datetime, timezone
-from html import escape
+from html import escape, unescape
 import json
 import re
 from urllib.parse import parse_qs, urlsplit
@@ -71,17 +71,31 @@ def badges(app, today):
 
 
 def page(title, body, path):
+    lede = re.search(r'<p class="lede">(.*?)</p>', body, re.S) or re.search(r'<p>(.*?)</p>', body, re.S)
+    description = unescape(re.sub(r'<[^>]+>', '', lede.group(1))) if lede else title
+    card = path + 'card.png' if path.startswith('/apps/') else '/brand/og-image.png'
+    dimensions = '<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">' if path.startswith('/apps/') else ''
     return f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Community apps to plant beside your Tiiny AI Pocket Lab. Read what each app needs and asks for.">
+<meta name="description" content="{e(description)}">
+<meta property="og:title" content="{e(title)} | tiinyapp.farm">
+<meta property="og:description" content="{e(description)}">
+<meta property="og:image" content="{ORIGIN}{card}">{dimensions}
+<meta property="og:url" content="{ORIGIN}{path}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#090D14">
 <title>{e(title)} | tiinyapp.farm</title>
 <link rel="canonical" href="{ORIGIN}{path}">
-<link rel="icon" href="/brand/ti-mark.svg" type="image/svg+xml">
+<link rel="icon" href="/brand/favicon.ico" type="image/x-icon">
+<link rel="icon" href="/brand/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/brand/favicon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,800&amp;family=Nunito:wght@400;600;700&amp;display=swap">
 <link rel="stylesheet" href="/assets/site.css"></head>
 <body><a class="skip" href="#main">Skip to content</a><div class="wrap">
-<header><a class="brand" href="/"><img src="/brand/ti-mark.svg" width="30" height="30" alt=""><span>tiinyapp.farm<small>apps you grow on your Tiiny</small></span></a>
+<header><a class="brand" href="/"><img class="brand-mark" src="/brand/icon-512.png" width="36" height="36" alt=""><span>tiinyapp.farm<small>apps you grow on your Tiiny</small></span></a>
 <nav aria-label="Main navigation"><a href="/#field">The field</a><a href="/plant/">Plant an app</a><a class="cta" data-farm-nav href="/seeds/">Bring your seeds</a></nav></header>
 <main id="main">{body}</main>
 <footer><div class="marks"><a class="pill" href="https://titanium.bot"><img src="/brand/titanium-bot-logo.svg" width="120" height="30" alt="Titanium Bot"><span>Brought to you by Titanium Bot</span></a>
@@ -168,6 +182,7 @@ def app_page(app, today):
     }
     details = "".join(f'<dt>{e(k)}</dt><dd>{e(v)}</dd>' for k, v in rows.items())
     return f'''<section class="sect"><p>{link('/#field', 'Back to the field')}</p>{header}{badges(app, today)}<div class="seed-title">{seed_icon(app)}<h1>{e(app['name'])}</h1></div><p class="lede">{e(app['pitch'])}</p>
+<button type="button" class="btn ghost" data-share data-share-title="{e(app['name'])}" data-share-text="{e(app['pitch'])}">Share</button><span data-share-status role="status" aria-live="polite"></span>
 <section><h2>What it does</h2><p>{e(app['description'])}</p></section>
 <section><h2>What it needs</h2><ul><li>Python: {e(req.get('python', 'minimum not specified'))}. The farmhand itself needs Python 3.11 or newer.</li>
 <li>Local ports: {e(', '.join(map(str, req['ports'])) or 'none')}.</li><li>Tiiny models: {e(', '.join(device['models']) or 'none specified')}.</li><li>NPU units: {device['npuUnits']}.</li></ul></section>
@@ -179,7 +194,7 @@ def app_page(app, today):
 <section><h2>Release</h2><p>{link(release['url'], 'Release archive')}</p><dl><dt>SHA-256 checksum</dt><dd><code>{e(release['sha256'])}</code></dd><dt>Archive size</dt><dd>{str(release['size']) + ' bytes' if release['size'] else '0 bytes recorded (size unknown)'}</dd></dl>
 {'<p>Release pending: the installer cannot install this seed until its checksum is published.</p>' if release['sha256'] == 'pending' else ''}
 <p>Release notes: {e(app['description'])}</p></section>
-{'<section><h2>Health check</h2><p>HTTP GET <code>' + e(app['health']) + '</code> on the first declared port; expects a JSON object with version and optional ok.</p></section>' if 'health' in app else ''}{social_strip(app)}</section><script type="module" src="/assets/seed-media.js"></script><script type="module" src="/assets/social.js"></script>'''
+{'<section><h2>Health check</h2><p>HTTP GET <code>' + e(app['health']) + '</code> on the first declared port; expects a JSON object with version and optional ok.</p></section>' if 'health' in app else ''}{social_strip(app)}</section><script type="module" src="/assets/share.js"></script><script type="module" src="/assets/seed-media.js"></script><script type="module" src="/assets/social.js"></script>'''
 
 
 def seeds():
@@ -279,6 +294,12 @@ def build(source=ROOT, output=None, today=None):
     source = Path(source)
     output = Path(output) if output else source / "site" / "dist"
     today = today or datetime.now(timezone.utc).date()
+    render_card = runpy.run_path(str(ROOT / 'scripts/share-cards.py'))['render_card']
+    snapshot = source / 'site/makers.json'
+    makers = json.loads(snapshot.read_text()) if snapshot.exists() else []
+    for maker in makers:
+        if not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', maker['handle']):
+            raise ValueError('Invalid maker handle in site/makers.json')
     validator = runpy.run_path(str(ROOT / "scripts" / "check-manifest.py"))["check_manifest"]
     manifests = []
     for path in sorted((source / "manifests").glob("*.json")):
@@ -300,7 +321,7 @@ def build(source=ROOT, output=None, today=None):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
 
-        hero = '''<section class="hero"><img src="/assets/hero.jpg" width="1600" height="1066" alt="A fantasy farm at dusk with glowing apps in rows and Titan tending the field."><div class="copy"><h1>Little apps, <em>grown for your Tiiny.</em></h1><p>Community-made apps that run beside your Pocket Lab on your own computer. Pick one, plant it, and let it grow.</p><div class="row"><a class="btn hay" href="#field">Browse the field</a><a class="btn ghost" href="/plant/">How planting works</a></div></div></section>'''
+        hero = '''<section class="hero"><img src="/assets/hero.jpg" width="1600" height="1066" alt="A fantasy farm at dusk with glowing apps in rows and Titan tending the field."><div class="copy"><h1>Little apps, <em>grown for your Tiiny.</em></h1><p class="lede">Community-made apps that run beside your Pocket Lab on your own computer. Pick one, plant it, and let it grow.</p><div class="row"><a class="btn hay" href="#field">Browse the field</a><a class="btn ghost" href="/plant/">How planting works</a></div></div></section>'''
         field = '<section class="sect" id="field"><h2>The field</h2><p class="lede">Every app shows what it needs and what it asks for before you plant it. Verified means the farmhands ran it and read it. Read each seed\'s release notes: some releases are still pending.</p><div class="field">'
         field += ''.join(plot(app, today) for _, app in manifests) + '</div></section>'
         invitation = '<section class="seeds"><div><h2>Bring your seeds</h2><p>One manifest, a place in the field, and farmhands to help it grow.</p></div><a class="btn hay" href="/seeds/">Share your app</a></section>'
@@ -309,17 +330,33 @@ def build(source=ROOT, output=None, today=None):
         listing = '<section class="sect"><h1>The seeds</h1><p>The installer catalog at https://tiinyapp.farm/manifests/.</p><ul>'
         for path, app in manifests:
             pages[f"/apps/{app['id']}/"] = (app["name"], app_page(app, today))
+            owner = next((maker for maker in makers if maker.get('tiinyverse') and maker['tiinyverse'] == app['author'].get('tiinyverse')), {})
+            render_card(source, dest / 'apps' / app['id'] / 'card.png', name=app['name'],
+                        pitch=app['pitch'], maker=app['author']['name'], media=app.get('media'),
+                        avatar=owner.get('avatar'), verified=bool(app['author'].get('tiinyverse')))
             write(f"manifests/{app['id']}.json", "")
             shutil.copyfile(path, dest / "manifests" / path.name)
             listing += '<li>' + link(path.name, app['name']) + '</li>'
+        for maker in makers:
+            count = sum(bool(maker.get('tiinyverse')) and app['author'].get('tiinyverse') == maker['tiinyverse'] for _, app in manifests)
+            render_card(source, dest / 'makers' / maker['handle'] / 'card.png',
+                        name=maker['name'], pitch=f"{count} seed{'s' if count != 1 else ''} in the field. " + maker.get('bio', ''),
+                        maker=maker['name'], media={'header': maker.get('avatar')},
+                        avatar=maker.get('avatar'), verified=bool(maker.get('tiinyverse')))
         pages['/manifests/'] = ('The seeds', listing + '</ul></section>')
         for url, (title, body) in pages.items():
             write(url.lstrip('/') + 'index.html', page(title, body, url))
         write('404.html', page('This plot is empty', '<section class="sect"><h1>This plot is empty</h1><p>That seed is not here. ' + link('/', 'Return to the field') + '.</p></section>', '/404.html'))
         write('sitemap.xml', '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + ''.join(f'<url><loc>{ORIGIN}{url}</loc></url>' for url in sorted(pages) if url not in ("/farm/", "/seeds/mine/")) + '</urlset>\n')
         write('catalog.json', json.dumps([app for _, app in manifests], ensure_ascii=False) + '\n')
+        write('site.webmanifest', json.dumps({'name': 'tiinyapp.farm', 'short_name': 'tiinyapp.farm',
+              'start_url': '/', 'display': 'standalone', 'theme_color': '#090D14', 'background_color': '#090D14',
+              'icons': [{'src': '/brand/favicon-192.png', 'sizes': '192x192', 'type': 'image/png'},
+                        {'src': '/brand/icon-512.png', 'sizes': '512x512', 'type': 'image/png'}]}) + '\n')
+        shutil.copytree(source / 'brand', dest / 'brand')
+        shutil.copytree(source / 'site/fonts', dest / 'fonts')
         write('robots.txt', f'User-agent: *\nAllow: /\nSitemap: {ORIGIN}/sitemap.xml\n')
-        for folder, files in {'assets': ['hero.jpg', 'site.css', 'seeds.js', 'session.js', 'farm.js', 'seed-media.js', 'social.js', 'titanium-icon.png', 'titanium-header.webp'], 'brand': ['ti-mark.svg', 'titanium-bot-logo.svg', 'tiiny-logo.svg'], 'docs': ['manifest.schema.json', 'SUBMIT.md']}.items():
+        for folder, files in {'assets': ['hero.jpg', 'site.css', 'seeds.js', 'session.js', 'farm.js', 'seed-media.js', 'social.js', 'share.js', 'titanium-icon.png', 'titanium-header.webp'], 'docs': ['manifest.schema.json', 'SUBMIT.md']}.items():
             for name in files:
                 origin = source / ('site/assets' if folder == 'assets' else folder) / name
                 (dest / folder).mkdir(exist_ok=True)

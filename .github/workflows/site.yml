@@ -27,6 +27,8 @@ jobs:
           node-version: '22'
       - name: Test Worker routes with offline service fakes
         run: node --test tests/worker.test.mjs
+      - name: Install image renderer
+        run: python3 -m pip install pillow
       - name: Build the static site
         run: python3 scripts/build-site.py
       - name: Test the installer and the site
