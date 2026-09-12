@@ -231,7 +231,7 @@ class SiteTests(unittest.TestCase):
         doc = Document((self.output / 'seeds/index.html').read_text())
         visible = ' '.join(doc.text)
         for phrase in ('Your farm account', 'Prove your Tiiny', 'Plant a seed',
-                       'Do I need GitHub?', 'No. Use your email', 'Put this in your TiinyVerse bio'):
+                       'Do I need GitHub?', 'No. Use your email', 'paste this code anywhere in the bio'):
             self.assertIn(phrase, visible)
         cards = [attrs for tag, attrs in doc.tags if attrs.get('class') == 'seed-card']
         self.assertEqual(len(cards), 3)
