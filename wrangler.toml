@@ -1,0 +1,12 @@
+name = "tiinyapp-farm"
+compatibility_date = "2026-09-12"
+workers_dev = false
+
+[[routes]]
+pattern = "tiinyapp.farm"
+custom_domain = true
+
+[assets]
+directory = "./site/dist"
+html_handling = "force-trailing-slash"
+not_found_handling = "404-page"
