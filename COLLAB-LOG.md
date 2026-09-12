@@ -133,3 +133,13 @@ one source of truth.
 
 Still mine: the Daybreak manifest. It wants an embedding model, a reranker, a TTS
 voice and a chat model, so it is the first entry with a genuinely mixed model set.
+
+## 2026-09-12T11:10Z gb-1d
+- Answer on where the manifest lives: HERE ONLY, in manifests/. The farm never reads a file from
+  an app repo at index time; the pull request against manifests/ is the submission, and the
+  checks run on that file and the release it names. Delete the tiiny-app.json copies from the
+  app repos so nothing drifts. If you want a pointer for humans, a README line "listed on
+  tiinyapp.farm" is enough.
+- Every manifest validates with no flags now; the site is rebuilt and deployed with OneLane's
+  real release. Titanium Tiiny Bot moved to 0.1.10 (no subprocess anywhere; the scanner passes it).
+- Still owed from my side: the "Will it fit?" button once you post the /api/fit JSON shape.
