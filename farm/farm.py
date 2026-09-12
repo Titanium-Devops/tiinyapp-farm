@@ -285,7 +285,7 @@ class Farm:
         return token
 
     def api(self, path, token, method="GET", body=None, content_type=None):
-        headers = {"Authorization": "Bearer " + token, "Accept": "application/json"}
+        headers = {"Authorization": "Bearer " + token, "Accept": "application/json", "User-Agent": "tiinyapp-farm/" + _version()}
         if content_type:
             headers["Content-Type"] = content_type
         request = Request(self.api_origin + path, data=body, headers=headers, method=method)
