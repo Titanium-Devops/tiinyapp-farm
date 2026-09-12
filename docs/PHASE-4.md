@@ -8,39 +8,51 @@ fetch with the display name and the bio text ("No bio yet.") in the HTML. So con
 TiinyVerse account can be proved by a code placed in the bio, and that control implies a bound
 serial. Jason's rule: only people with a TiinyVerse account may bring seeds.
 
-Build, in this order, all on the existing Cloudflare Worker (static assets stay; add routes
-under /api/ with a KV namespace named FARM; stdlib-free Worker JavaScript, no framework):
+Jason's rule, 2026-09-12 06:27: a farmer's identity is their TiinyVerse account, not GitHub. Nobody
+needs a GitHub account to bring a seed. GitHub is optional, only as one place a release can live.
 
-1. Sign in with GitHub: /api/auth/github (redirect to GitHub OAuth, scope read:user only),
-   /api/auth/github/callback (exchange the code, store {login, id, name, avatar} in KV under
-   user:<id>, set a signed HttpOnly session cookie, 30 days), /api/auth/logout, /api/me. Secrets
-   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, SESSION_SECRET via `wrangler secret put` (the
-   orchestrator sets them; document the names). CSRF state on the OAuth round trip.
+Build, in this order, all on the existing Cloudflare Worker (static assets stay; add routes under
+/api/ with a KV namespace named FARM and an R2 bucket named farm-seeds; plain Worker JavaScript,
+no framework):
+
+1. Farm account by email, no password: POST /api/auth/start {email} sends a six-digit code with
+   Resend (secret RESEND_API_KEY, from "Titanium Bot <farm@tiinyapp.farm>"; the orchestrator sets
+   the domain up), valid 10 minutes, rate-limited 3 per hour per address; POST /api/auth/verify
+   {email, code} sets a signed HttpOnly session cookie (30 days) and stores user:<id>
+   {email, createdAt}. /api/auth/logout, /api/me. Never store the code in plain form (hash it).
 2. Prove a Tiiny: POST /api/tiinyverse/link {profileUrl} validates the URL shape
    (https://www.tiinyverse.com/users/<uuid>), issues a code `farm-<6 chars>` stored on the user
    with a 24 h expiry, and answers the code and the instruction. POST /api/tiinyverse/verify
    fetches the profile page server-side (User-Agent "tiinyapp-farm-verifier/1.0", 10 s timeout,
-   200 KB cap), looks for the exact code in the HTML, and on success stores
-   tiinyverse:{profileUrl, name, verifiedAt} on the user and the reverse index
-   owner:<github-login> -> profileUrl. A profile already claimed by another account is refused.
-   GET /api/owners/<github-login> answers {verified: true|false, profileUrl} for CI.
-3. The gate in CI: .github/workflows/manifest-check.yml gains a first job that calls
-   https://tiinyapp.farm/api/owners/<pr author login>; a PR from an unverified login fails with
-   one plain sentence pointing at https://tiinyapp.farm/seeds/. The manifest gains
-   `author.tiinyverse` (the profile URL), required, and CI checks it matches the author's verified
-   profile. The app page shows the TiinyVerse link on the author line and a "Tiiny owner" badge.
-4. /seeds/ redone as cards, with polish: the hero line "Bring your seeds"; three cards in a row
-   (stacked on a phone): 1 "Sign in with GitHub" (a button; shows the avatar and name when done),
-   2 "Prove your Tiiny" (paste the profile URL, get the code, "put this in your TiinyVerse bio,
-   then press Verify"; shows the verified profile when done), 3 "Plant a seed" (locked until 1 and
-   2 are done: a form with name, pitch, repo URL, release URL, license, permissions checkboxes,
-   what it needs; on submit the Worker validates against the manifest schema, builds the
-   manifest, opens a branch and a pull request on Titanium-Devops/tiinyapp-farm through the
-   GitHub API with a farm token FARM_GITHUB_TOKEN (contents and pull requests on that repo only),
-   and shows the PR link). Below the cards: what the checks do, in the farm's voice, and a short
-   FAQ. The mockup's tokens and fonts; 44 px targets; the page must still read fully signed out.
-5. Tests: the Worker routes under `node --test` with a fake GitHub and a fake TiinyVerse page
-   (the fetch is injected), the code issue and verify flow, the claimed-profile refusal, the
-   owners route, the manifest built from the form; the site tests still green. Write
-   docs/PHASE-4-REPORT.md and the secret names the orchestrator must set. No browser, no
+   200 KB cap), looks for the exact code in the HTML, and on success stores tiinyverse:{profileUrl,
+   name, verifiedAt} on the user and the reverse index tvowner:<uuid> -> user id. A profile already
+   claimed by another account is refused. The display name shown on plots comes from TiinyVerse.
+3. Plant a seed, from the site, no git: POST /api/seeds (verified users only) takes the form (name,
+   pitch, description, license, repo URL optional, permissions, what it needs, and EITHER a
+   release URL OR an uploaded tar.gz up to 50 MB stored in R2 at seeds/<id>/<version>/<file> and
+   served at https://tiinyapp.farm/seeds-files/<id>/<version>/<file>), computes the sha256 and
+   size itself, builds the manifest with `author.tiinyverse` (the verified profile URL) and
+   `author.name` (the TiinyVerse display name), validates it against docs/manifest.schema.json
+   (port the validator's rules to JavaScript, or run the same checks), and opens a branch and a
+   pull request on Titanium-Devops/tiinyapp-farm through the GitHub API with the farm's own token
+   FARM_GITHUB_TOKEN (contents and pull requests on that repo only). The submitter never touches
+   GitHub; they get a status page /seeds/mine/ listing their seeds and each one's check results
+   and review state. A maintainer merges on GitHub; the site rebuilds.
+4. The gate in CI: manifest-check.yml requires `author.tiinyverse` and calls
+   https://tiinyapp.farm/api/owners?profile=<url> which answers {verified, name}; a manifest
+   naming an unverified profile fails with one plain sentence. Pull requests from the farm bot
+   carry a label `from-the-site`; hand-made pull requests are still allowed for people who prefer
+   git, with the same gate.
+5. /seeds/ redone as cards, with polish: the hero line "Bring your seeds"; three cards in a row
+   (stacked on a phone): 1 "Your farm account" (email, the code, done state), 2 "Prove your
+   Tiiny" (paste the profile URL, get the code, "put this in your TiinyVerse bio, then press
+   Verify"; shows the verified profile when done), 3 "Plant a seed" (locked until 1 and 2 are
+   done: the form, with the upload or the URL). Below the cards: what the checks do, in the farm's
+   voice, and a short FAQ ("Do I need GitHub? No."). The mockup's tokens and fonts; 44 px targets;
+   the page reads fully signed out.
+6. Tests: the Worker routes under `node --test` with a fake Resend, a fake TiinyVerse page and a
+   fake GitHub (fetch injected), the code flows, the claimed-profile refusal, the owners route,
+   the manifest built from the form, the upload path with a checksum; the site tests still green.
+   wrangler.toml gains the KV and R2 bindings (the orchestrator creates them). Write
+   docs/PHASE-4-REPORT.md with the secret names the orchestrator must set. No browser, no
    wrangler from your sandbox; commit is not possible from your sandbox.
