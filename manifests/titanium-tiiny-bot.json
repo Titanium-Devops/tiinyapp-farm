@@ -48,8 +48,8 @@
   ],
   "release": {
     "url": "https://github.com/Titanium-Devops/titanium-bot-lite/releases/download/v0.1.9/titanium-tiiny-bot-0.1.9.tar.gz",
-    "sha256": "49ad7e973fef53f7c3049f7a39a2dfb29509a8e6ce25e760f996889d76cda797",
-    "size": 434057
+    "sha256": "58dca3dbb5d573c3c0c3ffefb8fd615d6ef87f013d19de384ffe4f2bcb3cc715",
+    "size": 433852
   },
   "health": "/api/health"
 }
