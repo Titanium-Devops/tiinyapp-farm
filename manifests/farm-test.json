@@ -1,0 +1,53 @@
+{
+  "media": {
+    "icon": "https://tiinyapp.farm/media/dd3d7322-eae6-474d-af08-827613b20ecd/441c5256dd5a004f3ce3572adb3e51f0.png",
+    "header": "https://tiinyapp.farm/media/dd3d7322-eae6-474d-af08-827613b20ecd/e5389883c29b67190595aac916b176c3.png"
+  },
+  "links": {
+    "homepage": "https://tiinybench.app/"
+  },
+  "id": "farm-test",
+  "name": "Testing seed.",
+  "pitch": "It's magic.",
+  "description": "Just another test.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Jason",
+    "url": "https://www.tiinyverse.com/users/39628b1e-e94e-4bd8-800e-5437d5336e1f",
+    "tiinyverse": "https://www.tiinyverse.com/users/39628b1e-e94e-4bd8-800e-5437d5336e1f"
+  },
+  "license": "MIT",
+  "homepage": "https://tiinybench.app/",
+  "screenshots": [],
+  "release": {
+    "url": "https://github.com/webdevtodayjason/onelane/archive/refs/tags/v0.1.0.tar.gz",
+    "sha256": "32d62db80bd789206753a418f341604304d69a0bfc8c1823f5f3e4ace9af2ab9",
+    "size": 168709
+  },
+  "entry": {
+    "command": "45678"
+  },
+  "requires": {
+    "python": "3.11",
+    "ports": [
+      8080
+    ],
+    "device": {
+      "models": [
+        "Qwen 3.8B"
+      ],
+      "npuUnits": 20
+    }
+  },
+  "permissions": [
+    "network",
+    "device"
+  ],
+  "tags": [
+    "magic"
+  ],
+  "verified": false,
+  "addedAt": "2026-09-12",
+  "updatedAt": "2026-09-12",
+  "health": "/health"
+}
