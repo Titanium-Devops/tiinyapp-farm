@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tiinyapp.farm redesign</title>
+<meta name="description" content="Heuristic review of the live site, the new site map and word list, and v0 of the three pages that were failing: Install, Submit, App.">
+<style>
+:root{--night:#090D14;--soil:#12171F;--fence:#1E2732;--hay:#F2C462;--cyan:#00C8F0;--mint:#7FE3DC;--ink:#E8EEF2;--mute:#9AA7B4;--berry:#FF6B8A;--bad:#F0A08F;color-scheme:dark}
+*{box-sizing:border-box}html{background:var(--night)}body{margin:0;background:var(--night);color:var(--ink);font:16px/1.6 -apple-system,"Segoe UI",Nunito,sans-serif}
+a{color:var(--cyan)}code,pre,kbd{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.wrap{max-width:1040px;margin:0 auto;padding:32px 20px 80px}
+h1{font-size:40px;line-height:1.1;margin:0 0 6px;letter-spacing:-.01em}h2{font-size:26px;margin:56px 0 12px;letter-spacing:-.01em}h3{font-size:18px;margin:26px 0 8px}
+.tldr{color:var(--mute);font-size:18px;max-width:64ch;margin:0 0 8px}
+.meta{color:var(--mute);font-size:13px}
+table{border-collapse:collapse;width:100%;font-size:14px;margin:12px 0}th,td{text-align:left;vertical-align:top;padding:9px 10px;border-bottom:1px solid var(--fence)}th{color:var(--mute);font-weight:600}
+.sev{display:inline-block;min-width:26px;text-align:center;border-radius:6px;padding:1px 6px;font-weight:700;font-size:12px}.s4{background:#5a1f2a;color:#ffb3c0}.s3{background:#5a3f16;color:#ffd58a}.s2{background:#1d3a44;color:#9fe3f2}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:18px}
+.card{background:var(--soil);border:1px solid var(--fence);border-radius:14px;padding:18px}
+.card h3{margin-top:0}
+.tree{font-family:ui-monospace,Menlo,monospace;font-size:13px;line-height:1.7;background:var(--soil);border:1px solid var(--fence);border-radius:12px;padding:16px;white-space:pre;overflow-x:auto}
+.dict td:first-child{color:var(--bad);text-decoration:line-through}.dict td:nth-child(2){color:var(--mint);font-weight:600}
+.frame{margin:24px 0 8px;border:1px solid var(--fence);border-radius:16px;overflow:hidden}
+.frame-label{font-size:12px;color:var(--mute);letter-spacing:.08em;text-transform:uppercase;padding:8px 14px;background:#0d1219;border-bottom:1px solid var(--fence)}
+.badge{display:inline-block;border:1px solid var(--fence);border-radius:999px;padding:2px 10px;font-size:12px;color:var(--mute)}
+/* ===== the site's own look for the v0 frames ===== */
+.site{background:var(--night);color:var(--ink);font-family:Nunito,-apple-system,"Segoe UI",sans-serif}
+.site header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 28px;border-bottom:1px solid var(--fence)}
+.site .brand{display:flex;align-items:center;gap:10px;color:var(--ink);text-decoration:none;font-weight:800;font-size:18px}
+.site .brand .mark{width:32px;height:32px;border-radius:50%;background:radial-gradient(circle at 50% 35%,#7FE3DC 0 30%,#0e1a22 32%);box-shadow:0 0 0 1px var(--fence)}
+.site nav{display:flex;align-items:center;gap:22px;font-weight:600}.site nav a{color:var(--mute);text-decoration:none}.site nav a.on{color:var(--ink)}
+.site nav .me{display:flex;align-items:center;gap:8px;color:var(--ink)}.site nav .me .av{width:28px;height:28px;border-radius:50%;background:#2a3542;border:1px solid var(--fence)}
+.site .page{max-width:880px;margin:0 auto;padding:40px 28px 72px}
+.site h1{font-size:34px;margin:0 0 8px}.site .sub{color:var(--mute);margin:0 0 28px;max-width:60ch}
+.site .steps{display:grid;gap:14px}
+.site .stp{display:grid;grid-template-columns:44px 1fr;gap:14px;background:var(--soil);border:1px solid var(--fence);border-radius:14px;padding:18px}
+.site .stp .n{width:32px;height:32px;border-radius:50%;background:#1a2330;border:1px solid var(--fence);display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--hay);font-size:14px}
+.site .stp h2{font-size:19px;margin:2px 0 6px}.site .stp p{margin:0 0 10px;color:#c9d3dc}.site .stp p.small{color:var(--mute);font-size:14px}
+.site pre{margin:8px 0;background:#0b1017;border:1px solid var(--fence);border-radius:10px;padding:12px 14px;color:var(--mint);font-size:14px;overflow-x:auto}
+.site .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.site .btn{border:0;border-radius:999px;padding:11px 18px;font-weight:700;font-size:15px;cursor:pointer;background:var(--hay);color:var(--night)}
+.site .btn.q{background:#1a2330;color:var(--ink);border:1px solid var(--fence)}
+.site .note{border:1px solid var(--fence);background:#0d1219;border-radius:10px;padding:10px 14px;color:var(--mute);font-size:14px}
+.site dl{display:grid;grid-template-columns:160px 1fr;gap:6px 14px;margin:0;font-size:15px}.site dt{color:var(--mute)}.site dd{margin:0}
+/* progress + form */
+.site .prog{display:flex;gap:8px;margin:0 0 22px}.site .prog span{flex:1;padding:10px 12px;border-radius:10px;border:1px solid var(--fence);background:var(--soil);font-size:14px;font-weight:700;color:var(--mute)}
+.site .prog span.done{color:var(--mint)}.site .prog span.now{color:var(--night);background:var(--hay);border-color:var(--hay)}
+.site form{display:grid;gap:18px;max-width:560px}
+.site fieldset{border:1px solid var(--fence);border-radius:14px;padding:16px 18px 18px;margin:0;display:grid;gap:14px;background:var(--soil)}
+.site legend{padding:0 6px;font-weight:800;font-size:15px}
+.site label{display:grid;gap:6px;font-weight:700;font-size:14px}.site label small{font-weight:400;color:var(--mute)}
+.site input,.site textarea,.site select{width:100%;border:1px solid #2a3542;background:#0b1017;color:var(--ink);border-radius:10px;padding:10px 12px;font:inherit;font-size:15px}
+.site textarea{min-height:96px}
+.site .opt{color:var(--mute);font-weight:400}
+.site .err{border-color:#E5533D;box-shadow:0 0 0 2px rgba(229,83,61,.3)}.site .msg{color:var(--bad);font-weight:400;font-size:13px}
+.site .radios{display:grid;gap:8px}.site .radios label{grid-template-columns:auto 1fr;align-items:center;font-weight:600}.site .radios input{width:auto}
+.site .checks{display:flex;gap:14px;flex-wrap:wrap}.site .checks label{grid-template-columns:auto 1fr;align-items:center;font-weight:600}.site .checks input{width:auto}
+.site .w{width:140px}
+/* app page */
+.site .hero-img{height:180px;border-radius:14px;background:linear-gradient(120deg,#0e2a3a,#1a3d5a 40%,#0b1017);border:1px solid var(--fence);margin-bottom:18px;display:flex;align-items:flex-end;padding:14px;color:var(--mute);font-size:12px}
+.site .apphead{display:flex;gap:16px;align-items:center;margin-bottom:6px}.site .apphead .ic{width:56px;height:56px;border-radius:14px;background:#1a2330;border:1px solid var(--fence)}
+.site .apphead h1{margin:0}.site .apphead .v{color:var(--mute);font-size:14px}
+.site .two{display:grid;grid-template-columns:1fr 300px;gap:24px}.site .two h2{font-size:18px;margin:22px 0 8px}
+.site aside .card2{background:var(--soil);border:1px solid var(--fence);border-radius:14px;padding:16px;margin-bottom:14px;font-size:14px}
+.site aside .card2 h2{margin:0 0 10px;font-size:14px;color:var(--mute);text-transform:uppercase;letter-spacing:.08em}
+.site .maker{display:flex;gap:10px;align-items:center}.site .maker .av{width:36px;height:36px;border-radius:50%;background:#2a3542}
+.site .chips{display:flex;gap:6px;flex-wrap:wrap}.site .chip{border:1px solid var(--fence);border-radius:999px;padding:2px 10px;font-size:12px;color:var(--mute)}
+@media(max-width:760px){.site .two{grid-template-columns:1fr}.site header{flex-direction:column;align-items:flex-start}.site .prog{flex-direction:column}}
+</style></head><body><div class="wrap">
+<p class="meta">tiinyapp.farm · design review · 2026-09-12 · measured on the live site at 09:05 CDT, prototype rendered from this file</p>
+<h1>tiinyapp.farm redesign</h1>
+<p class="tldr">The homepage hero stays. Everything after it is rewritten as a tool: plain nouns, one column, exact commands, and the account where a developer expects it. Below: what is wrong and how bad, the new map and word list, then v0 of the three pages that failed you.</p>
+
+<h2>1. What is wrong, rated</h2>
+<p class="meta">Nielsen heuristics. Severity 4 = must fix before anyone else sees it, 3 = major, 2 = minor.</p>
+<table>
+<tr><th>Sev</th><th>Heuristic</th><th>Where</th><th>Problem</th><th>Fix</th></tr>
+<tr><td><span class="sev s4">4</span></td><td>Match the real world</td><td>Every page after the hero</td><td>The user's nouns are replaced by farm nouns: farmhand, seed, plot, plant, field, packet, sprouting. A developer has to translate each one before acting. "Tell it about your Tiiny" does not say what "it" is or what to tell.</td><td>Word list below. Flavor lives in the hero and the visuals only.</td></tr>
+<tr><td><span class="sev s4">4</span></td><td>Help and documentation</td><td>Install, step 1</td><td>"Install from PyPI" is false today: the package is not published and the repo is private. Nobody can complete step 1.</td><td>Publish to PyPI, or show the git line until then. Never show a command that cannot work.</td></tr>
+<tr><td><span class="sev s3">3</span></td><td>Recognition over recall</td><td>Install, step 2</td><td>"Find the base URL and key" does not say the URL's shape, that it differs on the Mac client, or where the file lands.</td><td>Show both URL forms, the exact TiinyOS path, and the config file path.</td></tr>
+<tr><td><span class="sev s3">3</span></td><td>Consistency</td><td>Nav</td><td>Three metaphors for three tasks: "The field", "Plant an app", "Bring your seeds". Nothing says catalog, install, submit.</td><td>Nav: Apps · Install · Submit an app · Sign in / your avatar.</td></tr>
+<tr><td><span class="sev s3">3</span></td><td>Wayfinding</td><td>Account</td><td>Sign in is buried inside the submit page. Your apps is a link inside a card. No account entry in the header.</td><td>Account lives in the header. /account/ holds your profile and your apps.</td></tr>
+<tr><td><span class="sev s3">3</span></td><td>Error prevention</td><td>Submit form</td><td>Two columns, hidden required section, jargon fields (NPU units, tags, health path), placeholders that look like values, errors at the top of the page.</td><td>Single column, grouped, one question at a time, errors under the field, a release yes/no choice up front.</td></tr>
+<tr><td><span class="sev s3">3</span></td><td>Visibility of status</td><td>Submit, app page</td><td>After Send nothing says what happens next. Status words are farm words.</td><td>One sentence after Send. Status words: Checks running · Checks failed · Waiting for review · Published.</td></tr>
+<tr><td><span class="sev s2">2</span></td><td>Aesthetic and minimalist</td><td>All</td><td>Sentences that only add flavor: "A little care before the field", "One farmhand for the whole field", "Libraries have nothing to start".</td><td>Delete.</td></tr>
+<tr><td><span class="sev s2">2</span></td><td>Layout</td><td>Install</td><td>Three equal cards for a sequence with unequal content; step 1 is three times taller than step 2.</td><td>Numbered rows, one column, in reading order.</td></tr>
+<tr><td><span class="sev s2">2</span></td><td>Help</td><td>Install</td><td>"macOS or Linux" with no reason; Python 3.11 with no reason.</td><td>Windows support ships; floor is 3.9; say so plainly.</td></tr>
+</table>
+
+<h2>2. Site map</h2>
+<div class="grid2">
+<div class="card"><h3>Routes</h3><div class="tree">/                 Apps (hero + catalog)
+/install/         Install the CLI and connect your Tiiny   (was /plant/, redirects)
+/submit/          Submit an app: sign in, verify, submit    (was /seeds/, redirects)
+/apps/&lt;id&gt;/       One app: install, needs, release, maker, comments
+/account/         Your profile and your apps               (was /farm/, redirects)
+/makers/&lt;handle&gt;/ Public maker page
+/docs/            Contributor guide, manifest schema</div></div>
+<div class="card"><h3>Header</h3><p>Logo · <b>Apps</b> · <b>Install</b> · <b>Submit an app</b> · right side: <b>Sign in</b>, or your avatar and name linking to Your apps.</p><h3>Rules</h3><ul><li>Every page reachable in one click from the header.</li><li>A page title says what the page is for, in a verb or a noun the user already uses.</li><li>The catalog is the home page. No separate "field" page.</li></ul></div>
+</div>
+
+<h2>3. Word list</h2>
+<p class="meta">Left: never again in instructions, labels, status, or errors. Right: the one word we use.</p>
+<table class="dict">
+<tr><th>Out</th><th>In</th><th>Note</th></tr>
+<tr><td>farmhand</td><td>the farm CLI, or <code>farm</code></td><td>First mention on a page: "the farm command-line tool (<code>farm</code>)".</td></tr>
+<tr><td>seed, plot, packet</td><td>app</td><td>"Seeds" may stay as a decorative eyebrow above a plain heading, nowhere else.</td></tr>
+<tr><td>plant, grow</td><td>install, run</td><td>Buttons say Install. Commands are shown as commands.</td></tr>
+<tr><td>the field</td><td>the catalog, or Apps</td><td></td></tr>
+<tr><td>Tell it about your Tiiny</td><td>Connect your Tiiny</td><td></td></tr>
+<tr><td>Bring your seeds</td><td>Submit an app</td><td></td></tr>
+<tr><td>Prove your Tiiny</td><td>Verify you own a Tiiny</td><td></td></tr>
+<tr><td>sprouting</td><td>No release yet</td><td></td></tr>
+<tr><td>farmhand review, verified by the farmhands</td><td>Maintainer review, Reviewed</td><td>"Verified Tiiny owner" stays for makers, that one is literal.</td></tr>
+<tr><td>Your farm, My farm</td><td>Your apps</td><td></td></tr>
+<tr><td>Send to the farmhands</td><td>Submit for review</td><td></td></tr>
+</table>
+
+<h2>4. v0 · Install</h2>
+<p class="meta">Rendered with the site's tokens and colours; the real build uses the site's Fraunces and Nunito faces. Placeholders are marked. Copy is final unless you change it.</p>
+<div class="frame"><div class="frame-label">tiinyapp.farm/install/ · desktop</div>
+<div class="site"><header><a class="brand" href="#"><span class="mark"></span>tiinyapp.farm</a><nav><a href="#">Apps</a><a class="on" href="#">Install</a><a href="#">Submit an app</a><span class="me"><span class="av"></span>Jason</span></nav></header>
+<div class="page">
+<h1>Install apps on your Tiiny</h1>
+<p class="sub">Apps from the catalog run on your computer and talk to your Tiiny Pocket Lab over its local API. One command-line tool installs, starts and updates them.</p>
+<div class="steps">
+<div class="stp"><div class="n">1</div><div><h2>Install the farm CLI</h2><p>Python 3.9 or newer. macOS, Linux and Windows.</p><pre>pip install tiinyapp-farm</pre><p class="small">Check it: <code>farm --version</code></p></div></div>
+<div class="stp"><div class="n">2</div><div><h2>Connect your Tiiny</h2><p>The CLI asks for two values once and saves them in <code>~/.tiinyapps/device.json</code>, readable only by you.</p><pre>farm device</pre>
+<dl><dt>API base URL</dt><dd>On a Mac with the TiinyOS client installed: <code>http://openai.api.tiiny/v1</code><br>From any other computer on your network: <code>http://&lt;your-tiiny-ip&gt;/v1</code></dd><dt>API key</dt><dd>TiinyOS → Settings → API Key. Copy it.</dd></dl>
+<p class="small">Run <code>farm device</code> again to change either value.</p></div></div>
+<div class="stp"><div class="n">3</div><div><h2>Install and run an app</h2><p>Pick an app in the catalog. Its page shows what it needs and what it asks for before you install it.</p><pre>farm install titanium-tiiny-bot
+farm start titanium-tiiny-bot</pre>
+<dl><dt><code>farm list</code></dt><dd>installed apps and whether they are running</dd><dt><code>farm stop &lt;id&gt;</code></dt><dd>stop one</dd><dt><code>farm update &lt;id&gt;</code></dt><dd>update to the newest release, then start it again</dd><dt><code>farm remove &lt;id&gt;</code></dt><dd>uninstall</dd></dl></div></div>
+</div>
+<p class="note" style="margin-top:18px">Apps declare the access they use (microphone, files, network, your Tiiny). The CLI shows that before installing; it does not sandbox them. Read the source if that matters to you: every app in the catalog ships it.</p>
+</div></div></div>
+
+<h2>5. v0 · Submit an app</h2>
+<p class="meta">Single column. Three steps as a progress strip. Shown at step 3, one error visible to show placement.</p>
+<div class="frame"><div class="frame-label">tiinyapp.farm/submit/ · desktop · signed in, verified</div>
+<div class="site"><header><a class="brand" href="#"><span class="mark"></span>tiinyapp.farm</a><nav><a href="#">Apps</a><a href="#">Install</a><a class="on" href="#">Submit an app</a><span class="me"><span class="av"></span>Jason</span></nav></header>
+<div class="page">
+<h1>Submit an app</h1>
+<p class="sub">Submitting opens a pull request on the catalog. Automated checks run, a maintainer reviews it, and it is listed when merged. You can follow it on Your apps.</p>
+<div class="prog"><span class="done">1 · Sign in ✓</span><span class="done">2 · Verify you own a Tiiny ✓</span><span class="now">3 · Your app</span></div>
+<form>
+<fieldset><legend>About the app</legend>
+<label>Name<input value="Tiiny Bench"></label>
+<label>ID <small>lowercase letters, digits and dashes; used in <code>farm install &lt;id&gt;</code> and in the URL</small><input value="tiiny-bench"></label>
+<label>One-line summary <small>shown on the catalog card</small><input class="err" value=""><span class="msg">This one is needed. One sentence, under 100 characters.</span></label>
+<label>Description <small>what it does, who it is for, anything to know before installing</small><textarea>Measure what your Tiiny actually does, not what the spec sheet says.</textarea></label>
+<label>License<input value="MIT"></label>
+</fieldset>
+<fieldset><legend>Release</legend>
+<div class="radios"><label><input type="radio" name="r" checked> I have a release (a .tar.gz with the source inside)</label><label><input type="radio" name="r"> Not yet, list it as "No release yet"</label></div>
+<label>Version<input class="w" value="0.1.0"></label>
+<label>Release URL <small>a direct https link to the .tar.gz; GitHub release links work</small><input value="https://github.com/webdevtodayjason/tiiny-bench/archive/refs/tags/v0.1.0.tar.gz"></label>
+<label>Or upload the .tar.gz <small>up to 50 MB</small><input type="file"></label>
+<label>Start command <small>leave empty if this is a library other apps import</small><input value="python -m tiiny_bench --port 8425"></label>
+<div><div style="font-weight:700;font-size:14px;margin-bottom:8px">This app uses</div><div class="checks"><label><input type="checkbox" checked> Microphone</label><label><input type="checkbox" checked> Files</label><label><input type="checkbox" checked> Network</label><label><input type="checkbox" checked> Your Tiiny</label></div></div>
+</fieldset>
+<fieldset><legend>Links and images <span class="opt">(all optional)</span></legend>
+<label>Source repository<input value="https://github.com/webdevtodayjason/tiiny-bench"></label>
+<label>Home page<input value="https://tiinybench.app"></label>
+<label>YouTube video<input placeholder="https://www.youtube.com/watch?v=…"></label>
+<label>Icon <small>square PNG, JPEG or WebP, up to 2 MB</small><input type="file"></label>
+<label>Header image <small>wide, shown across the top of the app page and on the share card</small><input type="file"></label>
+<label>Screenshots <small>up to 8</small><input type="file" multiple></label>
+</fieldset>
+<div class="row"><button class="btn" type="button">Submit for review</button><span class="opt">Your draft is saved on this computer as you type.</span></div>
+</form>
+</div></div></div>
+
+<h2>6. v0 · App page</h2>
+<div class="frame"><div class="frame-label">tiinyapp.farm/apps/tiiny-bench/ · desktop</div>
+<div class="site"><header><a class="brand" href="#"><span class="mark"></span>tiinyapp.farm</a><nav><a class="on" href="#">Apps</a><a href="#">Install</a><a href="#">Submit an app</a><span class="me"><span class="av"></span>Jason</span></nav></header>
+<div class="page">
+<div class="hero-img">[header image 1200×400]</div>
+<div class="apphead"><div class="ic"></div><div><h1>Tiiny Bench</h1><div class="v">v0.1.0 · MIT · Reviewed by a maintainer</div></div></div>
+<p class="sub">Measure what your Tiiny actually does, not what the spec sheet says.</p>
+<div class="two"><div>
+<h2>Install</h2><pre>farm install tiiny-bench
+farm start tiiny-bench</pre><p class="small" style="color:var(--mute);font-size:14px">Then open <code>http://localhost:8425</code>. New here? <a href="#">Install the farm CLI first.</a></p>
+<h2>What it does</h2><p>Times prefill against prompt length, throughput over a long unbroken generation, what happens when several callers arrive at once, and what a reasoning model charges in wall time for the tokens nobody reads. Image, speech and embedding models get their own measurements: seconds per 512 plate, real-time factor, embeddings per second. Results are plain JSON and the report is one self-contained HTML file with no CDN, no webfont and no JavaScript needed to read it. By default it loads and unloads nothing and benchmarks whatever is already running, so it is safe on a box doing real work. Python standard library only.</p>
+<h2>Screenshots</h2><div class="row"><span class="badge">[image 1]</span><span class="badge">[image 2]</span><span class="badge">[image 3]</span></div>
+<h2>Comments</h2><p style="color:var(--mute)">No comments yet.</p>
+</div><aside>
+<div class="card2"><h2>Needs</h2><dl style="grid-template-columns:90px 1fr"><dt>Python</dt><dd>3.11+</dd><dt>Port</dt><dd>8425</dd><dt>Models</dt><dd>any chat model</dd><dt>Uses</dt><dd><div class="chips"><span class="chip">Network</span><span class="chip">Your Tiiny</span></div></dd></dl></div>
+<div class="card2"><h2>Release</h2><dl style="grid-template-columns:90px 1fr"><dt>Version</dt><dd>0.1.0</dd><dt>Size</dt><dd>412 KB</dd><dt>SHA-256</dt><dd style="word-break:break-all;font-family:ui-monospace,Menlo;font-size:12px">08160481…5865d</dd><dt>Source</dt><dd><a href="#">GitHub</a></dd></dl></div>
+<div class="card2"><h2>Maker</h2><div class="maker"><span class="av"></span><div><b>Jason</b><br><span class="chip">Verified Tiiny owner</span></div></div></div>
+<div class="row"><button class="btn q" type="button">Thumbs up · 0</button><button class="btn q" type="button">Share</button></div>
+</aside></div>
+</div></div></div>
+
+<h2>7. What does not change</h2>
+<ul><li>The hero, the sprout mark, the palette and the two typefaces.</li><li>Every URL that other sites already use: <code>/apps/&lt;id&gt;/</code>, <code>/manifests/&lt;id&gt;.json</code>, <code>/makers/&lt;handle&gt;/</code>.</li><li>The API the pages call. This is markup, copy and CSS.</li></ul>
+<h2>8. Decision</h2>
+<p>Say <b>build it</b> and the three pages above plus the account page and the catalog cards are rebuilt to this spec, with a browser check at desktop and phone width before deploy. Say what to change first if anything here is wrong.</p>
+</div></body></html>
