@@ -125,7 +125,7 @@ async function refreshAccount(step, focus = false) {
   tabs.forEach((tab, index) => {
     const done = index === 0 ? !!user : index === 1 && !!proof;
     tab.classList.toggle('done', done);
-    tab.textContent = ['1 · Sign in', '2 · Verify you own a Tiiny', '3 · Your app'][index] + (done ? ' ✓' : '');
+    tab.textContent = ['1 · Sign in', '2 · Verify you own a Tiiny', '3 · Your app'][index];
     tab.classList.toggle('locked', index === 1 ? !user : index === 2 && !proof);
   });
   await prefillSeed();
