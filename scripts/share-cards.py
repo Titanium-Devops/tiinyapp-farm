@@ -114,7 +114,9 @@ def render_card(source, target, *, name, pitch, maker, media=None, avatar=None, 
     draw.text((710, 459), attribution, font=small, fill=INK)
     if verified:
         draw.rounded_rectangle((710, 496, 845, 522), radius=13, fill='#1E2732')
-        draw.text((720, 497), '✓ Verified Tiiny', font=font(source, 'Nunito', 16), fill=MINT)
+        # Nunito has no check glyph; draw a small one.
+        draw.line([(722, 505), (728, 511), (740, 497)], fill=MINT, width=3, joint='curve')
+        draw.text((748, 497), 'Verified Tiiny', font=font(source, 'Nunito', 16), fill=MINT)
     mark = ImageOps.fit(sprout, (38, 38), method=Image.Resampling.LANCZOS)
     mark_mask = Image.new('L', (38, 38))
     ImageDraw.Draw(mark_mask).ellipse((0, 0, 37, 37), fill=255)
