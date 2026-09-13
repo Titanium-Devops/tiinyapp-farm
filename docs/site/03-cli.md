@@ -69,7 +69,7 @@ farm start <id> --port 7799
 
 | Flag | Meaning |
 | --- | --- |
-| `--port N` | Replace the app's first declared port. Must be 1 to 65535 |
+| `--port N` | Replace the app's first declared port. Must be 1 to 65535. Refused by an app whose manifest says its port is fixed |
 
 Runs the entry from the version directory with no shell involved. A Python entry becomes
 `<interpreter> -m <module> <args>`; a command entry is split into arguments the way a shell would
@@ -79,8 +79,10 @@ then waited for, up to ten seconds: the first port is checked with the manifest'
 has one, and every other port with a TCP connection. Failure prints the last ten lines of
 `farm.log`, removes the process records, and exits 1.
 
-The chosen port is exported as `TIINYAPP_PORT`. Titanium Tiiny Bot additionally gets `TIINY_PORT`
-and has its `--port` argument rewritten; Story Lantern additionally gets `PORT`.
+The chosen port is exported as `TIINYAPP_PORT`, and the manifest's `port` field says how that app
+takes it: a flag on its command line, a different environment variable, or nothing at all when its
+port is fixed. An app with a fixed port refuses `--port` in one line naming the port it runs on,
+and a busy port on such an app is not answered with advice that cannot work.
 
 ## farm stop
 
@@ -217,9 +219,9 @@ objects with an `id`, or HTML links to the manifest files.
 | `TIINYAPP_PORT` | The port the app was started on, when it declares any |
 | `PYTHONUNBUFFERED` | Set to `1`, so output reaches `farm.log` as it happens |
 
-Two apps get extra variables because their upstream code expects them: Titanium Tiiny Bot gets
-`TIINY_PORT`, and Story Lantern gets `PORT`, `LANTERN_HOME`, `LANTERN_DB`, `LANTERN_SAFETY_JSONL`
-and `LANTERN_BLOCKLIST`.
+An app whose manifest names an environment variable in its `port` field also gets that variable,
+which is how Story Lantern gets `PORT`. Story Lantern additionally gets `LANTERN_HOME`,
+`LANTERN_DB`, `LANTERN_SAFETY_JSONL` and `LANTERN_BLOCKLIST`, which are data paths.
 
 ## Exit codes
 

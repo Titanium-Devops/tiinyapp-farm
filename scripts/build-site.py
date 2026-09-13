@@ -49,6 +49,7 @@ FIELDS = {
     "screenshots": "A list of public image URLs; an empty list is fine.",
     "release": "The archive url, its sha256 checksum and its size in bytes. A pending checksum blocks installation; size 0 means unknown.",
     "entry": "A Python module (python) and args, or a command. Use null for a library with nothing to start.",
+    "port": "Optional. How the app takes the port farm start gives it: {\"argv\": \"--port\"} for a command line flag, {\"env\": \"PORT\"} for an environment variable, or null for a fixed port. Leave it out and the farm sets TIINYAPP_PORT.",
     "requires": "Minimum python version if known, local ports, and device requirements: models and npuUnits.",
     "permissions": "Declared access: microphone, files, network and device. An empty list no permissions declared.",
     "tags": "Short labels that help people find the app.",
@@ -314,11 +315,16 @@ def app_page(app, today, makers=()):
         images = '<h2>Screenshots</h2><p class="fine">No screenshots yet.</p>'
     permissions = ''.join(f'<span class="chip">{e(permission_label(permission))}</span>' for permission in app['permissions']) or '<span class="chip">None declared</span>'
     python = e(req.get('python', 'Not specified')) + (' or newer' if req.get('python') else '')
+    movable = ''
+    if req['ports'] and app['entry'] is not None:
+        movable = ('<dt>Move it</dt><dd>' + (f'<code>farm start {e(app["id"])} --port N</code>'
+                   if 'port' not in app or app['port'] is not None
+                   else f'Fixed on {e(req["ports"][0])}') + '</dd>')
     return f'''<section class="app wrap">{band}<div class="head">{app_icon}<div><h1>{e(app['name'])}</h1><div class="sub">v{e(app['version'])} · {e(app['license'])} · {review} · Grown by {link(maker_url, app['author']['name'])}</div></div></div>
 <p class="pitch">{e(app['pitch'])}</p>
 <a hidden data-seed-update="{e(app['id'])}" href="/submit/?update={e(app['id'])}">Update this app</a>
 <div class="two"><div>{install}<h2>What it does</h2><p class="desc">{e(app['description'])}</p>{'<p>' + link(homepage, 'Home page') + '</p>' if homepage else ''}{images}{social_strip(app)}</div><aside class="rail">
-<div class="card"><h3>Needs</h3><dl><dt>Python</dt><dd>{python}</dd><dt>Port</dt><dd>{e(', '.join(map(str, req['ports'])) or 'None')}</dd><dt>Models</dt><dd>{e(', '.join(req['device']['models']) or 'None')}</dd><dt>NPU</dt><dd>{e(req['device']['npuUnits'])} units</dd><dt>Uses</dt><dd><div class="chips">{permissions}</div></dd></dl></div>
+<div class="card"><h3>Needs</h3><dl><dt>Python</dt><dd>{python}</dd><dt>Port</dt><dd>{e(', '.join(map(str, req['ports'])) or 'None')}</dd>{movable}<dt>Models</dt><dd>{e(', '.join(req['device']['models']) or 'None')}</dd><dt>NPU</dt><dd>{e(req['device']['npuUnits'])} units</dd><dt>Uses</dt><dd><div class="chips">{permissions}</div></dd></dl></div>
 <div class="card"><h3>Release</h3>{release_details}</div>
 <div class="card"><h3>Maker</h3><div class="maker">{avatar}<div><b>{link(maker_url, app['author']['name'])}</b><br>{owner}</div></div></div>
 <div class="rail-actions"><button id="seed-thumb" class="btn ghost" type="button" aria-pressed="false" disabled>Thumbs up · <span id="thumb-count">0</span></button><button type="button" class="btn ghost" data-share data-share-title="{e(app['name'])}" data-share-text="{e(app['pitch'])}">Share</button></div><span data-share-status role="status" aria-live="polite"></span>

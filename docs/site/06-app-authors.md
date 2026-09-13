@@ -64,9 +64,14 @@ never has to handle that case itself. The person can then rerun with `--port N`,
 first declared port only.
 
 Read the port from `TIINYAPP_PORT`. It is always set when the manifest declares any port, and it
-carries the override when there is one. Two listed apps get an extra variable because their
-upstream code already expected it: Titanium Tiiny Bot gets `TIINY_PORT` and has a `--port` argument
-in its entry rewritten, and Story Lantern gets `PORT`. Anything new should honour `TIINYAPP_PORT`.
+carries the override when there is one.
+
+If your app takes its port some other way, say so in the manifest's `port` field and the farm will
+use that instead: `{"argv": "--port"}` when the number follows a flag on your command line, or
+`{"env": "PORT"}` when you read a different variable. Both are honoured for every app, so you do
+not have to change your code to make `--port` work. If your port cannot move at all, write
+`"port": null` and `farm start --port N` refuses in one line instead of starting you somewhere you
+did not expect.
 
 ## Being ready
 
@@ -153,7 +158,8 @@ obscurely. This is how OneLane ships.
 
 - The archive unpacks cleanly under the rules above and contains your license.
 - The entry starts the app in the foreground from the archive root.
-- Every port you bind is declared, and you read `TIINYAPP_PORT`.
+- Every port you bind is declared, and you read `TIINYAPP_PORT` or the manifest says how you take
+  a port in its `port` field.
 - Every access you use is declared in `permissions`.
 - Nothing in the archive imports `subprocess` or `ctypes`, and nothing calls `eval`, `exec`,
   `os.system` or `os.popen`.

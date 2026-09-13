@@ -34,6 +34,10 @@ API_ORIGIN = "https://tiinyapp.farm"
 ID = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*\Z")
 VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 START_TIMEOUT = 10.0
+# How an app takes its port when its manifest does not say.
+PORT_DEFAULT = {"env": "TIINYAPP_PORT"}
+PORT_FLAG = re.compile(r"--?[A-Za-z0-9][A-Za-z0-9-]*\Z")
+PORT_ENV = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 MAX_DOWNLOAD = 512 * 1024 * 1024
 WINDOWS = os.name == "nt"
 MAX_UNPACKED = 2 * 1024 * 1024 * 1024
@@ -235,7 +239,36 @@ def validate_manifest(manifest, ident):
             raise FarmError("Empty command entry.")
     else:
         raise FarmError("Invalid app entry.")
+    takes = manifest.get("port", PORT_DEFAULT)
+    if takes is not None:
+        if not isinstance(takes, dict) or set(takes) not in ({"argv"}, {"env"}):
+            raise FarmError("Port must name one of argv or env, or be null for a fixed port.")
+        if "argv" in takes and not (isinstance(takes["argv"], str) and PORT_FLAG.fullmatch(takes["argv"])):
+            raise FarmError("Port argv must be a command line flag.")
+        if "env" in takes and not (isinstance(takes["env"], str) and PORT_ENV.fullmatch(takes["env"])):
+            raise FarmError("Port env must be an environment variable name.")
     return manifest
+
+
+def port_mechanism(manifest):
+    """How an app takes its port: {"argv": flag}, {"env": name}, or None when it is fixed."""
+    return manifest.get("port", PORT_DEFAULT)
+
+
+def set_port_argument(command, flag, port):
+    """Put the port on the command line after the flag the manifest names."""
+    value = str(port)
+    for index, argument in enumerate(command):
+        if argument == flag:
+            if index + 1 < len(command) and command[index + 1].isdigit():
+                command[index + 1] = value
+            else:
+                command.insert(index + 1, value)
+            return
+        if argument.startswith(flag + "="):
+            command[index] = f"{flag}={value}"
+            return
+    command += [flag, value]
 
 
 class CatalogLinks(HTMLParser):
@@ -778,12 +811,10 @@ class Farm:
             if host:
                 env["TIINY_HOST"] = f"[{host}]" if ":" in host else host
         if ident == "story-lantern":
-            if not manifest["requires"]["ports"]:
-                raise FarmError("Story Lantern needs its declared HTTP port.")
+            # Data paths only. Its port comes from the manifest port field, like every app's.
             env.update(LANTERN_HOME=str(data), LANTERN_DB=str(data / "lantern.db"),
                        LANTERN_SAFETY_JSONL=str(data / "safety-events.jsonl"),
-                       LANTERN_BLOCKLIST=str(data / "blocklist_extra.txt"),
-                       PORT=str(manifest["requires"]["ports"][0]))
+                       LANTERN_BLOCKLIST=str(data / "blocklist_extra.txt"))
         return env
 
     def active(self, ident):
@@ -869,10 +900,17 @@ class Farm:
     def start_failure(self, app, ident, manifest, message, port=None, exited=False):
         """Add the two causes of a failed start that leave nothing useful in the log."""
         declared = list(manifest["requires"]["ports"])
-        if port is not None and declared and declared[0] != port and self.tcp_ready(declared[0]):
+        takes = port_mechanism(manifest)
+        # A fixed port refuses --port before launch, so only a movable app reaches this.
+        if port is not None and takes is not None and declared and declared[0] != port and self.tcp_ready(declared[0]):
             message += (f"\n{ident} never opened {port}, and something is listening on {declared[0]},"
-                        f" the port its manifest declares. This app does not read TIINYAPP_PORT,"
-                        f" so --port cannot move it. Ask its author to read TIINYAPP_PORT.")
+                        " the port its manifest declares.")
+            if "argv" in takes:
+                message += (f" It was started with {takes['argv']} {port} and did not use it."
+                            f" Ask its author about {takes['argv']}.")
+            else:
+                message += (f" This app does not read {takes['env']}, so --port cannot move it."
+                            f" Ask its author to read {takes['env']}.")
         if exited and (manifest["requires"].get("device") or {}).get("models") and not self.device_configured():
             message += (f"\nNo device is configured. If {ident} needs your Tiiny,"
                         f" run farm device and start it again.")
@@ -895,25 +933,26 @@ class Farm:
             if command[0] in ("python", "python3"):
                 command[0] = sys.executable
             ports = list(manifest["requires"]["ports"])
+            takes = port_mechanism(manifest)
+            if port is not None and takes is None:
+                raise FarmError(f"{ident} runs on port {ports[0]} only and cannot be moved, so start it without --port."
+                                if ports else f"{ident} has no port to move, so start it without --port.")
             if port is not None:
                 ports = [port, *ports[1:]]
             for candidate in ports:
                 if self.tcp_ready(candidate):
                     # Nothing launched this time, so quoting farm.log would show a stale run.
-                    raise FarmError(f"Port {candidate} is already in use; use farm start {ident} --port N.")
+                    raise FarmError(f"Port {candidate} is already in use; use farm start {ident} --port N."
+                                    if takes is not None else
+                                    f"Port {candidate} is already in use, and {ident} cannot be moved off it.")
             env = self.environment(ident, manifest)
             if ports:
+                # Every app is told the farm's port; the manifest says how this one takes it.
                 env["TIINYAPP_PORT"] = str(ports[0])
-                if ident == "titanium-tiiny-bot":
-                    env["TIINY_PORT"] = str(ports[0])
-                    # Lite's manifest supplies --port, which takes precedence over env.
-                    for index, argument in enumerate(command):
-                        if argument == "--port" and index + 1 < len(command):
-                            command[index + 1] = str(ports[0])
-                        elif argument.startswith("--port="):
-                            command[index] = f"--port={ports[0]}"
-                elif ident == "story-lantern":
-                    env["PORT"] = str(ports[0])
+                if takes and "argv" in takes:
+                    set_port_argument(command, takes["argv"], ports[0])
+                elif takes:
+                    env[takes["env"]] = str(ports[0])
             with (app / ".run.lock").open("a+b") as lock:
                 with file_lock(lock, blocking=False), (app / "farm.log").open("ab") as log:
                     options = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS}

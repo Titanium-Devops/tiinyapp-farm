@@ -140,6 +140,17 @@ class ManifestTests(unittest.TestCase):
             with self.subTest(path=path.name):
                 validator.check_manifest(json.loads(path.read_text()), allow_pending=True)
 
+    def test_catalog_manifests_say_how_each_app_takes_its_port(self):
+        """Read from each app's own source at its released tag on 2026-09-13."""
+        expected = {'titanium-tiiny-bot': {'argv': '--port'},  # lite/server.py: --port
+                    'tiiny-bench': {'argv': '--serve'},        # bench.py: --serve [PORT], default 8425
+                    'story-lantern': {'env': 'PORT'},          # lantern.py: PORT, default 8420
+                    'onelane': None}                           # a library with no port at all
+        for ident, takes in expected.items():
+            with self.subTest(app=ident):
+                manifest = json.loads((ROOT / f'manifests/{ident}.json').read_text())
+                self.assertEqual(manifest['port'], takes)
+
     def test_pending_requires_explicit_flag(self):
         with self.assertRaisesRegex(ValueError, "allow-pending"):
             validator.check_manifest(self.manifest)
@@ -176,7 +187,9 @@ class ManifestTests(unittest.TestCase):
                  ("addedAt", "2026-02-30"), ("updatedAt", "yesterday"),
                  ("homepage", "https://"), ("permissions", ["shell"]),
                  ("permissions", ["files", "files"]), ("entry", {"python": "lite"}),
-                 ("entry", {"python": "lite", "args": [], "command": "oops"})]
+                 ("entry", {"python": "lite", "args": [], "command": "oops"}),
+                 ("port", {}), ("port", {"argv": "--port", "env": "PORT"}), ("port", "PORT"),
+                 ("port", {"env": "2PORT"}), ("port", {"argv": "port"})]
         for key, value in cases:
             with self.subTest(key=key, value=value):
                 manifest = copy.deepcopy(self.manifest)
@@ -311,6 +324,7 @@ class FarmTests(unittest.TestCase):
         self.manifest["requires"]["python"] = "3.9"
         self.manifest["requires"]["ports"] = []
         self.manifest.pop("health", None)
+        self.manifest.pop("port", None)  # The app the other tests use takes the default, TIINYAPP_PORT.
         self.output = io.StringIO()
         self.redirect = contextlib.redirect_stdout(self.output)
         self.redirect.__enter__()
@@ -608,7 +622,8 @@ class FarmTests(unittest.TestCase):
         (self.home / "story-lantern").mkdir()
         env = self.farm.environment("story-lantern", story)
         self.assertEqual(env["LANTERN_HOME"], str(self.home / "story-lantern/data"))
-        self.assertEqual(env["PORT"], "8420")
+        # The adapter carries data paths only; PORT comes from the manifest port field at start.
+        self.assertEqual(env.get("PORT"), os.environ.get("PORT"))
 
     def test_removing_library_preserves_shared_lock_directory(self):
         self.install()
@@ -910,23 +925,106 @@ while True: time.sleep(0.1)
         self.assertNotIn('Started', result.stdout)
         self.assertFalse((self.app / 'farm.pid').exists())
 
-    def test_lite_override_replaces_manifest_argument_and_sets_both_env_vars(self):
+    def start_with_port_field(self, ident, takes, args, port=None, ports=(7788,), code=None):
+        """Start one app whose manifest says how it takes its port, and return its log."""
         self.install()
-        lite = copy.deepcopy(self.manifest)
-        lite['id'] = 'titanium-tiiny-bot'
-        lite['entry']['args'] = ['--port', '7788']
-        lite['requires']['ports'] = [7788]
+        manifest = copy.deepcopy(self.manifest)
+        manifest['id'] = ident
+        manifest['entry']['args'] = list(args)
+        manifest['requires']['ports'] = list(ports)
+        if takes is not False:
+            manifest['port'] = takes
         root = self.app / '0.1.0'
-        root.joinpath('fake.py').write_text('import os, sys\nprint(sys.argv[1:])\n'
-                                          'print(os.environ["TIINYAPP_PORT"], os.environ["TIINY_PORT"])\n' + FAKE_APP)
-        with patch.object(self.farm, 'installed', return_value=(root, lite)), \
+        root.joinpath('fake.py').write_text(code or 'import os, sys\nprint(sys.argv[1:], flush=True)\n' + FAKE_APP)
+        with patch.object(self.farm, 'installed', return_value=(root, manifest)), \
                 patch.object(self.farm, 'app_dir', return_value=self.app), \
                 patch('farm.farm.socket.create_connection', side_effect=[
                     ConnectionRefusedError(), contextlib.nullcontext()]):
-            self.farm.start('titanium-tiiny-bot', port=7790)
+            self.farm.start(ident, port=port)
         self.wait_for(lambda: 'ready' in (self.app / 'farm.log').read_text())
-        self.assertIn("['--port', '7790']", (self.app / 'farm.log').read_text())
-        self.assertIn('7790 7790', (self.app / 'farm.log').read_text())
+        return (self.app / 'farm.log').read_text()
+
+    def test_argv_port_field_replaces_the_number_in_the_entry(self):
+        """Lite's shape: the manifest already carries --port 7788."""
+        log = self.start_with_port_field('titanium-tiiny-bot', {'argv': '--port'},
+                                         ['--port', '7788'], port=7790)
+        self.assertIn("['--port', '7790']", log)
+
+    def test_argv_port_field_replaces_an_attached_number(self):
+        log = self.start_with_port_field('titanium-tiiny-bot', {'argv': '--port'},
+                                         ['--port=7788'], port=7790)
+        self.assertIn("['--port=7790']", log)
+
+    def test_argv_port_field_adds_the_number_when_the_entry_has_none(self):
+        """TiinyBench's shape: --serve takes an optional port and the entry leaves it off."""
+        log = self.start_with_port_field('tiiny-bench', {'argv': '--serve'}, ['--serve'],
+                                         port=7790, ports=(8425,))
+        self.assertIn("['--serve', '7790']", log)
+
+    def test_argv_port_field_adds_the_flag_the_entry_left_out(self):
+        log = self.start_with_port_field('tiiny-bench', {'argv': '--serve'}, ['--quiet'],
+                                         port=7790, ports=(8425,))
+        self.assertIn("['--quiet', '--serve', '7790']", log)
+
+    def test_env_port_field_uses_the_name_the_manifest_gives(self):
+        """Story Lantern's shape: the app reads PORT."""
+        log = self.start_with_port_field(
+            'story-lantern', {'env': 'PORT'}, [], port=7790, ports=(8420,),
+            code='import os, sys\nprint(os.environ["PORT"], os.environ["TIINYAPP_PORT"], flush=True)\n' + FAKE_APP)
+        self.assertIn('7790 7790', log)
+
+    def test_a_manifest_with_no_port_field_gets_tiinyapp_port_alone(self):
+        with patch.dict(os.environ, {'PORT': 'left alone'}):
+            log = self.start_with_port_field(
+                'fake-app', False, [], port=7790,
+                code='import os, sys\nprint(os.environ["TIINYAPP_PORT"], os.environ["PORT"], flush=True)\n' + FAKE_APP)
+        self.assertIn('7790 left alone', log)
+
+    def test_a_fixed_port_refuses_to_be_moved(self):
+        self.manifest['port'] = None
+        self.manifest['requires']['ports'] = [8425]
+        self.save_manifest()
+        self.install()
+        with self.assertRaises(FarmError) as error:
+            self.farm.start('fake-app', port=7790)
+        self.assertEqual(str(error.exception),
+                         'fake-app runs on port 8425 only and cannot be moved, so start it without --port.')
+
+    def test_a_fixed_port_in_use_is_not_told_to_use_port(self):
+        self.manifest['port'] = None
+        self.manifest['requires']['ports'] = [8425]
+        self.save_manifest()
+        self.install()
+        with patch('farm.farm.socket.create_connection', return_value=contextlib.nullcontext()):
+            with self.assertRaises(FarmError) as error:
+                self.farm.start('fake-app')
+        self.assertEqual(str(error.exception),
+                         'Port 8425 is already in use, and fake-app cannot be moved off it.')
+        self.assertNotIn('--port', str(error.exception))
+
+    def test_a_movable_port_in_use_still_offers_port(self):
+        self.manifest['requires']['ports'] = [8420]
+        self.save_manifest()
+        self.install()
+        with patch('farm.farm.socket.create_connection', return_value=contextlib.nullcontext()):
+            with self.assertRaises(FarmError) as error:
+                self.farm.start('fake-app')
+        self.assertEqual(str(error.exception),
+                         'Port 8420 is already in use; use farm start fake-app --port N.')
+
+    def test_invalid_port_fields_are_refused(self):
+        from farm.farm import validate_manifest
+        for takes in ({}, {'argv': '--port', 'env': 'PORT'}, {'argv': ''}, {'argv': 'port'},
+                      {'env': '2PORT'}, {'env': ''}, {'flag': '--port'}, '--port', 7788, True):
+            manifest = copy.deepcopy(self.manifest)
+            manifest['port'] = takes
+            with self.subTest(port=takes), self.assertRaises(FarmError):
+                validate_manifest(manifest, 'fake-app')
+        for takes in (None, {'argv': '--port'}, {'argv': '-p'}, {'env': 'TIINYAPP_PORT'}):
+            manifest = copy.deepcopy(self.manifest)
+            manifest['port'] = takes
+            with self.subTest(port=takes):
+                validate_manifest(manifest, 'fake-app')
 
     def test_cli_port_option_dispatches_to_start(self):
         with patch('farm.farm.Farm', return_value=self.farm), patch.object(self.farm, 'start') as start:

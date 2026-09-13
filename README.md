@@ -70,8 +70,9 @@ the configuration for later launches. Explicit options take precedence over the
 environment; incomplete scripted input fails without prompting. Keys never need
 to appear in command arguments. The launcher passes `TIINY_BASE`, `TIINY_KEY`,
 and the derived `TIINY_HOST`. Cooperating apps share `ONELANE_DIR=~/tiinyapps/.onelane`.
-Story Lantern additionally receives `LANTERN_HOME`, its database/log paths, and
-`PORT`; its upstream device management still expects plain HTTP port 8800.
+Story Lantern additionally receives `LANTERN_HOME` and its database/log paths; its
+upstream device management still expects plain HTTP port 8800. Its `PORT` comes from
+the manifest, like every app's.
 Story Lantern currently retries contention but has not adopted OneLane, so merely
 setting the shared path cannot guarantee cross-app serialization for that app.
 
@@ -83,8 +84,11 @@ Failed startup exits 1, prints the last ten log lines, and removes process recor
 Apps without declared ports receive a short process-liveness check.
 
 `farm start <id> --port 7790` overrides the primary port and exports `TIINYAPP_PORT`.
-Lite also receives `TIINY_PORT` and an updated `--port` argument; Story Lantern
-receives `PORT`. Other apps must honor `TIINYAPP_PORT`. `farm status` displays the
+A manifest's optional `port` field says how that app takes it: `{"argv": "--port"}` puts
+the number on the command line after that flag, replacing one already there or adding it;
+`{"env": "PORT"}` sets that variable; `null` means the port is fixed, so `--port` is
+refused in one line and a port already in use is not answered with advice that cannot
+work. Leave the field out and the app must honor `TIINYAPP_PORT`. `farm status` displays the
 recorded ports and compares the health-reported version with the installed
 manifest, suggesting a restart on mismatch. Without health version data it uses
 the launch record and labels unavailable health data.

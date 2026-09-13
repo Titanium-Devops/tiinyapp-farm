@@ -624,6 +624,17 @@ assert.equal(anonymous.children[0].children[0].tag, 'span');
             visible = ' '.join(Document(path.read_text()).text)
             self.assertNotRegex(visible, r'(?i)farmhand|\bsprouting\b|\bseeds?\b|My farm')
 
+    def test_needs_card_says_whether_the_port_moves(self):
+        movable = next(app for app in self.apps if app['id'] == 'tiiny-bench')
+        rail = SITE['app_page'](movable, TODAY).split('<aside', 1)[1]
+        self.assertIn('<dt>Move it</dt><dd><code>farm start tiiny-bench --port N</code></dd>', rail)
+        fixed = copy.deepcopy(movable)
+        fixed['port'] = None
+        self.assertIn('<dt>Move it</dt><dd>Fixed on 8425</dd>',
+                      SITE['app_page'](fixed, TODAY).split('<aside', 1)[1])
+        library = next(app for app in self.apps if app['id'] == 'onelane')
+        self.assertNotIn('Move it', SITE['app_page'](library, TODAY))
+
     def test_navigation_links_and_current_page(self):
         for path, active in [('index.html', '/'), ('install/index.html', '/install/'),
                              ('catalog/index.html', '/catalog/'), ('submit/index.html', '/submit/'),

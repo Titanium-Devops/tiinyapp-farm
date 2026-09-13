@@ -126,7 +126,10 @@ farm start titanium-tiiny-bot --port 7799
 ```
 
 The override replaces the first declared port only. The chosen port is exported to the app as
-`TIINYAPP_PORT`, and `farm status` shows the port an app was actually started on.
+`TIINYAPP_PORT`, and an app whose manifest says it takes a port some other way gets it that way
+too, so `--port` works whatever the app expects. A few apps cannot move at all, and those say so
+in one line instead of starting somewhere you did not ask for. `farm status` shows the port an app
+was actually started on.
 
 ## Keep it current
 

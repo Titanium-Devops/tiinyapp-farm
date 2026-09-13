@@ -66,6 +66,28 @@ A Python module name is dotted identifiers: letters, digits and underscores, not
 digit. `args` is an array of strings. A command entry is split the way a shell would split it, but
 no shell is involved, so pipes, redirects and `&&` do not work.
 
+## port
+
+`port` says how the app takes the port `farm start` gives it, so `--port N` works without the CLI
+knowing your app by name. It is optional and has three shapes.
+
+| Shape | Example | What happens |
+| --- | --- | --- |
+| Command line | `{"argv": "--serve"}` | The number goes after that flag, replacing one already there in `entry`, or added if the flag is missing |
+| Environment | `{"env": "PORT"}` | That variable is set to the port |
+| Fixed | `null` | The port cannot move. `farm start --port N` refuses in one line naming the port |
+
+Leave it out and you get `{"env": "TIINYAPP_PORT"}`, which is what the farm has always done, so an
+app that reads `TIINYAPP_PORT` needs nothing here. `TIINYAPP_PORT` is set either way, whatever the
+field says. An `argv` flag looks like `--port` or `-p`; an `env` name is letters, digits and
+underscores, not starting with a digit. Exactly one of the two keys, never both.
+
+The four catalog apps show all of it: Titanium Tiiny Bot is `{"argv": "--port"}`, TiinyBench is
+`{"argv": "--serve"}`, Story Lantern is `{"env": "PORT"}`, and OneLane is `null` because a library
+has no port at all.
+
+The submit form does not ask for this field. Set it in a hand-made pull request.
+
 ## requires
 
 ```
@@ -107,6 +129,7 @@ the submission checks nor be installed.
 | --- | --- | --- |
 | `homepage` | string | The app's public home page, HTTP or HTTPS |
 | `repo` | string | Source repository URL. Also what the release path reads to find new releases |
+| `port` | null or object | How the app takes the port `farm start` gives it. See below |
 | `health` | string | An HTTP path on the first declared port, such as `/api/health`. Needs at least one port |
 | `selfcheck` | boolean | When true, the checks run your entry with `--selfcheck` offline. Needs a runnable entry |
 | `featured` | boolean | Maintainer-curated placement in the Featured section of the home page |
@@ -132,6 +155,7 @@ Image URLs are either an HTTPS URL or a site-relative path beginning `/assets/` 
 - `entry: null` requires `library` in `tags`.
 - `selfcheck: true` requires a runnable entry, so a library cannot declare one.
 - `health` requires at least one declared port.
+- `port` carries `argv` or `env`, never both, and `null` means the port is fixed.
 - `links.video` must carry exactly one eleven character YouTube video id.
 - A `pending` checksum requires the word "pending" in the description, and `--allow-pending` on the
   local checker.
@@ -161,6 +185,7 @@ Image URLs are either an HTTPS URL or a site-relative path beginning `/assets/` 
     "size": 455721
   },
   "entry": {"python": "lite", "args": ["--port", "7788"]},
+  "port": {"argv": "--port"},
   "requires": {
     "python": "3.11",
     "ports": [7788],
