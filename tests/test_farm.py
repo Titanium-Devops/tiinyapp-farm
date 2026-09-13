@@ -1086,8 +1086,10 @@ while True: time.sleep(0.1)
         self.save_manifest()
         self.install()
 
+        # The trickle is far longer than the deadline, so returning early proves the
+        # CLI did not wait for it even when a busy machine adds a tenth of a second.
         def slow_response(*args, **kwargs):
-            time.sleep(0.5)
+            time.sleep(5)
             return io.BytesIO(b'{"version":"0.1.0"}')
 
         with patch('farm.farm.socket.create_connection', side_effect=ConnectionRefusedError()), \
@@ -1096,5 +1098,5 @@ while True: time.sleep(0.1)
             started = time.monotonic()
             with self.assertRaisesRegex(FarmError, 'timed out'):
                 self.farm.start('fake-app')
-            self.assertLess(time.monotonic() - started, 0.45)
+            self.assertLess(time.monotonic() - started, 1.0)
         self.assertFalse((self.app / 'farm.pid').exists())
