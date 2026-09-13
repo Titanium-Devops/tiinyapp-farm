@@ -164,7 +164,7 @@ def page(title, body, path, scripts=()):
 <nav aria-label="Main navigation">{navigation}<a class="me" data-farm-nav href="/submit/#account-panel">Sign in</a></nav></div></header>
 <main id="main">{body}</main>
 <footer><div class="wrap"><div class="marks"><a class="pill" href="https://titanium.bot"><img src="/brand/titanium-bot-logo.svg" width="120" height="30" alt="Titanium Bot"><span>Brought to you by Titanium Bot</span></a>
-<a class="pill" href="https://tiiny.ai">Built for <img src="/brand/tiiny-logo.svg" width="80" height="28" alt="Tiiny"></a></div><span>Made by Titanium Computing</span><a href="/submit/">Submit an app</a><a href="/docs/agents/">AI guide</a><a href="/docs/manifest.schema.json">Manifest schema</a></div></footer>
+<a class="pill" href="https://tiiny.ai">Built for <img src="/brand/tiiny-logo.svg" width="80" height="28" alt="Tiiny"></a></div><span>Made by Titanium Computing</span><a href="/submit/">Submit an app</a><a href="/docs/">Documentation</a></div></footer>
 {page_scripts}<script type="module" src="/assets/session.js"></script></body></html>'''
 
 
@@ -356,6 +356,164 @@ def agent_guide(text):
 <pre class="agent-guide">{e(text)}</pre></section>'''
 
 
+# The documentation pages are written as markdown in docs/site/ so that editing them
+# never means editing HTML. This is the small subset of markdown those files use.
+LIST_ITEM = re.compile(r'^(\s*)([-*]|[0-9]+\.)\s+(.*)$')
+TABLE_RULE = re.compile(r'\|[\s:|-]+\|')
+
+
+def doc_slug(value):
+    return re.sub(r'-+', '-', re.sub(r'[^a-z0-9]+', '-', value.lower())).strip('-')
+
+
+def doc_inline(text):
+    """Set code spans aside, escape and mark up the rest, then put them back."""
+    spans = []
+
+    def stash(match):
+        spans.append('<code>' + e(match.group(1)) + '</code>')
+        return f'\x00{len(spans) - 1}\x00'
+
+    piece = e(re.sub(r'`([^`]+)`', stash, text))
+    piece = re.sub(r'\[([^\]]+)\]\(([^)\s]+)\)', r'<a href="\2">\1</a>', piece)
+    piece = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', piece)
+    return re.sub(r'\x00([0-9]+)\x00', lambda match: spans[int(match.group(1))], piece)
+
+
+def doc_list(lines, index, indent):
+    tag = 'ul' if LIST_ITEM.match(lines[index]).group(2) in ('-', '*') else 'ol'
+    items = []
+    while index < len(lines):
+        line = lines[index]
+        found = LIST_ITEM.match(line)
+        if not found:
+            # A wrapped line belongs to the item above it, so docs can wrap at a sane width.
+            if not items or not line.strip() or line.lstrip().startswith(('#', '```', '|', '> ')):
+                break
+            items[-1] += ' ' + doc_inline(line.strip())
+            index += 1
+            continue
+        if len(found.group(1)) < indent:
+            break
+        if len(found.group(1)) > indent:
+            nested, index = doc_list(lines, index, len(found.group(1)))
+            items[-1] += nested
+            continue
+        items.append(doc_inline(found.group(3)))
+        index += 1
+    return '<{0}>{1}</{0}>'.format(tag, ''.join(f'<li>{item}</li>' for item in items)), index
+
+
+def doc_table(lines, index):
+    rows = []
+    while index < len(lines) and lines[index].strip().startswith('|'):
+        rows.append([cell.strip() for cell in lines[index].strip().strip('|').split('|')])
+        index += 1
+    head = ''.join(f'<th scope="col">{doc_inline(cell)}</th>' for cell in rows[0])
+    body = ''.join('<tr>' + ''.join(f'<td>{doc_inline(cell)}</td>' for cell in row) + '</tr>' for row in rows[2:])
+    return f'<div class="docs-table"><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>', index
+
+
+def markdown(text):
+    """Headings, paragraphs, lists, tables, fenced code, notes and inline marks."""
+    lines = text.split('\n')
+    html = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if not line.strip():
+            index += 1
+            continue
+        if line.startswith('```'):
+            index += 1
+            block = []
+            while index < len(lines) and not lines[index].startswith('```'):
+                block.append(lines[index])
+                index += 1
+            html.append('<pre><code>' + e('\n'.join(block)) + '</code></pre>')
+            index += 1
+            continue
+        heading = re.match(r'(#{1,6})\s+(.*)$', line)
+        if heading:
+            # The page title is the only h1, so a section heading starts at h2.
+            level = max(2, len(heading.group(1)))
+            html.append(f'<h{level} id="{doc_slug(heading.group(2))}">{doc_inline(heading.group(2))}</h{level}>')
+            index += 1
+            continue
+        if line.startswith('|') and index + 1 < len(lines) and TABLE_RULE.fullmatch(lines[index + 1].strip()):
+            block, index = doc_table(lines, index)
+            html.append(block)
+            continue
+        if LIST_ITEM.match(line):
+            block, index = doc_list(lines, index, len(LIST_ITEM.match(line).group(1)))
+            html.append(block)
+            continue
+        if line.startswith('> '):
+            note = []
+            while index < len(lines) and lines[index].startswith('> '):
+                note.append(lines[index][2:])
+                index += 1
+            html.append('<p class="note">' + doc_inline(' '.join(note)) + '</p>')
+            continue
+        paragraph = []
+        while index < len(lines) and lines[index].strip() and not lines[index].startswith(('#', '```', '|', '> ')) \
+                and not LIST_ITEM.match(lines[index]):
+            paragraph.append(lines[index].strip())
+            index += 1
+        html.append('<p>' + doc_inline(' '.join(paragraph)) + '</p>')
+    return ''.join(html)
+
+
+def read_doc(path):
+    """A documentation source: key: value lines between --- markers, then markdown."""
+    text = path.read_text(encoding='utf-8')
+    meta = {}
+    if text.startswith('---\n'):
+        head, _, text = text[4:].partition('\n---\n')
+        for line in head.split('\n'):
+            key, _, value = line.partition(':')
+            if key.strip():
+                meta[key.strip()] = value.strip()
+    for field in ('title', 'summary', 'order'):
+        if not meta.get(field):
+            raise ValueError(f'{path.name} needs a {field} in its front matter')
+    meta['slug'] = meta.get('slug', '')
+    if meta['slug'] and not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', meta['slug']):
+        raise ValueError(f'{path.name} has an invalid slug')
+    meta['url'] = '/docs/' + (meta['slug'] + '/' if meta['slug'] else '')
+    meta['body'] = text
+    return meta
+
+
+def doc_entries(source):
+    entries = [read_doc(path) for path in sorted((source / 'docs/site').glob('*.md'))]
+    entries.sort(key=lambda entry: int(entry['order']))
+    if not entries or entries[0]['slug']:
+        raise ValueError('docs/site needs an index page whose slug is empty')
+    return entries
+
+
+def doc_page(entry, entries):
+    """One documentation page: the section list, the page, and its own contents."""
+    links = ''.join(
+        f'<li><a href="{item["url"]}"' + (' aria-current="page"' if item is entry else '') + f'>{e(item["title"])}</a></li>'
+        for item in entries)
+    body = markdown(entry['body'])
+    sections = re.findall(r'<h2 id="([^"]+)">(.*?)</h2>', body)
+    contents = ''
+    if entry['slug'] and len(sections) > 2:
+        contents = ('<nav class="docs-toc" aria-label="On this page"><b>On this page</b><ul>'
+                    + ''.join(f'<li><a href="#{anchor}">{title}</a></li>' for anchor, title in sections)
+                    + '</ul></nav>')
+    if not entry['slug']:
+        body += ('<div class="docs-index">' + ''.join(
+            f'<a class="docs-card" href="{item["url"]}"><b>{e(item["title"])}</b><span>{e(item["summary"])}</span></a>'
+            for item in entries if item['slug']) + '</div>')
+    return f'''<div class="docs"><nav class="docs-nav" aria-label="Documentation"><b>Documentation</b><ul>{links}</ul></nav>
+<section class="page docs-body"><h1>{e(entry['title'])}</h1><p class="lede">{e(entry['summary'])}</p>{contents}{body}
+<p class="docs-foot"><a href="/docs/">All documentation</a> <a href="/install/">Install an app</a> <a href="/submit/">Submit an app</a></p></section></div>'''
+
+
 def build(source=ROOT, output=None, today=None):
     source = Path(source)
     output = Path(output) if output else source / "site" / "dist"
@@ -393,6 +551,9 @@ def build(source=ROOT, output=None, today=None):
                  "/install/": ("Install an app", steps()), "/submit/": ("Submit an app", seeds()),
                  "/submit/done/": ("App submitted", seeds()), "/account/": ("Your apps", my_farm()),
                  "/docs/agents/": ("Publish for a person", agent_guide(guide))}
+        entries = doc_entries(source)
+        for entry in entries:
+            pages[entry['url']] = (entry['title'], doc_page(entry, entries))
         listing = '<section class="sect"><h1>App manifests</h1><p>The installer catalog at https://tiinyapp.farm/manifests/.</p><ul>'
         for path, app in manifests:
             pages[f"/apps/{app['id']}/"] = (app["name"], app_page(app, today, makers))

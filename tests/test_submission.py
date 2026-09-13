@@ -314,7 +314,10 @@ class SubmissionTests(unittest.TestCase):
         self.assertIn('farm device', site['steps']())
         footer = site['page']('Submit an app', site['seeds'](), '/submit/')
         self.assertIn('href="/submit/"', footer)
-        self.assertIn('href="/docs/agents/"', footer)
+        self.assertIn('href="/docs/"', footer)
+        # The footer points at the documentation index, which still carries the assistant guide.
+        entries = site['doc_entries'](ROOT)
+        self.assertIn('href="/docs/agents/"', site['doc_page'](entries[0], entries))
 
 
 class OwnerGateTests(unittest.TestCase):
