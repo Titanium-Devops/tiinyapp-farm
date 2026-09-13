@@ -589,7 +589,10 @@ assert.equal(anonymous.children[0].children[0].tag, 'span');
                        'http://openai.api.tiiny/v1', 'http://<your-tiiny-ip>/v1',
                        'TiinyOS → Settings → API Key', '~/.tiinyapps/device.json',
                        'farm install titanium-tiiny-bot', 'farm start titanium-tiiny-bot',
-                       'farm list', 'farm stop <id>', 'farm update <id>', 'farm remove <id>'):
+                       'farm list', 'farm stop <id>', 'farm update <id>', 'farm remove <id>',
+                       'farm install <id> -y',
+                       'Port 7788 is already in use; use farm start <id> --port N.',
+                       'farm start <id> --port 7799'):
             self.assertIn(phrase, install)
         steps = [attrs for tag, attrs in Document(html).tags if 'stp' in attrs.get('class', '').split()]
         self.assertEqual(len(steps), 3)

@@ -178,6 +178,8 @@ def steps():
 <p class="small">Run <code>farm device</code> again to change either value.</p></div></div>
 <div class="stp"><div class="n">3</div><div><h2>Install and run an app</h2><p>Pick an app in the catalog. Its page shows what it needs and what it asks for before you install it.</p><pre>farm install titanium-tiiny-bot
 farm start titanium-tiiny-bot</pre>
+<p class="small">The install prints what the app asks for and waits for a yes. In a script, <code>farm install &lt;id&gt; -y</code> answers it.</p>
+<p class="small">If something already holds the app's port, the start stops and tells you: <code>Port 7788 is already in use; use farm start &lt;id&gt; --port N.</code> Run it again on a free port with <code>farm start &lt;id&gt; --port 7799</code>.</p>
 <dl><dt><code>farm list</code></dt><dd>installed apps and whether they are running</dd><dt><code>farm stop &lt;id&gt;</code></dt><dd>stop one</dd><dt><code>farm update &lt;id&gt;</code></dt><dd>update to the newest release, then start it again</dd><dt><code>farm remove &lt;id&gt;</code></dt><dd>uninstall</dd></dl></div></div>
 </div>
 <p class="note" style="margin-top:18px">Apps declare the access they use (microphone, files, network, your Tiiny). The CLI shows that before installing; it does not sandbox them. Read the source if that matters to you: every app in the catalog ships it.</p></section>'''
