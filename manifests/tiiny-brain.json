@@ -1,0 +1,56 @@
+{
+  "id": "tiiny-brain",
+  "name": "Tiiny Brain",
+  "pitch": "Your own notes, held by the machine on your desk.",
+  "description": "Point it at a folder of markdown and it reads every note, works out which names keep turning up, and draws the ones that keep turning up together. Click a name and its neighbourhood pulls forward; click a note and read it, copy it as markdown or ask about that note alone. Ask anything and the answer cites the notes it came from, or says plainly that nothing it retrieved covers the question rather than inventing one. Two ways of answering sit behind that box: a question about a topic goes to nearest-neighbour search, and a question about a name the archive knows reads every passage that names it, which is a different and much better set. Write a new note from inside it and the note lands in your own vault as markdown, then gets chunked, embedded and becomes answerable a few seconds later. Your notes stay plain files in your own folder the whole time and nothing is uploaded anywhere. The embedding and the answering happen on your Tiiny. Python standard library only.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Jason Brashear",
+    "url": "https://github.com/webdevtodayjason",
+    "tiinyverse": "https://www.tiinyverse.com/users/39628b1e-e94e-4bd8-800e-5437d5336e1f"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/webdevtodayjason/archiver",
+  "repo": "https://github.com/webdevtodayjason/archiver",
+  "screenshots": [],
+  "release": {
+    "url": "https://github.com/webdevtodayjason/archiver/releases/download/v0.1.0/tiiny-brain-0.1.0.tar.gz",
+    "sha256": "0c0d7c50565c78f9ff5f07d5057011005034742aa4012026d1773b54b90b5a3d",
+    "size": 48424
+  },
+  "entry": {
+    "command": "python3 cockpit.py"
+  },
+  "selfcheck": true,
+  "requires": {
+    "python": "3.9",
+    "ports": [
+      8500
+    ],
+    "device": {
+      "models": [
+        "embedding",
+        "chat"
+      ],
+      "npuUnits": 0
+    }
+  },
+  "permissions": [
+    "files",
+    "network",
+    "device"
+  ],
+  "tags": [
+    "knowledge",
+    "notes",
+    "search",
+    "tools"
+  ],
+  "verified": false,
+  "addedAt": "2026-09-13",
+  "updatedAt": "2026-09-13",
+  "links": {
+    "repo": "https://github.com/webdevtodayjason/archiver",
+    "homepage": "https://github.com/webdevtodayjason/archiver"
+  }
+}
