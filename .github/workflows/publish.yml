@@ -25,8 +25,8 @@ jobs:
           if os.environ['RELEASE_TAG'] != 'v' + version:
               raise SystemExit('Release tag must match pyproject.toml version')
           PY
-      - run: python3 -m unittest
-      - run: python3 scripts/build-site.py
+      # The package is the CLI. The site's own tests and build run in site.yml with their deps.
+      - run: python3 -m unittest tests.test_farm
       - name: Build wheel and source distribution
         run: |
           python3 -m pip install build
