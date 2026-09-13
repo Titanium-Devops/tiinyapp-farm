@@ -164,7 +164,7 @@ def page(title, body, path, scripts=()):
 <nav aria-label="Main navigation">{navigation}<a class="me" data-farm-nav href="/submit/#account-panel">Sign in</a></nav></div></header>
 <main id="main">{body}</main>
 <footer><div class="wrap"><div class="marks"><a class="pill" href="https://titanium.bot"><img src="/brand/titanium-bot-logo.svg" width="120" height="30" alt="Titanium Bot"><span>Brought to you by Titanium Bot</span></a>
-<a class="pill" href="https://tiiny.ai">Built for <img src="/brand/tiiny-logo.svg" width="80" height="28" alt="Tiiny"></a></div><span>Made by Titanium Computing</span><a href="/docs/SUBMIT.md">Contributor guide</a><a href="/docs/manifest.schema.json">Manifest schema</a></div></footer>
+<a class="pill" href="https://tiiny.ai">Built for <img src="/brand/tiiny-logo.svg" width="80" height="28" alt="Tiiny"></a></div><span>Made by Titanium Computing</span><a href="/submit/">Submit an app</a><a href="/docs/agents/">AI guide</a><a href="/docs/manifest.schema.json">Manifest schema</a></div></footer>
 {page_scripts}<script type="module" src="/assets/session.js"></script></body></html>'''
 
 
