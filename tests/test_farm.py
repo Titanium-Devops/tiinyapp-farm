@@ -232,8 +232,10 @@ class PublishTests(unittest.TestCase):
 
     def test_login_saves_private_token_and_token_priority(self):
         farm = Farm(self.root / "config", api_origin="http://example.test")
-        with patch("farm.farm.getpass.getpass", return_value=self.TOKEN):
+        said = io.StringIO()
+        with patch("farm.farm.getpass.getpass", return_value=self.TOKEN), contextlib.redirect_stdout(said):
             farm.login()
+        self.assertEqual(said.getvalue().strip(), "Farm token saved.")
         token_path = self.root / "config/token"
         self.assertEqual(token_path.read_text().strip(), self.TOKEN)
         if os.name != "nt":

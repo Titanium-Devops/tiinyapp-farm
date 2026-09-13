@@ -228,7 +228,7 @@ after; both columns should go green.
 
 ## Found in the launch pass
 
-Ordered by what a first outside maker hits first. Three are fixed on this branch, the rest
+Ordered by what a first outside maker hits first. Four are fixed on this branch, the rest
 need a decision.
 
 1. **Fixed. The AI path in the release-link help modal numbered its second step 4.**
@@ -274,3 +274,7 @@ need a decision.
    to the default `Python-urllib` user agent, including `/docs/agents/`, the page the submit
    help modal tells makers to hand their assistant. The installer's own paths are already
    exempt. See "Why the python column is red" above for the dashboard action.
+10. **Fixed. The test suite printed "Farm token saved." after it said OK.**
+    `tests/test_farm.py:233`. The login test let the CLI's own line escape to stdout, which
+    reads like the suite wrote to `~/.tiinyapps/token`. It never did, it uses a temporary
+    directory. The test captures that line now and asserts it.
