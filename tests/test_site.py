@@ -92,7 +92,7 @@ class SiteTests(unittest.TestCase):
                     self.assertIn(model, visible)
                 for port in app['requires']['ports']:
                     self.assertIn(str(port), visible)
-                self.assertIn('Not reviewed yet', visible)
+                self.assertIn('Reviewed' if app['verified'] else 'Not reviewed yet', visible)
                 self.assertIn('Grown by', visible)
                 self.assertIn('class="rail"', (self.output / 'apps' / app['id'] / 'index.html').read_text())
 

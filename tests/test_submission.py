@@ -312,7 +312,9 @@ class SubmissionTests(unittest.TestCase):
         site = runpy.run_path(str(ROOT / 'scripts/build-site.py'))
         self.assertIn('pip install tiinyapp-farm', site['steps']())
         self.assertIn('farm device', site['steps']())
-        self.assertIn('/docs/SUBMIT.md', site['page']('Submit an app', site['seeds'](), '/submit/'))
+        footer = site['page']('Submit an app', site['seeds'](), '/submit/')
+        self.assertIn('href="/submit/"', footer)
+        self.assertIn('href="/docs/agents/"', footer)
 
 
 class OwnerGateTests(unittest.TestCase):
