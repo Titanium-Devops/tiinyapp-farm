@@ -90,7 +90,21 @@ farm stop tiiny-bench
 What to watch for: `farm device` must refuse to echo the key, `farm status` must report the
 version the app's health endpoint claims, and the start line must name the port it bound.
 
-### 4. Deploy, with a sweep on each side of it
+### 4. Let the standard library read the site
+
+Cloudflare answers the default `Python-urllib` user agent with `error code: 1010` on every
+page a person or an assistant reads, including `/docs/agents/`. The full measurement is
+under "The stranger sweep" below. In the Cloudflare dashboard for the `tiinyapp.farm` zone,
+widen the configuration rule that already exempts the catalog paths to cover the whole site,
+or turn the browser integrity check off for the zone. Then:
+
+```sh
+python3 scripts/check-live.py
+```
+
+Both columns go green, or the rule did not take.
+
+### 5. Deploy, with a sweep on each side of it
 
 ```sh
 python3 scripts/check-live.py                 # before
@@ -101,7 +115,7 @@ python3 scripts/check-live.py                 # after
 The sweep fetches every public page as an anonymous visitor and fails loudly on anything
 that is not 200, or not 302 for `/account/`. Run it with `--json` to keep a record.
 
-### 5. Post the announcement
+### 6. Post the announcement
 
 `docs/ANNOUNCE.md` holds the TiinyVerse post and a 280-character version. Both are drafts
 for Jason to read before anything goes out.
@@ -129,6 +143,88 @@ Python 3.14.6, against the live site at https://tiinyapp.farm.
 - The catalog holds 4 apps, every one by Jason Brashear or Titanium Computing.
 - Trailing-slash redirects work: `/install`, `/catalog`, `/submit`, `/docs/agents` and
   `/apps/<id>` all 307 to the slashed form, so a pasted link without the slash still lands.
+
+## The stranger sweep
+
+`scripts/check-live.py` fetches every public page and file with no cookie and no session,
+twice: once with a plain `Mozilla/5.0` user agent and once with whatever urllib sends by
+default. Run it before the deploy and again after.
+
+```sh
+python3 scripts/check-live.py
+python3 scripts/check-live.py --json     # keep the record
+python3 scripts/check-live.py --origin https://staging.example
+```
+
+It expects 200 everywhere and 302 on `/account/`, prints a failure list, and exits 1 if
+anything answers differently. App pages, share cards and manifests come from the
+`manifests/` folder in the checkout, so a new app is swept without editing the script.
+
+Run 2026-09-12 21:47 CDT from Jason's MacBook Pro (Mac17,6), macOS 26.6.2, Python 3.14.6,
+on home broadband in Central Texas. 33 paths, 66 fetches, 25 of them wrong, all 25 in the
+python column and all of them Cloudflare error 1010. The browser column is clean.
+
+| path | want | browser status | browser bytes | browser ms | python status | python bytes | python ms |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `/` | 200 | 200 | 12874 | 104 | 403 | 17 | 41 |
+| `/catalog/` | 200 | 200 | 4206 | 77 | 403 | 17 | 43 |
+| `/install/` | 200 | 200 | 4895 | 74 | 403 | 17 | 43 |
+| `/submit/` | 200 | 200 | 19725 | 62 | 403 | 17 | 114 |
+| `/submit/done/` | 200 | 200 | 19735 | 66 | 403 | 17 | 45 |
+| `/docs/agents/` | 200 | 200 | 9915 | 60 | 403 | 17 | 43 |
+| `/llms.txt` | 200 | 200 | 6349 | 61 | 200 | 6349 | 68 |
+| `/robots.txt` | 200 | 200 | 66 | 137 | 403 | 17 | 46 |
+| `/sitemap.xml` | 200 | 200 | 667 | 61 | 403 | 17 | 43 |
+| `/catalog.json` | 200 | 200 | 6801 | 88 | 200 | 6801 | 63 |
+| `/categories.json` | 200 | 200 | 380 | 66 | 200 | 380 | 129 |
+| `/site.webmanifest` | 200 | 200 | 317 | 60 | 403 | 17 | 41 |
+| `/assets/site.css` | 200 | 200 | 26744 | 70 | 403 | 17 | 42 |
+| `/assets/farm.js` | 200 | 200 | 11772 | 64 | 403 | 17 | 45 |
+| `/assets/session.js` | 200 | 200 | 1924 | 64 | 403 | 17 | 125 |
+| `/brand/og-image.png` | 200 | 200 | 459872 | 105 | 403 | 17 | 49 |
+| `/brand/favicon.ico` | 200 | 200 | 16406 | 73 | 403 | 17 | 47 |
+| `/docs/SUBMIT.md` | 200 | 200 | 6619 | 87 | 403 | 17 | 49 |
+| `/docs/manifest.schema.json` | 200 | 200 | 7298 | 136 | 403 | 17 | 44 |
+| `/manifests/` | 200 | 200 | 2925 | 61 | 200 | 2925 | 53 |
+| `/account/` | 302 | 302 | 0 | 65 | 403 | 17 | 55 |
+| `/apps/onelane/` | 200 | 200 | 6980 | 76 | 403 | 17 | 113 |
+| `/apps/onelane/card.png` | 200 | 200 | 342216 | 95 | 403 | 17 | 52 |
+| `/manifests/onelane.json` | 200 | 200 | 1647 | 62 | 200 | 1647 | 57 |
+| `/apps/story-lantern/` | 200 | 200 | 7392 | 78 | 403 | 17 | 114 |
+| `/apps/story-lantern/card.png` | 200 | 200 | 459982 | 112 | 403 | 17 | 46 |
+| `/manifests/story-lantern.json` | 200 | 200 | 2111 | 59 | 200 | 2111 | 68 |
+| `/apps/tiiny-bench/` | 200 | 200 | 7365 | 72 | 403 | 17 | 45 |
+| `/apps/tiiny-bench/card.png` | 200 | 200 | 374750 | 176 | 403 | 17 | 52 |
+| `/manifests/tiiny-bench.json` | 200 | 200 | 2059 | 63 | 200 | 2059 | 64 |
+| `/apps/titanium-tiiny-bot/` | 200 | 200 | 7053 | 74 | 403 | 17 | 43 |
+| `/apps/titanium-tiiny-bot/card.png` | 200 | 200 | 287995 | 149 | 403 | 17 | 44 |
+| `/manifests/titanium-tiiny-bot.json` | 200 | 200 | 1789 | 91 | 200 | 1789 | 66 |
+
+Two things to know before reading the numbers. The byte counts in the browser column are
+367 bytes larger than a `curl` fetch of the same page, because Cloudflare injects its Web
+Analytics beacon into HTML for some clients and not others. And the millisecond column is
+network time from one house in Texas, so it says the site is up, not that it is fast.
+
+### Why the python column is red
+
+Cloudflare answers `Python-urllib/3.x` with `error code: 1010` on most of the site. It is
+the browser integrity check refusing a user agent it does not like. Something already
+exempts the paths the installer needs, which is why `/llms.txt`, `/catalog.json`,
+`/categories.json`, `/manifests/` and every `/manifests/<id>.json` answer 200 in both
+columns, and why `/api/*` reaches the Worker. Everything a person or an assistant would
+read is refused.
+
+The one that matters is `/docs/agents/`. The prompt in the submit help modal tells a maker
+to hand their assistant `Read https://tiinyapp.farm/docs/agents and publish this project`.
+An assistant that fetches it with Python's standard library gets 403 and no explanation.
+The `farm` CLI is fine, it sends `tiinyapp-farm/<version>`, and so are curl, requests and
+node.
+
+Operator action: in the Cloudflare dashboard for the `tiinyapp.farm` zone, find the
+configuration rule that already exempts the catalog paths and widen it to the whole site,
+or turn the browser integrity check off for this zone. The CLI stopped depending on a
+permissive user agent in 0.1.1, so nothing on the farm needs that check. Re-run the sweep
+after; both columns should go green.
 
 ## Found in the launch pass
 
@@ -173,3 +269,8 @@ need a decision.
 8. **No app has a screenshot.** Every app page ends at "No screenshots yet", including the
    flagship. The submit form asks makers for up to eight. Next action: add two to
    `titanium-tiiny-bot` and `tiiny-bench` so the form's ask is something the farm does too.
+9. **Cloudflare refuses the Python standard library on every page a person reads.**
+   `scripts/check-live.py` found it. 25 of 66 anonymous fetches answered `error code: 1010`
+   to the default `Python-urllib` user agent, including `/docs/agents/`, the page the submit
+   help modal tells makers to hand their assistant. The installer's own paths are already
+   exempt. See "Why the python column is red" above for the dashboard action.
