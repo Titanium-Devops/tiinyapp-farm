@@ -18,6 +18,7 @@
   "homepage": "https://github.com/webdevtodayjason/onelane",
   "repo": "https://github.com/webdevtodayjason/onelane",
   "entry": null,
+  "port": null,
   "requires": {
     "ports": [],
     "device": {

@@ -21,6 +21,9 @@
   "entry": {
     "command": "python3 tiiny-bench --serve"
   },
+  "port": {
+    "argv": "--serve"
+  },
   "requires": {
     "python": "3.9",
     "ports": [

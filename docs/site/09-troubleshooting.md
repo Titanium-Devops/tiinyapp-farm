@@ -55,6 +55,12 @@ something to bypass.
 **`Port 7788 is already in use; use farm start <id> --port N.`** Something already holds the port.
 Either stop it, or start on a free one: `farm start <id> --port 7799`.
 
+**`Port 8425 is already in use, and <id> cannot be moved off it.`** The same thing, for an app whose
+manifest says its port is fixed. `--port` cannot help here, so find what holds the port and stop it.
+
+**`<id> runs on port 8425 only and cannot be moved, so start it without --port.`** You passed
+`--port` to an app whose manifest declares a fixed port. Run it without the flag.
+
 **`<id> exited at startup (exit 1).`** followed by up to ten log lines. The app started and died.
 The log lines are the reason; the full log is at `~/tiinyapps/<id>/farm.log`.
 

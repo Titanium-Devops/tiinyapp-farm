@@ -150,6 +150,42 @@
         }
       ]
     },
+    "port": {
+      "description": "How the app takes the port farm start gives it. Omit it and the farm sets TIINYAPP_PORT, which is {\"env\": \"TIINYAPP_PORT\"}. Use {\"argv\": \"--port\"} when the port follows a command line flag, {\"env\": \"PORT\"} when the app reads an environment variable, or null when the port is fixed and farm start --port must refuse.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "argv"
+          ],
+          "properties": {
+            "argv": {
+              "type": "string",
+              "pattern": "^--?[A-Za-z0-9][A-Za-z0-9-]*(?![\\s\\S])",
+              "description": "The flag the port follows, such as --port. The farm replaces the number already after it in entry, or adds one."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "env"
+          ],
+          "properties": {
+            "env": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?![\\s\\S])",
+              "description": "The environment variable the app reads the port from, such as PORT."
+            }
+          }
+        }
+      ]
+    },
     "requires": {
       "type": "object",
       "additionalProperties": false,

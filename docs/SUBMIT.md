@@ -53,6 +53,16 @@ request. The app runs on the person's computer; it is not installed into TiinyOS
    package directly at the archive root. Links, special files, unsafe paths and
    duplicate files are rejected. Downloads are limited to 512 MiB and unpacked
    contents to 2 GiB and 100,000 archive entries.
+   Say how your app takes a port with the optional `port` field beside `entry`. Use
+   `{"argv": "--port"}` when the port follows a flag, and the farm puts the number after
+   that flag, replacing one that is already there. Use `{"env": "PORT"}` when your app
+   reads it from the environment. Use `null` when the port is fixed, and
+   `farm start <id> --port N` refuses in one line instead of starting the app somewhere
+   you did not ask for. Leave the field out and the farm sets `TIINYAPP_PORT`, which is
+   what it has always done, so read that variable if you want `--port` to work without
+   declaring anything. `TIINYAPP_PORT` is set either way. The submit form does not ask
+   for this field yet; set it in a hand-made pull request.
+
 6. Add a quick offline check if your app supports one. Declare `"selfcheck": true`
    alongside `entry`; CI appends `--selfcheck` to that entry's normal arguments.
    For example, `{"python": "lite", "args": []}` becomes
