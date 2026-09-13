@@ -8,12 +8,12 @@
   "verified": true,
   "featured": true,
   "addedAt": "2026-09-12",
-  "updatedAt": "2026-09-12",
+  "updatedAt": "2026-09-13",
   "id": "story-lantern",
   "name": "Story Lantern",
   "pitch": "Write, illustrate and narrate bedtime stories on your Tiiny.",
   "description": "Ask for a story and half a minute later a painted page appears in an open book and a warm voice reads it. Characters come back across nights looking and acting the same, which is the part a five-year-old notices. Every page is checked by a safety layer before it can be shown or spoken, and a parent view logs what was asked, what was written and the verdict on each page. Needs a chat model, an image model and a voice: 89 of the box's 100 NPU units with the voice loaded, and the voice is released after twenty minutes idle. Python standard library only. Nothing leaves your network. Voice input is not implemented yet.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "MIT",
   "homepage": "https://github.com/webdevtodayjason/story-lantern",
   "repo": "https://github.com/webdevtodayjason/story-lantern",
@@ -45,9 +45,9 @@
     "audio"
   ],
   "release": {
-    "url": "https://github.com/webdevtodayjason/story-lantern/archive/refs/tags/v0.1.0.tar.gz",
-    "sha256": "94be154239515236baf8bc8b3f0163ffd6c36cb8e68eae928eee85e1cd3a8541",
-    "size": 3676365
+    "url": "https://github.com/webdevtodayjason/story-lantern/archive/refs/tags/v0.1.1.tar.gz",
+    "sha256": "f0aa7cf556cf39975b388259845ba48716e5f7c0e8fc30ba582b6065da919bfb",
+    "size": 3684019
   },
   "media": {
     "icon": "/assets/art/story-lantern-icon.png",
