@@ -140,6 +140,19 @@ def private_mode(path):
             raise
 
 
+def open_url(url, timeout=30):
+    """Every fetch the CLI makes carries its own User-Agent. Cloudflare's Browser Integrity Check
+    answers 403 to Python's default agent on tiinyapp.farm, which is what made `farm install` fail
+    for a brand-new user on 2026-09-12."""
+    request = Request(url, headers={"User-Agent": "tiinyapp-farm/" + _version(), "Accept": "*/*"})
+    try:
+        return urlopen(request, timeout=timeout)
+    except HTTPError as error:
+        raise FarmError(f"HTTP {error.code} from {urlsplit(url).netloc}{urlsplit(url).path}") from None
+    except URLError as error:
+        raise FarmError(f"Could not reach {urlsplit(url).netloc}: {error.reason}") from None
+
+
 def app_id(value):
     if not isinstance(value, str) or not ID.fullmatch(value) or value == "tiiny":
         raise FarmError("Invalid app id; use lowercase letters, digits and dashes (not tiiny).")
@@ -523,7 +536,7 @@ class Farm:
         if self.local_catalog is not None:
             result = read_json(self.local_catalog / (ident + ".json"))
         else:
-            with urlopen(self.catalog.rstrip("/") + "/" + ident + ".json", timeout=30) as response:
+            with open_url(self.catalog.rstrip("/") + "/" + ident + ".json") as response:
                 data = response.read(1024 * 1024 + 1)
             if len(data) > 1024 * 1024:
                 raise FarmError("Manifest exceeds 1 MiB.")
@@ -549,7 +562,7 @@ class Farm:
     def catalog_ids(self):
         if self.local_catalog is not None:
             return sorted(app_id(p.stem) for p in self.local_catalog.glob("*.json") if p.name != "index.json")
-        with urlopen(self.catalog.rstrip("/") + "/", timeout=30) as response:
+        with open_url(self.catalog.rstrip("/") + "/") as response:
             raw = response.read(2 * 1024 * 1024).decode("utf-8")
         if raw.lstrip().startswith("["):
             entries = json.loads(raw)
@@ -580,7 +593,7 @@ class Farm:
         elif parsed.scheme == "file" and self.local_catalog is not None:
             source = Path(url2pathname(parsed.path)).open("rb")
         elif parsed.scheme in ("http", "https"):
-            source = urlopen(location, timeout=30)
+            source = open_url(location)
         else:
             raise FarmError("Release must use HTTP(S); local archives require a local catalog.")
         digest = hashlib.sha256()
