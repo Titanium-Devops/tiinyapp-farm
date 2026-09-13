@@ -90,19 +90,21 @@ farm stop tiiny-bench
 What to watch for: `farm device` must refuse to echo the key, `farm status` must report the
 version the app's health endpoint claims, and the start line must name the port it bound.
 
-### 4. Let the standard library read the site
+### 4. Let the standard library read the site — DONE, nothing to do
 
-Cloudflare answers the default `Python-urllib` user agent with `error code: 1010` on every
-page a person or an assistant reads, including `/docs/agents/`. The full measurement is
-under "The stranger sweep" below. In the Cloudflare dashboard for the `tiinyapp.farm` zone,
-widen the configuration rule that already exempts the catalog paths to cover the whole site,
-or turn the browser integrity check off for the zone. Then:
+Someone widened the rule between the launch pass and 2026-09-13. Re-measured that day at
+22:10 UTC from Jason's MacBook Pro (Mac17,6), macOS 26.6.2, Python 3.14.6, on home
+broadband in Central Texas: `python3 scripts/check-live.py` answers **All 66 fetches
+answered as expected**, both columns green, including `/docs/agents/` and `/` to the
+default `Python-urllib` user agent. The red table under "The stranger sweep" below is the
+launch-pass measurement and no longer describes the site. Run it again after any zone
+change:
 
 ```sh
 python3 scripts/check-live.py
 ```
 
-Both columns go green, or the rule did not take.
+Both columns stay green, or a zone change broke it again.
 
 ### 5. Deploy, with a sweep on each side of it
 
@@ -159,6 +161,11 @@ python3 scripts/check-live.py --origin https://staging.example
 It expects 200 everywhere and 302 on `/account/`, prints a failure list, and exits 1 if
 anything answers differently. App pages, share cards and manifests come from the
 `manifests/` folder in the checkout, so a new app is swept without editing the script.
+
+**Superseded.** The table below is the launch-pass run of 2026-09-12 21:47 CDT and is kept
+as history. The same script on 2026-09-13 22:10 UTC, same machine, answers "All 66 fetches
+answered as expected" — the python column is green now. Read this table only to see what
+the Cloudflare rule used to do.
 
 Run 2026-09-12 21:47 CDT from Jason's MacBook Pro (Mac17,6), macOS 26.6.2, Python 3.14.6,
 on home broadband in Central Texas. 33 paths, 66 fetches, 25 of them wrong, all 25 in the
@@ -244,14 +251,19 @@ need a decision.
 3. **Fixed. `farm --version` printed 0.1.0 from a checkout.** `farm/farm.py:1016`. The
    fallback for a source run was a literal left at 0.1.0. It now reads `pyproject.toml`, so
    the README's `python3 farm/farm.py` path reports the version it actually is.
-4. **The footer's only contributor-guide link downloads a file.** `scripts/build-site.py:167`
+4. **Fixed since the launch pass.** The footer no longer links `/docs/SUBMIT.md` at all:
+   on 2026-09-13 it carries Submit an app, AI guide and Manifest schema, none of which
+   download. `/docs/SUBMIT.md` is still served as `text/markdown`, so keep it out of
+   footers. Original entry: **the footer's only contributor-guide link downloads a file.** `scripts/build-site.py:167`
    links `/docs/SUBMIT.md`, which Cloudflare serves as `content-type: text/markdown`. Chrome
    and Safari download that instead of showing it, so the first maker who clicks Contributor
    guide gets a file in their Downloads folder. Fixing it properly means either a built HTML
    page at `/docs/submit/` or adding `/docs/*.md` to `run_worker_first` and rewriting the
    content type in the Worker. Next action: build the HTML page in the next site pass, since
    the routing change touches the one list that controls sign-in.
-5. **Nothing in the catalog is reviewed, including Titanium's own apps.** All four manifests
+5. **Fixed since the launch pass.** All four manifests now carry `"verified": true` and the
+   app pages read "Verified". Original entry: **nothing in the catalog is reviewed,
+   including Titanium's own apps.** All four manifests
    carry `"verified": false`, so every app page reads "Not reviewed yet" while
    `docs/SUBMIT.md` tells makers a maintainer sets `verified: true` after review. A newcomer
    reads both and concludes nobody reviews anything. Next action: Jason reviews the four and
@@ -269,7 +281,9 @@ need a decision.
 8. **No app has a screenshot.** Every app page ends at "No screenshots yet", including the
    flagship. The submit form asks makers for up to eight. Next action: add two to
    `titanium-tiiny-bot` and `tiiny-bench` so the form's ask is something the farm does too.
-9. **Cloudflare refuses the Python standard library on every page a person reads.**
+9. **Fixed since the launch pass**, re-measured 2026-09-13: all 66 fetches green, both
+   columns. Original entry: **Cloudflare refuses the Python standard library on every page
+   a person reads.**
    `scripts/check-live.py` found it. 25 of 66 anonymous fetches answered `error code: 1010`
    to the default `Python-urllib` user agent, including `/docs/agents/`, the page the submit
    help modal tells makers to hand their assistant. The installer's own paths are already

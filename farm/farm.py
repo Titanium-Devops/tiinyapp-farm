@@ -250,6 +250,23 @@ class CatalogLinks(HTMLParser):
                 self.ids.add(app_id(name[:-5]))
 
 
+def describe_requirements(requires):
+    """What an app needs, in the words the install prompt shows a person."""
+    parts = []
+    if requires.get("python"):
+        parts.append(f"Python {requires['python']} or newer")
+    ports = list(requires.get("ports") or [])
+    if ports:
+        parts.append(("port " if len(ports) == 1 else "ports ") + ", ".join(map(str, ports)))
+    device = requires.get("device") or {}
+    models = list(device.get("models") or [])
+    if models:
+        parts.append("your Tiiny, for " + ", ".join(models))
+    if device.get("npuUnits"):
+        parts.append(f"{device['npuUnits']} NPU units")
+    return ", ".join(parts) if parts else "nothing beyond Python"
+
+
 class Farm:
     def __init__(self, home=None, catalog=None, api_origin=None):
         self.home = Path(home) if home is not None else Path.home() / "tiinyapps"
@@ -527,9 +544,20 @@ class Farm:
         self.home.mkdir(parents=True, exist_ok=True, mode=0o700)
         locks = self.home / ".locks"
         locks.mkdir(exist_ok=True, mode=0o700)
-        with (locks / (app_id(ident) + ".lock")).open("a+b") as lock:
-            with file_lock(lock):
-                yield
+        path = locks / (app_id(ident) + ".lock")
+        try:
+            with path.open("a+b") as lock:
+                with file_lock(lock):
+                    yield
+        finally:
+            # A mistyped app id should not leave a lock behind for ever, and only when
+            # there was nothing to protect. After the handle closes, because Windows
+            # refuses to unlink a file that is still open.
+            try:
+                if not (self.home / app_id(ident)).exists():
+                    path.unlink()
+            except OSError:
+                pass
 
     def manifest(self, ident):
         ident = app_id(ident)
@@ -672,7 +700,7 @@ class Farm:
                 raise FarmError(f"This app needs Python {py} or newer.")
             print(f"{manifest['name']} {manifest['version']}\n{manifest['pitch']}")
             print("Permissions: " + ", ".join(manifest["permissions"]))
-            print("Needs: " + json.dumps(manifest["requires"], sort_keys=True))
+            print("Needs: " + describe_requirements(manifest["requires"]))
             if not yes and input("Install this release? [y/N] ").strip().lower() not in ("y", "yes"):
                 print("Cancelled.")
                 return
@@ -835,6 +863,21 @@ class Farm:
                 tail = "\n".join(b"".join(reversed(chunks)).decode("utf-8", errors="replace").splitlines()[-10:])
         return FarmError(message + ("\n" + tail if tail else ""))
 
+    def device_configured(self):
+        return (self.config_home / "device.json").exists() or (self.home / "device.json").exists()
+
+    def start_failure(self, app, ident, manifest, message, port=None, exited=False):
+        """Add the two causes of a failed start that leave nothing useful in the log."""
+        declared = list(manifest["requires"]["ports"])
+        if port is not None and declared and declared[0] != port and self.tcp_ready(declared[0]):
+            message += (f"\n{ident} never opened {port}, and something is listening on {declared[0]},"
+                        f" the port its manifest declares. This app does not read TIINYAPP_PORT,"
+                        f" so --port cannot move it. Ask its author to read TIINYAPP_PORT.")
+        if exited and (manifest["requires"].get("device") or {}).get("models") and not self.device_configured():
+            message += (f"\nNo device is configured. If {ident} needs your Tiiny,"
+                        f" run farm device and start it again.")
+        return self.startup_error(app, message)
+
     def start(self, ident, port=None):
         if port is not None and (type(port) is not int or not 1 <= port <= 65535):  # noqa: E721
             raise FarmError("Port must be an integer between 1 and 65535.")
@@ -856,7 +899,8 @@ class Farm:
                 ports = [port, *ports[1:]]
             for candidate in ports:
                 if self.tcp_ready(candidate):
-                    raise self.startup_error(app, f"Port {candidate} is already in use; use farm start {ident} --port N.")
+                    # Nothing launched this time, so quoting farm.log would show a stale run.
+                    raise FarmError(f"Port {candidate} is already in use; use farm start {ident} --port N.")
             env = self.environment(ident, manifest)
             if ports:
                 env["TIINYAPP_PORT"] = str(ports[0])
@@ -884,7 +928,7 @@ class Farm:
                                 identity = running.identity
                         except OSError:
                             if process.poll() is not None:
-                                raise self.startup_error(app, f"{ident} exited at startup (exit {process.returncode}).")
+                                raise self.start_failure(app, ident, manifest, f"{ident} exited at startup (exit {process.returncode}).", exited=True)
                             raise
                     atomic_write(app / "farm.pid", str(process.pid) + "\n")
                     atomic_write(app / "process.json", json.dumps({"started": time.time(),
@@ -893,10 +937,11 @@ class Farm:
                     while True:
                         time.sleep(min(0.1, max(0, deadline - time.monotonic())))
                         if process.poll() is not None:
-                            raise self.startup_error(app, f"{ident} exited at startup (exit {process.returncode}).")
+                            raise self.start_failure(app, ident, manifest, f"{ident} exited at startup (exit {process.returncode}).", exited=True)
                         remaining = deadline - time.monotonic()
                         if remaining <= 0:
-                            raise self.startup_error(app, f"{ident} timed out waiting for readiness after {START_TIMEOUT:g} s.")
+                            raise self.start_failure(app, ident, manifest,
+                                f"{ident} timed out waiting for readiness after {START_TIMEOUT:g} s.", port)
                         ready = True
                         for index, candidate in enumerate(ports):
                             remaining = deadline - time.monotonic()
@@ -912,7 +957,7 @@ class Farm:
                         if ready:
                             # Check again after I/O: the child may have exited during a probe.
                             if process.poll() is not None:
-                                raise self.startup_error(app, f"{ident} exited at startup (exit {process.returncode}).")
+                                raise self.start_failure(app, ident, manifest, f"{ident} exited at startup (exit {process.returncode}).", exited=True)
                             break
                 except BaseException:
                     try:
@@ -970,7 +1015,7 @@ class Farm:
             print(f"Stopped {ident}." if self._stop(ident) else f"{ident} is not running.")
 
     def status(self):
-        print("APP PID PORT UPTIME VERSION")
+        print("APP PID PORT UPTIME STATUS")
         for path in sorted(self.home.glob("*/farm.pid")):
             ident = path.parent.name
             with self.guard(ident):
