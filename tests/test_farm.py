@@ -749,6 +749,78 @@ while True: time.sleep(0.1)
         self.assertNotIn('Started', self.output.getvalue())
         self.assertFalse((self.app / 'farm.pid').exists())
 
+    def test_busy_port_refusal_does_not_quote_an_older_run(self):
+        """A refused port launches nothing, so farm.log still holds the run before it."""
+        self.manifest['requires']['ports'] = [43210]
+        self.save_manifest()
+        self.install()
+        self.app.mkdir(parents=True, exist_ok=True)
+        (self.app / 'farm.log').write_text('Traceback from a run that ended yesterday\n')
+        with patch('farm.farm.socket.create_connection', return_value=contextlib.nullcontext()):
+            with self.assertRaisesRegex(FarmError, 'already in use') as error:
+                self.farm.start('fake-app')
+        self.assertNotIn('yesterday', str(error.exception))
+
+    def test_timeout_names_a_port_override_the_app_ignored(self):
+        """An app that ignores TIINYAPP_PORT binds its own port and looks like a hang."""
+        self.manifest['requires']['ports'] = [43210]
+        self.save_manifest()
+        self.install()
+        ready = {43210: True, 43211: False}
+
+        def connect(address, *_args, **_kwargs):
+            if ready.get(address[1]):
+                return contextlib.nullcontext()
+            raise ConnectionRefusedError()
+
+        with patch('farm.farm.socket.create_connection', side_effect=connect):
+            with patch('farm.farm.START_TIMEOUT', 0.5):
+                with self.assertRaisesRegex(FarmError, 'timed out') as error:
+                    self.farm.start('fake-app', port=43211)
+        message = str(error.exception)
+        self.assertIn('never opened 43211', message)
+        self.assertIn('43210', message)
+        self.assertIn('TIINYAPP_PORT', message)
+
+    def test_failed_start_points_at_farm_device_when_the_app_needs_one(self):
+        """Story Lantern dies on a missing device; the log says nothing about farm device."""
+        self.manifest['requires']['device'] = {'models': ['chat'], 'npuUnits': 1}
+        self.make_release(code='raise SystemExit(1)\n')
+        self.install()
+        with self.assertRaises(FarmError) as error:
+            self.farm.start('fake-app')
+        self.assertIn('run farm device', str(error.exception))
+
+    def test_failed_start_stays_quiet_about_a_device_that_is_configured(self):
+        self.manifest['requires']['device'] = {'models': ['chat'], 'npuUnits': 1}
+        self.make_release(code='raise SystemExit(1)\n')
+        self.install()
+        self.home.mkdir(parents=True, exist_ok=True)
+        (self.home / 'device.json').write_text(json.dumps({'base': 'http://d/v1', 'key': 'k'}))
+        with self.assertRaises(FarmError) as error:
+            self.farm.start('fake-app')
+        self.assertNotIn('run farm device', str(error.exception))
+
+    def test_status_header_names_the_status_column(self):
+        """The row ends with a status word, not a bare version."""
+        self.install()
+        self.farm.start('fake-app')
+        self.farm.status()
+        printed = self.output.getvalue()
+        self.assertIn('APP PID PORT UPTIME STATUS', printed)
+        self.assertIn('running 0.1.0', printed)
+
+    def test_install_prompt_describes_requirements_in_words(self):
+        """The first thing a stranger reads should not be a JSON blob."""
+        self.manifest['requires'] = {'python': '3.9', 'ports': [7788],
+                                     'device': {'models': ['chat', 'tts'], 'npuUnits': 57}}
+        self.save_manifest()
+        self.install()
+        printed = self.output.getvalue()
+        self.assertIn('Needs: Python 3.9 or newer, port 7788, your Tiiny, for chat, tts, 57 NPU units',
+                      printed)
+        self.assertNotIn('npuUnits', printed)
+
     def test_start_timeout_reports_last_ten_log_lines_and_cleans_up(self):
         self.manifest['requires']['ports'] = [43210]
         self.make_release(code='\n'.join(f'print("line-{i}", flush=True)' for i in range(20)) + '\n' + FAKE_APP)
