@@ -6,6 +6,20 @@ What the farm is
 
 tiinyapp.farm is a reviewed catalog of small apps for Tiiny computers. Publishing opens a pull request, runs automated checks, and waits for a human maintainer to review and merge it. It does not put code directly into the catalog.
 
+Where the documentation is
+--------------------------
+
+The complete documentation lives at https://tiinyapp.farm/docs/ and this file is the assistant-facing summary of it. Read the page you need rather than guessing:
+
+    https://tiinyapp.farm/docs/getting-started/   install the CLI, connect a Tiiny, install and run an app
+    https://tiinyapp.farm/docs/cli/               every command, flag, environment variable and exit code
+    https://tiinyapp.farm/docs/publish/           the whole publishing path, the checks, and keeping a listing current
+    https://tiinyapp.farm/docs/manifest/          every manifest field, its rules and its defaults
+    https://tiinyapp.farm/docs/app-authors/       what the installer expects of an archive, entry, ports and health
+    https://tiinyapp.farm/docs/permissions/       what the archive scanner refuses and why
+    https://tiinyapp.farm/docs/api/               every HTTP route, its authentication, limits and error shapes
+    https://tiinyapp.farm/docs/troubleshooting/   the messages the farm prints and what to do about each
+
 Authentication rule
 -------------------
 

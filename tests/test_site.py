@@ -388,6 +388,10 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         urls = {element.text for element in tree.iter('{http://www.sitemaps.org/schemas/sitemap/0.9}loc')}
         expected = {'https://tiinyapp.farm' + path for path in ('/', '/catalog/', '/install/', '/submit/', '/docs/agents/', '/manifests/')}
         expected.update('https://tiinyapp.farm/apps/' + app['id'] + '/' for app in self.apps)
+        documentation = {'https://tiinyapp.farm' + entry['url'] for entry in SITE['doc_entries'](ROOT)}
+        self.assertIn('https://tiinyapp.farm/docs/', documentation)
+        self.assertGreater(len(documentation), 5)
+        expected.update(documentation)
         self.assertEqual(urls, expected)
         self.assertIn('Sitemap: https://tiinyapp.farm/sitemap.xml', (self.output / 'robots.txt').read_text())
         schema = json.loads((ROOT / 'docs/manifest.schema.json').read_text())
@@ -615,8 +619,8 @@ assert.equal(anonymous.children[0].children[0].tag, 'span');
             for port in app['requires']['ports']:
                 self.assertIn('http://localhost:' + str(port), main)
         for path in self.output.rglob('*.html'):
-            if path.relative_to(self.output).as_posix() == 'docs/agents/index.html':
-                continue  # The public API route is /api/seeds and must be named literally for assistants.
+            if path.relative_to(self.output).as_posix() in ('docs/agents/index.html', 'docs/api/index.html'):
+                continue  # The public API route is /api/seeds; both pages name every route literally.
             visible = ' '.join(Document(path.read_text()).text)
             self.assertNotRegex(visible, r'(?i)farmhand|\bsprouting\b|\bseeds?\b|My farm')
 
