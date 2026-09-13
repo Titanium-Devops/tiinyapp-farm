@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Tiiny App Farm Launcher | tiinyapp.farm</title>
+<meta name="description" content="A decision document for a desktop launcher that installs and runs farm apps for people who will never open a terminal.">
+<meta name="color-scheme" content="dark light">
+<style>
+:root{
+  --night:#090D14; --soil:#12171F; --fence:#1E2732; --sunk:#0B1017;
+  --hay:#F2C462; --on-hay:#090D14; --cyan:#00C8F0; --mint:#7FE3DC;
+  --ink:#E8EEF2; --body-ink:#C9D3DC; --mute:#9AA7B4; --bad:#F0A08F;
+  --display:Fraunces,Georgia,"Times New Roman",serif;
+  --body:Nunito,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: light){
+  :root{
+    --night:#FBF7F0; --soil:#FFFFFF; --fence:#E2D9C8; --sunk:#F4EEE3;
+    --hay:#F2C462; --on-hay:#241B05; --cyan:#0A6A80; --mint:#0F6F68;
+    --ink:#171C22; --body-ink:#3A444E; --mute:#5F6A75; --bad:#A33A22;
+  }
+}
+*{box-sizing:border-box;min-width:0}
+html{background:var(--night);-webkit-text-size-adjust:100%}
+html,body{overflow-x:clip}
+body{margin:0;background:var(--night);color:var(--body-ink);font:16px/1.6 var(--body);overflow-wrap:break-word}
+h1,h2,h3{font-family:var(--display);font-weight:700;letter-spacing:-.01em;color:var(--ink);text-wrap:balance;margin:0}
+h1{font-size:clamp(30px,6vw,44px);line-height:1.08}
+h2{font-size:clamp(23px,4.2vw,30px);line-height:1.15;margin:56px 0 6px}
+h3{font-size:19px;line-height:1.25;margin:28px 0 6px}
+p{margin:12px 0}
+a{color:var(--cyan)}
+a:hover{color:var(--mint)}
+strong{color:var(--ink)}
+code{font:0.88em/1.5 var(--mono);background:var(--sunk);border:1px solid var(--fence);border-radius:6px;padding:1px 5px;color:var(--mint)}
+:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+
+.wrap{max-width:880px;margin:0 auto;padding:0 20px}
+header.site{border-bottom:1px solid var(--fence)}
+header.site .wrap{display:flex;align-items:center;gap:12px;height:62px}
+.brand{display:flex;align-items:center;gap:10px;color:var(--ink);text-decoration:none;font:700 17px var(--display)}
+.brand svg{width:30px;height:30px;flex:none}
+.stamp{margin-left:auto;font-size:12.5px;color:var(--mute);white-space:nowrap}
+
+.lede{font-size:clamp(17px,2.6vw,19px);color:var(--ink);max-width:60ch;margin:14px 0 0}
+.meta{color:var(--mute);font-size:14px;margin:14px 0 0}
+.hero{padding-block:44px 8px}
+.tagrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+.tag{border:1px solid var(--fence);border-radius:999px;padding:4px 12px;font-size:12.5px;color:var(--mute);white-space:nowrap}
+.tag.on{color:var(--on-hay);background:var(--hay);border-color:var(--hay);font-weight:700}
+
+.call{background:var(--soil);border:1px solid var(--fence);border-left:3px solid var(--hay);border-radius:12px;padding:18px 20px;margin:24px 0}
+.call .k{font:700 12px var(--body);letter-spacing:.09em;text-transform:uppercase;color:var(--hay);margin:0 0 6px}
+.call p:first-of-type{margin-top:0}
+.call p:last-child{margin-bottom:0}
+.note{border:1px solid var(--fence);background:var(--sunk);border-radius:12px;padding:14px 18px;margin:20px 0;font-size:15px;color:var(--mute)}
+
+.scroll{overflow-x:auto;margin:20px 0;border:1px solid var(--fence);border-radius:12px}
+table{border-collapse:collapse;width:100%;font-size:14.5px;min-width:520px}
+caption{caption-side:top;text-align:left;padding:12px 16px 0;color:var(--mute);font-size:13.5px}
+th,td{text-align:left;padding:11px 16px;border-bottom:1px solid var(--fence);vertical-align:top}
+th{color:var(--ink);font-weight:700;font-size:13px;letter-spacing:.04em;text-transform:uppercase;background:var(--sunk)}
+tr:last-child td{border-bottom:0}
+td b{color:var(--ink)}
+
+ol.flow{counter-reset:s;list-style:none;padding:0;margin:22px 0;display:grid;gap:10px}
+ol.flow li{counter-increment:s;display:grid;grid-template-columns:32px minmax(0,1fr);gap:14px;background:var(--soil);border:1px solid var(--fence);border-radius:12px;padding:14px 16px}
+ol.flow li::before{content:counter(s);width:30px;height:30px;border-radius:50%;background:var(--sunk);border:1px solid var(--fence);display:flex;align-items:center;justify-content:center;font:700 14px var(--body);color:var(--hay)}
+ol.flow b{display:block;color:var(--ink)}
+ol.flow span{display:block;margin-top:2px;font-size:15px}
+
+ul.plain{margin:14px 0;padding-left:20px}
+ul.plain li{margin:7px 0}
+
+.shapes{display:grid;gap:16px;margin:22px 0}
+.card{background:var(--soil);border:1px solid var(--fence);border-radius:12px;padding:18px 20px}
+.card h3{margin-top:0}
+.card .verdict{margin:12px 0 0;font-size:14px;color:var(--mute)}
+.card.pick{border-color:var(--hay)}
+.card.pick .verdict{color:var(--hay);font-weight:700}
+
+ol.decisions{list-style:none;counter-reset:d;padding:0;margin:22px 0;display:grid;gap:14px}
+ol.decisions li{counter-increment:d;background:var(--soil);border:1px solid var(--fence);border-radius:12px;padding:16px 18px}
+ol.decisions h3{margin:0 0 4px;font-size:17px}
+ol.decisions h3::before{content:counter(d) ". ";color:var(--hay)}
+ol.decisions p{margin:6px 0 0;font-size:15px}
+.rec{display:inline-block;margin-top:10px;border:1px solid var(--fence);border-radius:999px;padding:4px 12px;font-size:13px;color:var(--mint);background:var(--sunk)}
+.rec b{color:var(--mint)}
+
+footer.site{border-top:1px solid var(--fence);margin-top:64px}
+footer.site .wrap{padding-top:24px;padding-bottom:48px;color:var(--mute);font-size:14px}
+footer.site p{margin:6px 0}
+
+@media (max-width:520px){
+  .hero{padding-block:30px 4px}
+  h2{margin-top:42px}
+  ol.flow li{grid-template-columns:26px minmax(0,1fr);gap:11px;padding:13px 14px}
+  ol.flow li::before{width:26px;height:26px;font-size:13px}
+  th,td{padding:10px 12px}
+  .stamp{display:none}
+}
+</style>
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="https://tiinyapp.farm">
+      <svg viewBox="0 0 32 32" role="img" aria-label="tiinyapp.farm">
+        <circle cx="16" cy="16" r="15" fill="none" stroke="currentColor" stroke-opacity=".25"/>
+        <path d="M16 25V14" stroke="#7FE3DC" stroke-width="2.2" stroke-linecap="round"/>
+        <path d="M16 15c-.2-4-2.6-6.2-6-6.6-.2 3.9 2.1 6.3 6 6.6Z" fill="#00C8F0"/>
+        <path d="M16 13c.2-4.4 2.8-6.8 6.6-7.2.2 4.2-2.4 6.9-6.6 7.2Z" fill="#F2C462"/>
+      </svg>
+      <span>tiinyapp.farm</span>
+    </a>
+    <span class="stamp">Design document</span>
+  </div>
+</header>
+
+<main>
+<section class="wrap hero">
+  <h1>The Tiiny App Farm Launcher</h1>
+  <p class="lede">A signed desktop app for Mac and Windows that installs and runs farm apps for
+  people who will never open a terminal. It carries its own Python and the farm command-line tool
+  inside itself, so there is nothing to install first.</p>
+  <p class="meta">Design, 2026-09-13. Owner Jason Brashear. Nothing here is built. Every number names
+  where it was measured or read, and estimates say so.</p>
+  <div class="tagrow">
+    <span class="tag on">Recommended: a Tauri shell</span>
+    <span class="tag">No new certificates to buy</span>
+    <span class="tag">Two weeks</span>
+    <span class="tag">Ten decisions</span>
+  </div>
+</section>
+
+<section class="wrap">
+  <h2>What it is</h2>
+  <p>The launcher is a small signed desktop app for macOS and Windows that installs and runs farm apps
+  for a person who will never open a terminal. It carries a standalone Python runtime and
+  <code>farm/farm.py</code> inside itself and uses them as its engine, so there is nothing to install
+  first: no Python, no Node, no Docker, no package manager. You download one file, open it, it finds
+  your Tiiny on the network, you paste your key once, you pick an app from the same catalog the site
+  shows, and half a minute later that app is running on your own computer with a menu bar or tray icon
+  that says so. It is a face on the command-line tool that already exists, not a second way of doing
+  things: same install directory, same device settings file, same lock, same logs. Somebody who starts
+  with the launcher and later learns the CLI finds their apps exactly where the CLI expects them.</p>
+
+  <h2>Who it is for</h2>
+  <p>The person who bought a Tiiny AI Pocket Lab because it looked interesting, runs macOS or Windows,
+  and would not get past step one of the current install page. That page opens with
+  <code>pip install tiinyapp-farm</code> and a note about what to do when pip answers "externally
+  managed environment". The note is correct, and it is also the moment a consumer closes the tab.
+  Linux users are not the target: they already have the CLI and are the least likely to need this.</p>
+  <p>There is a second, smaller audience. A maker who wants somebody non-technical to try their app has
+  to hand over a paragraph of terminal instructions today. With the launcher it is a link.</p>
+
+  <h2>The first run, screen by screen</h2>
+  <ol class="flow">
+    <li><b>Download</b><span>The install page shows one button that already knows the platform, with
+    the other one underneath as a small link.</span></li>
+    <li><b>Open it</b><span>On macOS, drag to Applications from a notarised and stapled disk image, with
+    no Gatekeeper argument. On Windows, an installer that installs for the current user and never asks
+    for an administrator.</span></li>
+    <li><b>Find your Tiiny</b><span>The launcher probes <code>http://openai.api.tiiny/v1</code> first,
+    which is what the TiinyOS client publishes on a Mac, then offers a box for
+    <code>http://&lt;your-tiiny-ip&gt;/v1</code>. Both are the forms the site documents today.</span></li>
+    <li><b>Paste the key once</b><span>Through the same code path as <code>farm device</code>:
+    <code>~/.tiinyapps/device.json</code> at mode 0600, never echoed, never in a command line. Apps then
+    receive the base URL, the key and the derived host from the launcher exactly as the CLI sets
+    them.</span></li>
+    <li><b>Pick an app</b><span>A grid of the live catalog. Icon, name, one line, and the badges the
+    site already computes: Reviewed, New, Library, No release yet. Opening a card shows what the app
+    needs and what access it asks for before anything is downloaded.</span></li>
+    <li><b>Plant it</b><span>One button, and progress for the three steps that are real: download,
+    checksum, unpack. The checksum is the CLI's, and an archive whose checksum differs is never
+    unpacked.</span></li>
+    <li><b>It runs</b><span>The launcher waits for the app to be ready, up to the CLI's ten second
+    ceiling, preferring the manifest health path when there is one. Then an Open button pointing at the
+    app's own address on this machine.</span></li>
+    <li><b>The tray</b><span>A menu bar icon on Mac, a tray icon on Windows, listing what is running
+    with Open, Stop and Update beside each. Closing the window does not stop anything.</span></li>
+  </ol>
+  <p>Nothing in that list asks a person to understand a port, a virtual environment or a checksum, and
+  nothing in it is new behaviour. Steps four through eight are the existing device, install, start,
+  status, stop and update commands with a window in front of them.</p>
+
+  <h2>Three shapes, and which one to build</h2>
+  <div class="shapes">
+    <article class="card pick">
+      <h3>A. A Tauri shell, a bundled Python, farm.py as the engine</h3>
+      <p>A Rust and web-view app, the same stack as the Titanium Bot desktop app, carrying a standalone
+      CPython tree and <code>farm.py</code> as bundled files. The shell draws the catalog and the tray;
+      every action runs the bundled interpreter against the bundled CLI. One behaviour, two faces.</p>
+      <p>The reuse is not theoretical. The existing desktop app is Tauri 2 with the tray icon,
+      notifications, the updater, single instance, autostart, the OS credential store, macOS hardened
+      runtime with an entitlements file, and a Windows installer in current-user mode. Its two workflows
+      already sign, notarise, staple and then verify the result before they will upload it.</p>
+      <p>One sharp edge, worth knowing before the first line of code. The Tauri bundler signs frameworks
+      and sidecar binaries inside out and only those, so a Python tree copied in as a resource reaches
+      the notary unsigned and is refused. The good news is the size of that job: a whole CPython 3.11.13
+      install for macOS arm64 holds four Mach-O files out of 2,762 files in total. Four signing calls in
+      the workflow, before the app is signed, and the tree is legal.</p>
+      <p class="verdict">Recommended.</p>
+    </article>
+    <article class="card">
+      <h3>B. An Electron shell, same engine</h3>
+      <p>The same idea with a browser instead of a web view. The catalog interface could share code with
+      the site, which is the honest argument for it, and more people can write it. It costs four to five
+      times the download and throws away the signing pipeline, because Electron notarises through
+      electron-builder rather than through the two workflows that are already green.</p>
+      <p class="verdict">Held in reserve, and not the first fallback.</p>
+    </article>
+    <article class="card">
+      <h3>C. A native pair: SwiftUI on macOS, WinUI 3 on Windows</h3>
+      <p>The best first-run feel and the smallest Mac download. Also two applications, two languages,
+      two interface codebases and two sets of bugs, with the Windows half being the one that has the
+      least existing work behind it. For a launcher whose whole job is a grid, a progress bar and a tray
+      menu, that is a large bill for a small gain.</p>
+      <p class="verdict">Declined on cost, not on quality.</p>
+    </article>
+  </div>
+
+  <h3>The sizes, measured</h3>
+  <div class="scroll">
+    <table>
+      <caption>Download weight of each candidate, and of the runtimes they would carry.</caption>
+      <thead><tr><th>What</th><th>macOS</th><th>Windows</th><th>Where the number came from</th></tr></thead>
+      <tbody>
+        <tr><td><b>Tauri app bundle, no Python</b></td><td>7.8 MB</td><td>not measured</td><td>the installed Titanium Bot app on this Mac, 2026-09-13</td></tr>
+        <tr><td><b>CPython 3.11.16 standalone, as published</b></td><td>27.1 MB (arm64)</td><td>47.9 MB (x64)</td><td>python-build-standalone release 20260901, asset sizes from the GitHub API, 2026-09-13</td></tr>
+        <tr><td><b>CPython 3.11.13, pruned and recompressed here</b></td><td>16.1 MB</td><td>not measured</td><td>this Mac, 2026-09-13: 62 MB unpacked becomes 44 MB and 1,650 files once tcl, tk, idlelib, tkinter, headers and caches are dropped</td></tr>
+        <tr><td><b>Electron runtime alone</b></td><td>129.8 MB</td><td>158.1 MB</td><td>Electron v44.3.0 release assets, GitHub API, 2026-09-13</td></tr>
+        <tr><td><b>Node 22, if the catalog ever needs it</b></td><td>50.1 MB</td><td>35.7 MB</td><td>nodejs.org downloads for v22.23.2, read 2026-09-13</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note"><b>Projection, not a measurement.</b> A Tauri launcher carrying a pruned Python
+  should land near 25 MB on macOS and near 60 MB on Windows, the Windows figure being larger because
+  the published Windows runtime is 77 percent heavier than the macOS one before pruning. The same app
+  on Electron starts at roughly 130 MB and 160 MB before any of our code. Phase 0 below replaces both
+  projections with real installer sizes inside the first two days.</div>
+
+  <div class="call">
+    <p class="k">Recommendation</p>
+    <p><b>Build shape A: Tauri, a bundled Python, farm.py as the engine.</b></p>
+    <p>Three reasons, in order. The release pipeline exists and is proven green on both platforms, so
+    this is a user interface job and not a distribution project. The download stays in the range where
+    a consumer does not think twice, and the gap against Electron is 100 MB of somebody's hotel wifi.
+    And because the engine is the same file the CLI ships, there is one install format, one device
+    file, one lock and one set of failure messages to support, forever.</p>
+    <p>Keep Electron on the shelf for exactly one contingency. If bundling a runtime inside a notarised
+    app turns out to be worse than four signing calls, the fallback is not Electron. It is to fetch the
+    runtime on first run, which is decision 2 below.</p>
+  </div>
+
+  <h2>Signing, notarisation, and what Jason has to buy</h2>
+  <p><b>Nothing new.</b> Both certificates are already paid for and already wired into GitHub Actions.</p>
+  <p><b>macOS.</b> Distributing outside the App Store needs a Developer ID Application certificate,
+  notarisation and a stapled ticket. The Apple Developer Program is 99 USD a year, from Apple's own
+  enrollment page read on 2026-09-13, and the membership is current: team F2DH8T4BVH, with a Developer
+  ID Application certificate recorded in the signing notes as valid to 2027-02-01. The existing macOS
+  workflow imports the certificate into a throwaway keychain, builds a universal binary, notarises
+  through either the App Store Connect API key or an app-specific password, and staples the disk image
+  itself, which the bundler does not do on its own. It also refuses to upload anything that macOS
+  Gatekeeper and the stapler do not accept. Copy it as it stands and add the runtime signing step.</p>
+  <p><b>Windows.</b> Azure Artifact Signing, formerly Trusted Signing, is 9.99 USD a month on the Basic
+  plan for up to 5,000 signatures, from Microsoft's pricing page read on 2026-09-13. The account is
+  live: the existing Windows workflow signs against the signing account Titanium and the certificate
+  profile titanium-public, authenticating with a GitHub federated credential scoped to the main branch
+  and no client secret anywhere. It then fails the run unless Windows itself reports the signature
+  Valid. No hardware token, no dongle.</p>
+  <div class="note"><b>One honest caveat for the launch email.</b> A correctly signed installer from a
+  publisher with no download history can still show the SmartScreen "More info" panel until reputation
+  accumulates. That is a function of downloads over time, and no certificate purchase removes it.</div>
+  <p><b>Two details in those workflows that were learned the hard way and must survive the copy.</b>
+  The bundle output directory is cleaned before every build, because the build cache otherwise carries
+  an older installer into the artifact and into the signing step. And the build fails on its own if the
+  updater private key does not match the public key in the config, because that mismatch is only a
+  warning from the tool, which means a green build whose every update is silently refused by every
+  installed app.</p>
+
+  <h2>Auto update</h2>
+  <p>The Tauri updater, the same one the desktop app uses: a signed tarball plus a small JSON feed at a
+  fixed URL, the signature verified before anything is applied, and Windows installing in passive mode.
+  The feed and the artifacts sit on the Cloudflare Worker that already serves the site, next to the R2
+  bucket that already holds submitted archives. The macOS workflow already writes that feed from the
+  signature file rather than from anything retyped.</p>
+  <p>Two update tracks, kept apart in the interface because they are different questions. The launcher
+  updates itself quietly on a restart. Apps update through the CLI's update command, which installs only
+  a newer version and keeps the data directory, and the launcher shows a badge when the catalog version
+  differs from the installed one. The status command already computes that comparison, including the
+  case where a running app reports a different version than the one on disk.</p>
+
+  <h2>What an app declares, and what the launcher can honestly provide</h2>
+  <p>The manifest already carries the answer. <code>requires</code> holds an optional minimum Python
+  version, the ports the app listens on, and the device block with model names and NPU units.
+  <code>entry</code> is either a Python module with arguments or a command string.</p>
+  <p>The bundled runtime works for every app in the catalog today without touching a single manifest,
+  because of one line in the CLI's start path: a command whose first word is <code>python</code> or
+  <code>python3</code> is rewritten to the interpreter the CLI is itself running under, which under the
+  launcher is the bundled one. Story Lantern's <code>python3 lantern.py</code> and Tiiny Bench's
+  <code>python3 tiiny-bench --serve</code> therefore run on the launcher's Python unchanged, and
+  Titanium Tiiny Bot's module form was always going to. The floor to bundle is 3.11, because that is
+  what Titanium Tiiny Bot requires; the other three ask for 3.9.</p>
+  <h3>Free from the launcher</h3>
+  <ul class="plain">
+    <li>Its own CPython, 3.11 or newer, which is what the manifest's Python floor is measured against.</li>
+    <li>A writable data directory per app, handed over in the environment the CLI already sets.</li>
+    <li>SQLite, because it is in the Python standard library and a database is a file in that data
+    directory. Nothing to install, no server to run.</li>
+    <li>The device base URL and key, the derived host, and the shared OneLane lock directory, so two
+    apps take turns on one Tiiny instead of colliding.</li>
+    <li>A port check before start, and a working port override when something else already holds one.</li>
+  </ul>
+  <h3>Never from the launcher</h3>
+  <p>Docker. MySQL, Postgres, or any database that is a server. Anything that needs an installer, an
+  administrator prompt, a system service or a kernel extension. A compiler toolchain. If an app needs
+  those, it is not a farm app, and the right place to say so is the submission check rather than a
+  support email six months later.</p>
+  <h3>A second runtime, if and only if a real app needs one</h3>
+  <p>Node is the only plausible candidate. The proposal is a <code>requires.runtime</code> enum that
+  defaults to Python, with the Node build fetched on demand into the launcher's own directory rather
+  than shipped to everybody who never uses it. Do not add the field before the first app that needs it
+  exists.</p>
+  <div class="note"><b>What the launcher does not do, stated plainly in the interface.</b> It does not
+  sandbox anything. Permissions in a manifest are declared by the author and shown to the person before
+  installing. They are not enforced at runtime, which is what the CLI's own documentation says today.
+  The launcher shows them on the card and in the confirmation, and claims nothing more.</div>
+
+  <h2>What changes for makers</h2>
+  <p>Almost nothing, deliberately. Same tar or tar.gz archive, same checksum and exact byte size in the
+  manifest, same download and unpack ceilings, same refusal of symlinks, special files, traversal paths
+  and duplicate entries, same static scan, same offline selfcheck, same cap on a publish upload. There is
+  no launcher-specific package format and there never should be, because the moment there are two, an
+  app works in one place and not the other.</p>
+  <p>Three small things do change, and all three are presentation:</p>
+  <ul class="plain">
+    <li><b>An icon stops being optional in practice.</b> The launcher's grid is icon first. Three of the
+    four manifests today carry one; the submission flow should generate or require it rather than let a
+    card ship blank.</li>
+    <li><b>A health path becomes strongly recommended.</b> Without it the launcher can only say
+    "started". With it the launcher can say "ready", and can tell a person when the running version no
+    longer matches the installed one.</li>
+    <li><b>The requires block grows a runtime field</b> only when a non-Python app appears.</li>
+  </ul>
+  <p>Nothing in the review pipeline changes. A maker who never hears about the launcher keeps publishing
+  the way they publish now, and their app appears in it.</p>
+
+  <h2>What the site shows a consumer who has no CLI</h2>
+  <ul class="plain">
+    <li><b>On the install page:</b> the download button becomes the top of the page, with the platform
+    detected in a few lines of JavaScript and the other platform offered underneath. The three existing
+    steps stay, moved below a heading along the lines of "Prefer the command line?". Nobody loses
+    anything; the default path stops being the developer one.</li>
+    <li><b>On every app page:</b> beside the copyable install command, a button that opens the app in the
+    launcher through a deep link, falling back to the install page when nothing on the machine handles
+    the scheme. The desktop app already registers two schemes this way, so it is configuration rather
+    than new code.</li>
+    <li><b>On the home page:</b> the hero's second button changes from "Install an app" to "Get the
+    launcher".</li>
+  </ul>
+  <p>All of it is static site work in the existing build script. No manifest changes, and no Worker
+  changes except serving the download and the update feed.</p>
+
+  <h2>The build: two weeks, and what each phase proves</h2>
+  <div class="scroll">
+    <table>
+      <caption>The riskiest thing is first, because it is the only part that can change the design.</caption>
+      <thead><tr><th>Phase</th><th>Days</th><th>What it proves</th></tr></thead>
+      <tbody>
+        <tr><td><b>0. The riskiest thing first</b></td><td>1 to 2</td><td>A Mac app containing a CPython tree signs, notarises, staples and passes Gatekeeper, and its bundled interpreter runs the CLI from inside the bundle. A Windows installer installs with no administrator prompt and reports a valid signature. Real installer sizes replace the projections above. If this fails, the fallback is taken on day 2 rather than day 12.</td></tr>
+        <tr><td><b>1. The engine</b></td><td>3 to 4</td><td>The shell drives install, start, stop, status, list, update and remove through the bundled CLI and gets structured results back, with progress during a download. Proves one behaviour rather than two.</td></tr>
+        <tr><td><b>2. First run</b></td><td>5 to 7</td><td>Find the Tiiny, save the key once at 0600, read the live catalog, install with progress, start with the readiness wait, open it. A person who has never seen a terminal reaches a running Story Lantern.</td></tr>
+        <tr><td><b>3. The tray</b></td><td>8 to 9</td><td>What is running, with Open, Stop, Update and Quit. Closing the window leaves apps running. Single instance, and autostart off by default.</td></tr>
+        <tr><td><b>4. Failure, in words</b></td><td>10 to 11</td><td>A port already in use offers another port. A checksum mismatch says so and installs nothing. A crashed app shows the last lines of its log in a pane rather than a dead icon. Proves the launcher is usable on a bad day, which is the only day support hears about.</td></tr>
+        <tr><td><b>5. The site and the feed</b></td><td>12</td><td>Download buttons, the per-app deep link, the artifacts and the update feed served from the farm's own Worker, and a launcher updating itself from one version to the next.</td></tr>
+        <tr><td><b>6. The beta</b></td><td>13 to 14</td><td>Five people who are not developers, on real Tiinys, on both platforms. The number that matters is minutes from download to a running app, and how many of them needed a human.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Everything from phase 2 onward is a known quantity: a grid, a progress bar, a tray menu and a
+  wrapper around a tool that already works.</p>
+
+  <h2>Decisions for Jason</h2>
+  <ol class="decisions">
+    <li>
+      <h3>Shape: Tauri, Electron, or a native pair</h3>
+      <p>Tauri reuses the signed pipeline and ships near 25 MB on Mac. Electron costs roughly 130 MB
+      before our own code, and a new notarisation path. The native pair is two codebases for one grid.</p>
+      <p class="rec">Recommended: <b>Tauri</b></p>
+    </li>
+    <li>
+      <h3>Bundle the Python runtime, or fetch it on first run</h3>
+      <p>Bundling means one download and no network step, and puts four Mach-O files through the signing
+      workflow. Fetching saves 16 to 48 MB in the installer and sidesteps the runtime signing question
+      entirely, because a separately downloaded interpreter is a separate process and not part of our
+      signature, at the cost of a first-run download and a checksum to verify.</p>
+      <p class="rec">Recommended: <b>bundle, with fetch held as the phase 0 fallback</b></p>
+    </li>
+    <li>
+      <h3>How the shell talks to the engine</h3>
+      <p>Add a JSON output mode to the CLI and run it as a child process, or embed the interpreter and
+      import the Farm class in process. The child process with structured output is simpler, keeps the
+      CLI honest, and makes the CLI better for AI agents at the same time. In process is faster and
+      couples the two together.</p>
+      <p class="rec">Recommended: <b>a JSON mode on the CLI, about two days of the phase 1 budget</b></p>
+    </li>
+    <li>
+      <h3>Does the launcher also put the farm command on the PATH?</h3>
+      <p>Automatic means a consumer's shell gains a command they did not ask for. Never means a developer
+      who starts with the launcher installs the same thing twice.</p>
+      <p class="rec">Recommended: <b>a one-click toggle in Settings, off by default</b></p>
+    </li>
+    <li>
+      <h3>Updater keypair</h3>
+      <p>A new keypair for the launcher, or reuse the desktop app's. Separate keys mean a compromise or a
+      loss touches one product. A lost key strands every installed copy of whatever it signed.</p>
+      <p class="rec">Recommended: <b>a new keypair, in Bitwarden before phase 5</b></p>
+    </li>
+    <li>
+      <h3>Where the downloads and the feed live</h3>
+      <p>The farm's existing Cloudflare Worker and R2 bucket, or GitHub Releases. The Worker keeps one
+      domain and one set of analytics and is already deployed. GitHub Releases is free bandwidth and a
+      public download count.</p>
+      <p class="rec">Recommended: <b>the Worker, artifacts in R2</b></p>
+    </li>
+    <li>
+      <h3>Windows architectures</h3>
+      <p>x64 only, or x64 and arm64. Every architecture is another signed artifact and another build leg.
+      Windows on ARM is a small but growing share of new consumer laptops.</p>
+      <p class="rec">Recommended: <b>x64 at launch, arm64 when somebody asks</b></p>
+    </li>
+    <li>
+      <h3>Name, bundle identifier and deep link scheme</h3>
+      <p>Decided once and painful to change, because the identifier is what the operating system uses to
+      recognise an installed app across updates. Suggestion: the product name "Tiiny App Farm", the
+      identifier farm.tiinyapp.launcher, the scheme tiinyfarm.</p>
+      <p class="rec">Recommended: <b>as suggested, unless the name is wrong</b></p>
+    </li>
+    <li>
+      <h3>Linux</h3>
+      <p>Ship an AppImage as well, or say no. The consumer premise is Mac and Windows, and Linux users
+      already have a working pip install.</p>
+      <p class="rec">Recommended: <b>no, and say so on the download page rather than leaving people guessing</b></p>
+    </li>
+    <li>
+      <h3>Does the launcher sign in to a farm account?</h3>
+      <p>Browsing and installing need no account today; only publishing does. Adding sign-in means the
+      account flows, the token store and a support surface, for a person who wants to run an app.</p>
+      <p class="rec">Recommended: <b>no sign-in in version 1; publishing stays in the CLI</b></p>
+    </li>
+  </ol>
+
+  <h2>What this costs</h2>
+  <p>No new subscription. The Apple membership at 99 USD a year and the Azure signing plan at 9.99 USD a
+  month are both paid and both already automated, the Cloudflare Worker and the R2 bucket already exist,
+  and the runtime is free and redistributable. The cost of the launcher is two weeks of building it, and
+  one more release artifact to sign per version after that.</p>
+</section>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <p>tiinyapp.farm, community apps for the Tiiny AI Pocket Lab. Brought to you by Titanium Bot.</p>
+    <p>Design document, 2026-09-13. The same content is in the repository at docs/LAUNCHER.md.</p>
+    <p>This page was measured on this Mac on 2026-09-13: headless Chromium at 1440x900 renders it
+    1440 by 19,762 px with no horizontal scroll and 300 px side gutters, and WebKit at 390x844
+    renders it 390 by 28,365 px with no horizontal scroll and 20 px side gutters, the two tables
+    scrolling inside their own containers. No request leaves the page in either engine.</p>
+  </div>
+</footer>
+
+</body>
+</html>
