@@ -749,6 +749,21 @@ while True: time.sleep(0.1)
         self.assertNotIn('Started', self.output.getvalue())
         self.assertFalse((self.app / 'farm.pid').exists())
 
+    def test_a_mistyped_app_id_leaves_no_lock_behind(self):
+        """farm start nope used to drop a lock file in your home directory for ever."""
+        # start and remove refuse an unknown app; stop reports it is not running.
+        for command in ("start", "stop", "remove"):
+            with contextlib.suppress(FarmError):
+                getattr(self.farm, command)("never-installed")
+        self.assertIn("not running", self.output.getvalue())
+        leftovers = sorted(q.name for q in (self.home / ".locks").glob("*.lock"))
+        self.assertEqual(leftovers, [])
+
+    def test_an_installed_app_keeps_its_lock(self):
+        self.install()
+        self.farm.stop("fake-app")
+        self.assertTrue((self.home / ".locks/fake-app.lock").exists())
+
     def test_busy_port_refusal_does_not_quote_an_older_run(self):
         """A refused port launches nothing, so farm.log still holds the run before it."""
         self.manifest['requires']['ports'] = [43210]

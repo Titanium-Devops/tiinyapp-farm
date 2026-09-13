@@ -544,9 +544,19 @@ class Farm:
         self.home.mkdir(parents=True, exist_ok=True, mode=0o700)
         locks = self.home / ".locks"
         locks.mkdir(exist_ok=True, mode=0o700)
-        with (locks / (app_id(ident) + ".lock")).open("a+b") as lock:
+        path = locks / (app_id(ident) + ".lock")
+        with path.open("a+b") as lock:
             with file_lock(lock):
-                yield
+                try:
+                    yield
+                finally:
+                    # A mistyped app id should not leave a lock behind for ever. Still
+                    # inside the lock, and only when there was nothing to protect.
+                    if not self.app_dir(ident).exists():
+                        try:
+                            path.unlink()
+                        except OSError:
+                            pass
 
     def manifest(self, ident):
         ident = app_id(ident)
