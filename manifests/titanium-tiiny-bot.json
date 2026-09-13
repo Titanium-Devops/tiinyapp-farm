@@ -13,7 +13,7 @@
   "name": "Titanium Tiiny Bot",
   "pitch": "A local assistant with chat, files, memories and voice.",
   "description": "Titanium Computing's assistant runs beside your Tiiny on Mac or Linux: chat, files, memories, skills, routines and voice, all on the device. Runs on the stdlib, no pip installs. Supports --selfcheck.",
-  "version": "0.1.11",
+  "version": "0.1.13",
   "license": "MIT",
   "homepage": "https://titanium.bot",
   "repo": "https://github.com/Titanium-Devops/titanium-bot-lite",
@@ -49,9 +49,9 @@
     "voice"
   ],
   "release": {
-    "url": "https://github.com/Titanium-Devops/titanium-bot-lite/releases/download/v0.1.11/titanium-tiiny-bot-0.1.11.tar.gz",
-    "sha256": "e47dea7878cc9788697b2c286e908f05927d08fe95814e596401ba8d030ac8bc",
-    "size": 440054
+    "url": "https://github.com/Titanium-Devops/titanium-bot-lite/releases/download/v0.1.13/titanium-tiiny-bot-0.1.13.tar.gz",
+    "sha256": "d43e15bae4d06640e5487942bc3489e72f84d4b35a9c26a97a7439ee4d7626d1",
+    "size": 455721
   },
   "health": "/api/health",
   "selfcheck": true,
