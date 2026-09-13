@@ -545,18 +545,19 @@ class Farm:
         locks = self.home / ".locks"
         locks.mkdir(exist_ok=True, mode=0o700)
         path = locks / (app_id(ident) + ".lock")
-        with path.open("a+b") as lock:
-            with file_lock(lock):
-                try:
+        try:
+            with path.open("a+b") as lock:
+                with file_lock(lock):
                     yield
-                finally:
-                    # A mistyped app id should not leave a lock behind for ever. Still
-                    # inside the lock, and only when there was nothing to protect.
-                    if not self.app_dir(ident).exists():
-                        try:
-                            path.unlink()
-                        except OSError:
-                            pass
+        finally:
+            # A mistyped app id should not leave a lock behind for ever, and only when
+            # there was nothing to protect. After the handle closes, because Windows
+            # refuses to unlink a file that is still open.
+            try:
+                if not (self.home / app_id(ident)).exists():
+                    path.unlink()
+            except OSError:
+                pass
 
     def manifest(self, ident):
         ident = app_id(ident)
