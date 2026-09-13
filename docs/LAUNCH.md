@@ -1,0 +1,175 @@
+# Launch day
+
+Run this top to bottom. Everything in "Operator does" needs a person with credentials or a
+Tiiny on the desk. Everything in "Already verified" was measured before launch day and does
+not need repeating unless the code moved.
+
+## Operator does
+
+### 1. Give the deploy workflow its Cloudflare token
+
+Deploy on merge is wired in `.github/workflows/site.yml` and it has never worked. The repo
+has `CLOUDFLARE_ACCOUNT_ID` but not `CLOUDFLARE_API_TOKEN`, so the `site` job fails on every
+push to main with this:
+
+```
+In a non-interactive environment, it's necessary to set a CLOUDFLARE_API_TOKEN environment
+variable for wrangler to work.
+```
+
+Create the token at https://dash.cloudflare.com/profile/api-tokens with the "Edit Cloudflare
+Workers" template, scoped to the account that owns the `tiinyapp-farm` Worker (account id
+`5a845e69fbed4f4e64e2176d86637680`, in `wrangler.toml`). The Worker needs Workers Scripts
+edit, Workers KV edit, and R2 edit, which that template covers.
+
+```sh
+gh secret set CLOUDFLARE_API_TOKEN --repo Titanium-Devops/tiinyapp-farm
+gh secret list --repo Titanium-Devops/tiinyapp-farm
+```
+
+Then prove it on a real push rather than trusting the secret list:
+
+```sh
+gh run list --repo Titanium-Devops/tiinyapp-farm --workflow "Build and deploy the farm" --limit 1
+gh run watch <run-id> --repo Titanium-Devops/tiinyapp-farm
+```
+
+### 2. Set up the PyPI trusted publisher
+
+`tiinyapp-farm` 0.1.0 and 0.1.1 are on PyPI, but the publish workflow did not put them
+there. Both tag pushes failed with `invalid-publisher: valid token, but no corresponding
+publisher`, so the next tag fails the same way until this is done once.
+
+Go to https://pypi.org/manage/project/tiinyapp-farm/settings/publishing/ and add a GitHub
+publisher with exactly these values, which are the claims the failed run printed:
+
+| Field | Value |
+| --- | --- |
+| Owner | `Titanium-Devops` |
+| Repository name | `tiinyapp-farm` |
+| Workflow name | `publish.yml` |
+| Environment name | `pypi` |
+
+The `pypi` environment already exists on the repo, so nothing is needed on the GitHub side.
+Then cut the next version and watch it publish itself:
+
+```sh
+# bump project.version in pyproject.toml first
+git tag v0.1.2 && git push origin v0.1.2
+gh run list --repo Titanium-Devops/tiinyapp-farm --workflow "Publish farm to PyPI" --limit 1
+```
+
+A clean run ends with files at https://pypi.org/project/tiinyapp-farm/ whose upload time
+matches the run.
+
+### 3. Run the installer against a real Tiiny
+
+This is the one leg nothing here can fake, because the machine that ran the pre-launch
+checks has no Tiiny on it. Every device call so far was a fake. On a computer with a Tiiny
+reachable, from a shell with nothing installed:
+
+```sh
+pip install tiinyapp-farm          # pipx install tiinyapp-farm on Homebrew Python or Debian
+farm --version
+farm device                        # base URL and API key, asked once, saved 0600
+farm install titanium-tiiny-bot
+farm start titanium-tiiny-bot
+farm status
+farm stop titanium-tiiny-bot
+```
+
+Then install one app that is not Titanium's own, so the catalog path gets exercised end to
+end by a stranger's manifest shape:
+
+```sh
+farm install tiiny-bench && farm start tiiny-bench
+open http://localhost:8425
+farm stop tiiny-bench
+```
+
+What to watch for: `farm device` must refuse to echo the key, `farm status` must report the
+version the app's health endpoint claims, and the start line must name the port it bound.
+
+### 4. Deploy, with a sweep on each side of it
+
+```sh
+python3 scripts/check-live.py                 # before
+python3 scripts/build-site.py && wrangler deploy
+python3 scripts/check-live.py                 # after
+```
+
+The sweep fetches every public page as an anonymous visitor and fails loudly on anything
+that is not 200, or not 302 for `/account/`. Run it with `--json` to keep a record.
+
+### 5. Post the announcement
+
+`docs/ANNOUNCE.md` holds the TiinyVerse post and a 280-character version. Both are drafts
+for Jason to read before anything goes out.
+
+## Already verified
+
+Measured 2026-09-12 and 2026-09-13 UTC on Jason's MacBook Pro (Mac17,6), macOS 26.6.2,
+Python 3.14.6, against the live site at https://tiinyapp.farm.
+
+- A brand new user's path works on a Mac: `pip install tiinyapp-farm` (0.1.1 from PyPI),
+  `farm install titanium-tiiny-bot -y`, `farm start titanium-tiiny-bot --port 7799`,
+  `farm stop`.
+- `farm start` with the default port taken answers
+  `Port 7788 is already in use; use farm start titanium-tiiny-bot --port N.` and exits 1.
+- All four catalog releases download and match their manifests. Fetched anonymously, each
+  archive's byte count and SHA-256 equal the manifest values: `onelane` 0.1.0 (168709 B),
+  `story-lantern` 0.1.0 (3676365 B), `tiiny-bench` 0.1.0 (2333494 B), `titanium-tiiny-bot`
+  0.1.10 (433818 B).
+- `FARM_CATALOG=https://tiinyapp.farm/manifests/ python3 farm/farm.py list` lists all four
+  apps from the live catalog with no device configured.
+- `python3 -m unittest`: 126 passed, 1 skipped, 24 s. `tests/test_share.py` and
+  `tests/test_site.py` import Pillow, so the suite needs `python3 -m pip install pillow`;
+  the skip is a Windows-only process identity test.
+- `python3 scripts/build-site.py`: builds 4 app pages.
+- The catalog holds 4 apps, every one by Jason Brashear or Titanium Computing.
+- Trailing-slash redirects work: `/install`, `/catalog`, `/submit`, `/docs/agents` and
+  `/apps/<id>` all 307 to the slashed form, so a pasted link without the slash still lands.
+
+## Found in the launch pass
+
+Ordered by what a first outside maker hits first. Three are fixed on this branch, the rest
+need a decision.
+
+1. **Fixed. The AI path in the release-link help modal numbered its second step 4.**
+   `scripts/submit-page.html:64`. The modal a maker opens from Release URL showed steps "1"
+   then "4" on the "I ask an AI assistant" tab. It is now 2.
+2. **Fixed. A CI deploy would have shipped different routing than a hand deploy.**
+   `.github/workflows/site.yml:56`. `cloudflare/wrangler-action@v3` installs wrangler 3.90.0
+   by default, and wrangler 3 does not understand `run_worker_first` in `wrangler.toml`. It
+   warned `Unexpected fields found in assets field: "run_worker_first"` and would have
+   deployed without worker-first routing for `/api/*`, `/account/*`, `/makers/*` and
+   `/media/*`, which is sign-in, publishing and maker pages. The action is now pinned to the
+   wrangler the operator deploys with by hand, 4.131.1.
+3. **Fixed. `farm --version` printed 0.1.0 from a checkout.** `farm/farm.py:1016`. The
+   fallback for a source run was a literal left at 0.1.0. It now reads `pyproject.toml`, so
+   the README's `python3 farm/farm.py` path reports the version it actually is.
+4. **The footer's only contributor-guide link downloads a file.** `scripts/build-site.py:167`
+   links `/docs/SUBMIT.md`, which Cloudflare serves as `content-type: text/markdown`. Chrome
+   and Safari download that instead of showing it, so the first maker who clicks Contributor
+   guide gets a file in their Downloads folder. Fixing it properly means either a built HTML
+   page at `/docs/submit/` or adding `/docs/*.md` to `run_worker_first` and rewriting the
+   content type in the Worker. Next action: build the HTML page in the next site pass, since
+   the routing change touches the one list that controls sign-in.
+5. **Nothing in the catalog is reviewed, including Titanium's own apps.** All four manifests
+   carry `"verified": false`, so every app page reads "Not reviewed yet" while
+   `docs/SUBMIT.md` tells makers a maintainer sets `verified: true` after review. A newcomer
+   reads both and concludes nobody reviews anything. Next action: Jason reviews the four and
+   sets `verified: true` in a follow-up commit, or the copy stops promising it for launch.
+6. **Featured is the whole catalog.** All four manifests carry `"featured": true`, so the
+   home page shows the same four apps under "Featured, picked by the maintainers" and again
+   under "All apps". The first outside app lands below four Titanium apps in a shelf labelled
+   as a maintainer's pick. Next action: pick one or two to feature, or drop the shelf until
+   there are apps to choose between.
+7. **The API calls an app a seed.** `docs/agents.txt` documents `POST /api/seeds` and
+   `PUT /api/seeds/<id>`, which is the word the style lock retired, on the surface an
+   assistant reads. Renaming the route breaks the 0.1.1 CLI already on PyPI and the Worker
+   routes in `worker/seeds.mjs`, so this is a deliberate carry, not an oversight. Next
+   action: leave it until a CLI release can add the new route with the old one aliased.
+8. **No app has a screenshot.** Every app page ends at "No screenshots yet", including the
+   flagship. The submit form asks makers for up to eight. Next action: add two to
+   `titanium-tiiny-bot` and `tiiny-bench` so the form's ask is something the farm does too.
