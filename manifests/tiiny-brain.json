@@ -52,5 +52,9 @@
   "links": {
     "repo": "https://github.com/webdevtodayjason/archiver",
     "homepage": "https://github.com/webdevtodayjason/archiver"
+  },
+  "media": {
+    "icon": "/assets/art/tiiny-brain-icon.png",
+    "header": "/assets/art/tiiny-brain-header.webp"
   }
 }
