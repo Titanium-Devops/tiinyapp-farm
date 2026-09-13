@@ -1018,7 +1018,15 @@ def _version():
         from importlib.metadata import version
         return version("tiinyapp-farm")
     except Exception:  # running from a checkout without an install
-        return "0.1.0"
+        pass
+    try:
+        project = Path(__file__).resolve().parents[1] / "pyproject.toml"
+        found = re.search(r'^version\s*=\s*"([^"]+)"', project.read_text(), re.M)
+        if found:
+            return found.group(1)
+    except OSError:
+        pass
+    return "unknown"
 
 
 def main(argv=None):

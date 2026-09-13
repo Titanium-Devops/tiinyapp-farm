@@ -51,6 +51,9 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: cloudflare/wrangler-action@v3
         with:
+          # Wrangler 3 ignores assets.run_worker_first and would deploy the site
+          # without worker-first routing for /api/*, /account/* and /makers/*.
+          wranglerVersion: '4.131.1'
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
