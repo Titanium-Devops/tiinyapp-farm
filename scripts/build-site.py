@@ -53,6 +53,8 @@ FIELDS = {
     "requires": "Minimum python version if known, local ports, and device requirements: models and npuUnits.",
     "permissions": "Declared access: microphone, files, network and device. An empty list no permissions declared.",
     "tags": "Short labels that help people find the app.",
+    "updates": "Optional. auto, the default, lets the farm open a pull request when the repository publishes a newer release; manual leaves this app's version alone.",
+    "prereleases": "Optional. false by default, so release tracking considers only full GitHub releases.",
     "verified": "Keep false when submitting. A maintainer sets true in a follow-up commit after CI and manual review.",
     "featured": "Optional maintainer-curated placement in the home page Featured section.",
     "addedAt": "The day the app joined the catalog, YYYY-MM-DD. New lasts less than 30 days.",
@@ -343,7 +345,7 @@ def app_page(app, today, makers=()):
                    else f'Fixed on {e(req["ports"][0])}') + '</dd>')
     return f'''<section class="app wrap">{band}<div class="head">{app_icon}<div><h1>{e(app['name'])}</h1><div class="sub">v{e(app['version'])} · {e(app['license'])} · {review} · Grown by {link(maker_url, app['author']['name'])}</div></div></div>
 <p class="pitch">{e(app['pitch'])}</p>
-<a hidden data-seed-update="{e(app['id'])}" href="/submit/?update={e(app['id'])}">Update this app</a>
+<div class="owner-tools"><a hidden data-seed-update="{e(app['id'])}" href="/submit/?update={e(app['id'])}">Update this app</a><span hidden data-seed-release="{e(app['id'])}"><button id="release-check" class="btn ghost" type="button">Check for a new release</button> <span id="release-status" role="status" aria-live="polite"></span> <a id="release-pr" hidden>View the pull request</a></span></div>
 <div class="two"><div>{install}<h2>What it does</h2><p class="desc">{e(app['description'])}</p>{'<p>' + link(homepage, 'Home page') + '</p>' if homepage else ''}{images}{art_panel(app)}{social_strip(app)}</div><aside class="rail">
 <div class="card"><h3>Needs</h3><dl><dt>Python</dt><dd>{python}</dd><dt>Port</dt><dd>{e(', '.join(map(str, req['ports'])) or 'None')}</dd>{movable}<dt>Models</dt><dd>{e(', '.join(req['device']['models']) or 'None')}</dd><dt>NPU</dt><dd>{e(req['device']['npuUnits'])} units</dd><dt>Uses</dt><dd><div class="chips">{permissions}</div></dd></dl></div>
 <div class="card"><h3>Release</h3>{release_details}</div>
@@ -601,7 +603,7 @@ def build(source=ROOT, output=None, today=None):
         pages['/manifests/'] = ('App manifests', listing + '</ul></section>')
         for url, (title, body) in pages.items():
             scripts = ('/assets/catalog.js',) if url in ('/', '/catalog/') else (
-                ('/assets/catalog.js', '/assets/share.js', '/assets/seed-media.js', '/assets/social.js', '/assets/art.js')
+                ('/assets/catalog.js', '/assets/share.js', '/assets/seed-media.js', '/assets/social.js', '/assets/art.js', '/assets/release.js')
                 if url.startswith('/apps/') else ())
             write(url.lstrip('/') + 'index.html', page(title, body, url, scripts))
         write('404.html', page('Page not found', '<section class="sect"><h1>Page not found</h1><p>This page does not exist. ' + link('/', 'Return to the catalog') + '.</p></section>', '/404.html'))
@@ -616,7 +618,7 @@ def build(source=ROOT, output=None, today=None):
         shutil.copytree(source / 'brand', dest / 'brand')
         shutil.copytree(source / 'site/fonts', dest / 'fonts')
         write('robots.txt', f'User-agent: *\nAllow: /\nSitemap: {ORIGIN}/sitemap.xml\n')
-        for folder, files in {'assets': ['hero.jpg', 'site.css', 'catalog.js', 'seeds.js', 'session.js', 'farm.js', 'seed-media.js', 'social.js', 'share.js', 'art.js', 'titanium-icon.png', 'titanium-header.webp'], 'docs': ['manifest.schema.json', 'SUBMIT.md']}.items():
+        for folder, files in {'assets': ['hero.jpg', 'site.css', 'catalog.js', 'seeds.js', 'session.js', 'farm.js', 'seed-media.js', 'social.js', 'share.js', 'art.js', 'release.js', 'titanium-icon.png', 'titanium-header.webp'], 'docs': ['manifest.schema.json', 'SUBMIT.md']}.items():
             for name in files:
                 origin = source / ('site/assets' if folder == 'assets' else folder) / name
                 (dest / folder).mkdir(exist_ok=True)

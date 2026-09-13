@@ -48,8 +48,8 @@ export async function boundedBody(response, limit, timeout = 10000) {
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
   return bytes;
 }
-// Drawing an image runs minutes past the ten seconds every other outside call is given, so the
-// deadline is a parameter rather than a constant.
+// Drawing an image runs minutes past the ten seconds every other outside call is given, and a
+// release archive runs past it too, so the deadline is a parameter rather than a constant.
 export async function remote(fetcher, url, options = {}, limit = 200 * 1024, timeout = 10000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
@@ -67,7 +67,7 @@ async function bodyJSON(request) {
   }
   catch (e) { if (e instanceof HttpError) throw e; fail(400, 'Send a valid JSON object.'); }
 }
-export function createApp({ fetcher = fetch, now = () => Date.now(), seedRoutes = async () => null, proofRoutes = async () => null, artRoutes = async () => null } = {}) {
+export function createApp({ fetcher = fetch, now = () => Date.now(), seedRoutes = async () => null, proofRoutes = async () => null, artRoutes = async () => null, releaseRoutes = async () => null } = {}) {
   return async function handle(request, env) {
     const url = new URL(request.url), path = url.pathname;
     const bearerRoute = (request.method === 'POST' && ['/api/seeds', '/api/media'].includes(path)) ||
@@ -254,7 +254,7 @@ export function createApp({ fetcher = fetch, now = () => Date.now(), seedRoutes 
       }
       const context = { request, env, url, path, get, put, del, now, fetcher, bodyJSON, random,
         currentUser, requireUser: async () => { const user = await currentUser(); if (!user) fail(401, 'Sign in to your account first.'); return user; } };
-      return await socialRoutes(context) || await makerRoutes(context) || await proofRoutes(context) || await artRoutes(context) || await seedRoutes(context) || json({ error: 'This route does not exist.' }, 404);
+      return await socialRoutes(context) || await makerRoutes(context) || await proofRoutes(context) || await artRoutes(context) || await releaseRoutes(context) || await seedRoutes(context) || json({ error: 'This route does not exist.' }, 404);
     } catch (error) {
       return json({ error: error instanceof HttpError ? error.message : 'The request could not be completed. Please try again.' }, error.status || 502);
     }

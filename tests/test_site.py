@@ -218,18 +218,35 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
   ]) {
     const link = { hidden: true, dataset: { seedUpdate: 'seed' } };
     const art = { hidden: true, dataset: { artOwner: 'seed' } };
+    const panel = { hidden: true, dataset: { seedRelease: 'seed' } };
     vm.runInNewContext(source, {
-      document: { querySelectorAll: selector => selector.includes('data-art-owner') ? [link, art] : [], querySelector: () => null },
+      document: { querySelectorAll: selector => selector.includes('data-art-owner') ? [link, art, panel] : [], querySelector: () => null },
       fetch: async path => ({ ok: true, json: async () => path === '/api/me' ? { user } : { seeds } }),
     });
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(link.hidden, !visible);
     assert.equal(art.hidden, !visible, 'the art panel follows the same owner check as the update link');
+    assert.equal(panel.hidden, !visible, 'the release check is an owner tool too');
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
         result = subprocess.run(['node', '-e', script], cwd=ROOT, text=True, capture_output=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_release_check_is_an_owner_tool_on_the_app_page_and_your_apps(self):
+        app = self.apps[0]
+        doc = Document((self.output / 'apps' / app['id'] / 'index.html').read_text())
+        panel = next(attrs for tag, attrs in doc.tags if 'data-seed-release' in attrs)
+        self.assertIn('hidden', panel)
+        self.assertEqual(panel['data-seed-release'], app['id'])
+        self.assertTrue({'release-check', 'release-status', 'release-pr'}.issubset(doc.ids))
+        self.assertIn('Check for a new release', ' '.join(doc.text))
+        module = (self.output / 'assets/release.js').read_text()
+        self.assertIn("'/release-check'", module)
+        account = (self.output / 'assets/farm.js').read_text()
+        self.assertIn("'/release-check'", account)
+        self.assertIn('Check for a new release', account)
+        self.assertIn('Release check: ', account)
 
     def test_required_pages_and_byte_identical_manifests(self):
         for path in ('index.html', 'catalog/index.html', 'install/index.html', 'submit/index.html', 'account/index.html', 'docs/agents/index.html', 'llms.txt', 'catalog.json', 'categories.json', 'manifests/index.html', 'sitemap.xml', 'robots.txt', '404.html'):
@@ -275,6 +292,7 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
                 expected.append({'type': 'module', 'src': '/assets/seed-media.js'})
                 expected.append({'type': 'module', 'src': '/assets/social.js'})
                 expected.append({'type': 'module', 'src': '/assets/art.js'})
+                expected.append({'type': 'module', 'src': '/assets/release.js'})
             elif relative == 'account/index.html':
                 expected.append({'type': 'module', 'src': '/assets/farm.js'})
             expected.append({'type': 'module', 'src': '/assets/session.js'})

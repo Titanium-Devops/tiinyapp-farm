@@ -547,6 +547,30 @@ class Farm:
             print("Pull request: " + result["prUrl"])
         print("Your apps: " + urljoin(self.api_origin + "/", result.get("statusUrl", "/account/")))
 
+    def release(self, ident=None, project=None):
+        """Turn a tag the maker has just published into a catalog bump pull request."""
+        try:
+            from . import release as bump
+        except ImportError:  # farm.py run as a loose script rather than the package
+            import release as bump
+        if ident is None:
+            local = Path(project or Path.cwd()) / "farm.json"
+            if not local.exists():
+                raise FarmError("Name the app (farm release <id>) or run this where farm.json is.")
+            described = read_json(local)
+            ident = described.get("id") if isinstance(described, dict) else None
+        ident = app_id(ident)
+        api = bump.GitHub(bump.gh_token())
+        catalog = bump.Catalog(api)
+        where = catalog.use_fork(bump.gh_login(api))
+        outcome = bump.check(catalog, ident, opened_by="a maker running farm release")
+        print("{}: {}".format(ident, outcome.message))
+        if outcome.pr:
+            print(("Pull request: " if outcome.opened else "Already open: ") + outcome.pr)
+            if where != catalog.repo:
+                print("Opened from your fork at " + where + ".")
+        return outcome
+
     def submission_status(self, ident, token=None):
         ident = app_id(ident)
         result = self.api("/api/seeds/mine", self.token(token))
@@ -638,13 +662,13 @@ class Farm:
         print("Installed:")
         for current in sorted(self.home.glob("*/current")):
             _, manifest = self.installed(current.parent.name)
-            print(f"  {manifest['id']} {manifest['version']} — {manifest['name']}")
+            print(f"  {manifest['id']} {manifest['version']} - {manifest['name']}")
         print("Catalog:")
         for ident in self.catalog_ids():
             manifest = self.manifest(ident)
             draft = (" [No release yet]" if "release" not in manifest else
                      " [release pending]" if manifest["release"]["sha256"] == "pending" else "")
-            print(f"  {ident} {manifest['version']} — {manifest['pitch']}{draft}")
+            print(f"  {ident} {manifest['version']} - {manifest['pitch']}{draft}")
 
     def download(self, release, destination):
         location = release["url"]
@@ -1134,6 +1158,8 @@ def main(argv=None):
     publish = commands.add_parser("publish")
     publish.add_argument("--token", help="API token (otherwise FARM_TOKEN or ~/.tiinyapps/token)")
     publish.add_argument("--update", action="store_true", help="Update an existing app")
+    bump = commands.add_parser("release")
+    bump.add_argument("id", nargs="?", help="App id (otherwise the id in farm.json here)")
     status = commands.add_parser("status")
     status.add_argument("id", nargs="?", help="Show submission checks for this app")
     status.add_argument("--token", help="API token (otherwise FARM_TOKEN or ~/.tiinyapps/token)")
@@ -1147,6 +1173,8 @@ def main(argv=None):
             farm.login(token_stdin=args.token_stdin)
         elif args.command == "publish":
             farm.publish(token=args.token, update=args.update)
+        elif args.command == "release":
+            farm.release(args.id)
         elif args.command == "status" and args.id:
             farm.submission_status(args.id, token=args.token)
         elif args.command == "device":

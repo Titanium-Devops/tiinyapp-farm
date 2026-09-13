@@ -15,6 +15,37 @@ Use Your apps to update an existing app that you own, or submit a pull request u
 
 ---
 
+## Keeping a listed app up to date
+
+Once an app is in the catalog, a new version reaches it from the app's GitHub release. Publish the
+release, then let any of these open the bump pull request:
+
+* The farm checks every listed app once an hour and opens it on its own.
+* Press **Check for a new release** on your app page, or on Your apps, while signed in. It runs the
+  same check for that app straight away, once a minute at most.
+* Run `farm release` in the project folder, or `farm release <id>` anywhere. It uses your own
+  GitHub login through the `gh` CLI, and opens the pull request from your fork if you cannot push
+  to the catalog.
+
+All three do the same thing: they take the newest full release of the repository in your manifest,
+download that archive, measure its SHA-256 and exact size, and change `version`, `release.url`,
+`release.sha256`, `release.size` and `updatedAt`. Numbers written in release notes are ignored. A
+maintainer still reviews and merges, and the usual checks run on the pull request. There is one
+pull request per app: an open one is refreshed rather than another opened beside it.
+
+Two optional manifest fields control this. Set them in a pull request like any other field.
+
+* `"updates": "manual"` stops release tracking for the app. The default, `"auto"`, tracks it.
+* `"prereleases": true` lets a GitHub prerelease count. The default, `false`, ignores them. A draft
+  release is never used.
+
+Your release tag must be three numbers, optionally with a leading `v`: `v0.1.1` or `0.1.1`. The
+archive that gets listed keeps the shape of the one already listed: a source archive stays the
+source archive for the new tag, and a release asset stays an asset, matched by its file name with
+the version swapped.
+
+---
+
 ## Submit by hand with git
 
 Have an app that works beside a Tiiny AI Pocket Lab? Submit one manifest in a pull

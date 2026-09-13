@@ -67,6 +67,31 @@ function appStatus(app) {
   return 'Waiting for review';
 }
 
+const checkedAt = value => value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '';
+function releaseLine(release) {
+  const when = checkedAt(release.checkedAt);
+  return 'Release check: ' + release.message + (when ? ' (' + when + ')' : '');
+}
+// The same check the hourly poller runs, for one app, now.
+function releaseButton(seed) {
+  const check = element('button', 'Check for a new release');
+  check.type = 'button';
+  check.className = 'btn ghost';
+  check.addEventListener('click', async () => {
+    check.disabled = true;
+    status('Asking GitHub about ' + seed.name + '\u2026');
+    try {
+      const result = await api('/api/seeds/' + encodeURIComponent(seed.id) + '/release-check', post({}));
+      status(seed.name + ': ' + result.message);
+      await refreshSeeds();
+    } catch (error) {
+      status(seed.name + ': ' + error.message);
+      check.disabled = false;
+    }
+  });
+  return check;
+}
+
 async function refreshSeeds() {
   const { seeds } = await api('/api/seeds/mine');
   byId('my-seeds').replaceChildren();
@@ -78,11 +103,13 @@ async function refreshSeeds() {
     const state = appStatus(seed), stateNode = element('b', state); stateNode.className = state.startsWith('Checks failed') ? 'bad' : state === 'Checks running' ? 'wait' : '';
     meta.append(stateNode);
     if (['merged', 'published', 'sprouting'].includes(seed.state)) meta.append(element('span', `${seed.thumbs || 0} thumbs · ${seed.comments || 0} comments`));
+    if (seed.release?.message) meta.append(element('span', releaseLine(seed.release)));
     copy.append(name, meta); const actions = document.createElement('div'); actions.className = 'act';
     const addAction = (label, href) => { const anchor = element('a', label); anchor.className = 'btn ghost'; anchor.href = href; actions.append(anchor); };
     if (state.startsWith('Checks failed')) { if (seed.prUrl) addAction('See why', seed.prUrl); addAction('Fix and resubmit', '/submit/?update=' + encodeURIComponent(seed.id)); }
     else {
       if (seed.canUpdate) addAction('Update', '/submit/?update=' + encodeURIComponent(seed.id));
+      if (seed.canUpdate) actions.append(releaseButton(seed));
       if (seed.url && (seed.url.startsWith('/apps/') || seed.url.startsWith('https://'))) addAction('View', seed.url);
       else if (seed.prUrl) addAction('Details', seed.prUrl);
     }

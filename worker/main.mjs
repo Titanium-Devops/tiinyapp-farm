@@ -1,9 +1,10 @@
 import { mediaPattern } from './makers.mjs';
 import { createApp, json } from './index.mjs';
 import { proofRoutes } from './proof.mjs';
+import { releaseRoutes } from './release.mjs';
 import { seedRoutes } from './seeds.mjs';
 import { artRoutes } from './art.mjs';
-const app = createApp({ proofRoutes, seedRoutes, artRoutes });
+const app = createApp({ proofRoutes, releaseRoutes, seedRoutes, artRoutes });
 
 // A single durable coordinator prevents KV's eventual consistency from allowing
 // double code redemption, duplicate profile claims or simultaneous seed writes.
@@ -30,6 +31,8 @@ export class FarmCoordinator {
     // In particular, CI's ten-second owner lookup remains responsive.
     // Drawing app art holds the model for a minute or more, which no other maker should wait
     // behind; the route reserves its own daily slot and refuses a second drawing for the same app.
+    // A release check stays in the queue: it runs in seconds, and the queue is what makes its
+    // once-a-minute limit per app hold, so two presses cannot open two pull requests.
     const { pathname } = new URL(request.url);
     if (request.method === 'GET' && ['/api/owners'].includes(pathname)) return execute();
     if (request.method === 'POST' && /^\/api\/seeds\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*\/art$/.test(pathname)) return execute();

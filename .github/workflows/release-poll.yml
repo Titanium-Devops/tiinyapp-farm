@@ -1,0 +1,58 @@
+name: Poll for new app releases
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      app:
+        description: 'One app id to check (blank checks every listed app)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-poll
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # A pull request opened with the built-in GITHUB_TOKEN does not start the
+    # manifest checks, so every write here goes through the farm's GitHub App.
+    env:
+      FARM_APP_ID: ${{ secrets.FARM_APP_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Report the missing App registration
+        if: env.FARM_APP_ID == ''
+        run: |
+          echo "The farm GitHub App is not registered yet, so nothing was checked." >> "$GITHUB_STEP_SUMMARY"
+          echo "Add FARM_APP_ID and FARM_APP_PRIVATE_KEY; docs/GITHUB-APP.md has the settings." >> "$GITHUB_STEP_SUMMARY"
+          echo "Skipped: FARM_APP_ID and FARM_APP_PRIVATE_KEY are not set. See docs/GITHUB-APP.md."
+      - name: Mint an installation token for the farm's GitHub App
+        id: token
+        if: env.FARM_APP_ID != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.FARM_APP_ID }}
+          private-key: ${{ secrets.FARM_APP_PRIVATE_KEY }}
+      - name: Open a bump pull request for every newer release
+        if: env.FARM_APP_ID != ''
+        env:
+          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+          ONLY_APP: ${{ inputs.app }}
+        run: |
+          if [ -n "$ONLY_APP" ]; then
+            python3 scripts/poll-releases.py --app "$ONLY_APP"
+          else
+            python3 scripts/poll-releases.py
+          fi

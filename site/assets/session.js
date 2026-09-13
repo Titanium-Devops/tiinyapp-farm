@@ -30,8 +30,8 @@ export function refreshSession() {
         label.textContent = firstName;
         anchor.append(avatar, label);
       });
-      // Parts of an app page only its own maker sees: the update link and the art panel.
-      const mine = [...document.querySelectorAll('[data-seed-update], [data-art-owner]')];
+      // Parts of an app page only its own maker sees: the update link, the art panel and the release check.
+      const mine = [...document.querySelectorAll('[data-seed-update], [data-art-owner], [data-seed-release]')];
       if (mine.length) {
         for (const part of mine) part.hidden = true;
         if (user?.tiinyverse) {
@@ -39,7 +39,7 @@ export function refreshSession() {
           if (response.ok) {
             const { seeds } = await response.json();
             for (const part of mine) {
-              const id = part.dataset.seedUpdate || part.dataset.artOwner;
+              const id = part.dataset.seedUpdate || part.dataset.artOwner || part.dataset.seedRelease;
               part.hidden = !seeds.some(seed => seed.id === id && seed.canUpdate);
             }
           }
