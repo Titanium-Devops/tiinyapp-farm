@@ -23,8 +23,9 @@ from unittest.mock import call, patch
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 
-from farm.farm import (DEVICE_PORT, DEVICE_PROBE, Farm, FarmError, MODELS_PROBE, describe_size,
-                       main, python_candidates)
+import farm.farm as farm_module
+from farm.farm import (DEVICE_PORT, DEVICE_PROBE, Farm, FarmError, MODELS_PROBE,
+                       describe_size, main, python_candidates)
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("check_manifest", ROOT / "scripts/check-manifest.py")
@@ -1865,12 +1866,27 @@ while True: time.sleep(0.1)
         stop.assert_called_once_with(None)
 
     def other_python(self, name="other-python3"):
-        """A second interpreter that really runs this one, and leaves proof it was used."""
-        path = self.root / name
-        marker = self.root / (name + ".used")
-        path.write_text(f'#!/bin/sh\ntouch "{marker}"\nexec "{sys.executable}" "$@"\n')
+        """A second interpreter for the farm to find, check and choose. What the farm launches is
+        recorded by watch_the_launch, so this file never has to be something Windows, macOS and
+        Linux can all execute: WinError 193 on windows-latest is what that cost."""
+        path = self.root / (name + (".exe" if os.name == "nt" else ""))
+        path.write_text("")
         path.chmod(0o755)
-        return str(path), marker
+        return str(path)
+
+    @contextlib.contextmanager
+    def watch_the_launch(self):
+        """Record the interpreter the farm launches an app with, and run the app with this one,
+        so the app really starts, is really waited for, and is really stopped afterwards."""
+        launched = []
+        spawn = subprocess.Popen
+
+        def record(command, *args, **kwargs):
+            launched.append(command[0])
+            return spawn([sys.executable, *command[1:]], *args, **kwargs)
+
+        with patch("farm.farm.subprocess.Popen", side_effect=record):
+            yield launched
 
     def answers_from(self, mapping):
         return lambda host, which: mapping[which]
@@ -1880,10 +1896,11 @@ while True: time.sleep(0.1)
         it? They may not have you sitting there to fix it.\""""
         self.configure_device()
         self.install()
-        other, marker = self.other_python()
+        other = self.other_python()
         answers = {sys.executable: (errno.EHOSTUNREACH, "172.17.7.177", (3, 14)),
                    other: (0, "172.17.7.177", (3, 14))}
-        with patch("farm.farm.python_candidates", return_value=[other]), \
+        with self.watch_the_launch() as launched, \
+                patch("farm.farm.python_candidates", return_value=[other]), \
                 patch.object(self.farm, "probe_device", side_effect=self.answers_from(answers)):
             self.farm.start("fake-app")
         printed = self.output.getvalue()
@@ -1891,28 +1908,30 @@ while True: time.sleep(0.1)
                       f" with {other} instead.", printed)
         self.assertIn("Fake app is running.", printed)
         self.assertNotIn("macOS is blocking", printed)
-        self.wait_for(marker.exists)  # the app itself ran under the Python the farm chose
+        self.assertEqual(launched, [other])  # the app was started with the Python the farm chose
         self.assertEqual(json.loads((self.home / "settings.json").read_text())["python"], other)
 
     def test_the_python_the_farm_settled_on_is_used_again_without_asking(self):
         self.configure_device()
         self.install()
-        other, marker = self.other_python()
+        other = self.other_python()
         self.farm.save_setting("python", other)
-        with patch("farm.farm.python_candidates", side_effect=AssertionError("searched again")), \
+        with self.watch_the_launch() as launched, \
+                patch("farm.farm.python_candidates", side_effect=AssertionError("searched again")), \
                 patch.object(self.farm, "probe_device", return_value=(0, "172.17.7.177", (3, 14))) as probe:
             self.farm.start("fake-app")
         self.assertEqual(probe.call_args.args[1], other)
-        self.wait_for(marker.exists)
+        self.assertEqual(launched, [other])
         self.assertNotIn("This Python cannot reach", self.output.getvalue())
 
     def test_an_explicit_python_is_used_saved_and_never_second_guessed(self):
         self.configure_device()
         self.install()
-        other, marker = self.other_python()
-        with patch.object(self.farm, "probe_device", side_effect=AssertionError("probed a choice")):
+        other = self.other_python()
+        with self.watch_the_launch() as launched, \
+                patch.object(self.farm, "probe_device", side_effect=AssertionError("probed a choice")):
             self.farm.start("fake-app", python=other)
-        self.wait_for(marker.exists)
+        self.assertEqual(launched, [other])
         self.assertEqual(json.loads((self.home / "settings.json").read_text())["python"], other)
         self.assertNotIn("This Python cannot reach", self.output.getvalue())
 
@@ -1943,17 +1962,61 @@ while True: time.sleep(0.1)
         self.assertFalse(refused)
 
     def test_the_pythons_looked_for_are_the_known_places_then_path_without_repeats(self):
+        suffix = ".exe" if os.name == "nt" else ""
+        binaries = self.root / "bin"
+        binaries.mkdir()
+        real = binaries / ("python3.12" + suffix)
+        real.write_text("")
+        real.chmod(0o755)
+        beside = binaries / ("python3-config" + suffix)  # not an interpreter on either platform
+        beside.write_text("")
+        beside.chmod(0o755)
+        with patch.dict(os.environ, {"PATH": str(binaries)}), \
+                patch("farm.farm.python_places", return_value=[str(real)]):
+            self.assertEqual(python_candidates(skip=[]), [str(real)])
+            self.assertEqual(python_candidates(skip=[str(real)]), [])
+
+    @unittest.skipIf(os.name == "nt", "A symlink needs a privilege Windows runners do not grant")
+    def test_two_names_for_one_python_are_listed_once(self):
         binaries = self.root / "bin"
         binaries.mkdir()
         real = binaries / "python3.12"
-        real.write_text("#!/bin/sh\nexit 0\n")
+        real.write_text("")
         real.chmod(0o755)
         (binaries / "python3").symlink_to(real)
-        (binaries / "python3-config").write_text("#!/bin/sh\nexit 0\n")
-        (binaries / "python3-config").chmod(0o755)
-        with patch.dict(os.environ, {"PATH": str(binaries)}), patch("farm.farm.PYTHON_PLACES", ()):
+        with patch.dict(os.environ, {"PATH": str(binaries)}), \
+                patch("farm.farm.python_places", return_value=[]):
             self.assertEqual(python_candidates(skip=[]), [str(binaries / "python3")])
-            self.assertEqual(python_candidates(skip=[str(real)]), [])
+
+    def test_the_pythons_looked_for_on_windows_are_the_windows_ones(self):
+        """windows-latest has no /opt/homebrew, and its interpreters are all called python.exe."""
+        root = self.root / "win"
+        for made in ("Windows", "Program Files/Python312", "Local/Programs/Python/Python39",
+                     "Local/Microsoft/WindowsApps"):
+            (root / made).mkdir(parents=True)
+        for made in ("Windows/py.exe", "Program Files/Python312/python.exe",
+                     "Local/Programs/Python/Python39/python.exe",
+                     "Local/Microsoft/WindowsApps/python.exe"):
+            (root / made).write_text("")
+        # Every place it looks has to come from this temporary tree, including the one a real
+        # Windows runner sets and this test does not use, or the runner's own Pythons turn up.
+        with patch("farm.farm.WINDOWS", True), patch.dict(os.environ, {
+                "SystemRoot": str(root / "Windows"), "ProgramFiles": str(root / "Program Files"),
+                "ProgramFiles(x86)": str(root / "nothing here"),
+                "LOCALAPPDATA": str(root / "Local")}):
+            found = farm_module.python_places()
+        self.assertEqual(found, [str(root / "Windows/py.exe"),
+                                 str(root / "Program Files/Python312/python.exe"),
+                                 str(root / "Local/Programs/Python/Python39/python.exe"),
+                                 str(root / "Local/Microsoft/WindowsApps/python.exe")])
+        self.assertFalse(any("homebrew" in path for path in found))
+
+    def test_the_windows_names_take_python_exe_and_leave_pythonw_alone(self):
+        from farm.farm import PYTHON_NAMED
+        for name in ("python.exe", "python3.exe", "python3.12.exe", "PYTHON3.EXE"):
+            self.assertTrue(PYTHON_NAMED[True].fullmatch(name), name)
+        for name in ("pythonw.exe", "python3-config.exe", "python3", "py.exe"):
+            self.assertIsNone(PYTHON_NAMED[True].fullmatch(name), name)
 
     def test_doctor_passes_and_says_so(self):
         self.configure_device()

@@ -46,6 +46,8 @@ MAX_DOWNLOAD = 512 * 1024 * 1024
 # Where a Tiiny answers /device.json on the local network.
 DEVICE_PORT = 39218
 LOCAL_NETWORK_TIMEOUT = 2.0
+# 65 on macOS, 113 on Linux, and Windows sockets answer with the WSA number instead.
+NO_ROUTE = {errno.EHOSTUNREACH, 10065}
 WINDOWS = os.name == "nt"
 MAX_UNPACKED = 2 * 1024 * 1024 * 1024
 MAX_PUBLISH = 50 * 1024 * 1024
@@ -352,7 +354,10 @@ def url_host(address):
 
 # The places a second Python 3 lives on a Mac, before anything on PATH.
 PYTHON_PLACES = ("/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3")
-PYTHON_NAME = re.compile(r"python3(\.[0-9]+)?")
+# Windows keeps its interpreters somewhere else and names them differently, and pythonw.exe is
+# deliberately not one of them: an app the farm starts writes to its log through a console handle.
+PYTHON_NAMED = {False: re.compile(r"python3(\.[0-9]+)?"),
+                True: re.compile(r"python(3(\.[0-9]+)?)?\.exe", re.IGNORECASE)}
 MOST_PYTHONS_TRIED = 6
 
 
@@ -361,6 +366,32 @@ def runnable(path):
         return Path(path).is_file() and os.access(path, os.X_OK)
     except OSError:
         return False
+
+
+def windows_python_places():
+    """The launcher, then the per machine installs, the per user installs, and last the Microsoft
+    Store alias, which is a stub until somebody installs Python behind it."""
+    places = [str(Path(os.environ.get("SystemRoot", "C:\\Windows")) / "py.exe")]
+    local = os.environ.get("LOCALAPPDATA")
+    roots = [os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")]
+    if local:
+        roots.append(str(Path(local) / "Programs"))
+    for root in roots:
+        if not root:
+            continue
+        for pattern in ("Python*/python.exe", "Python*/Python*/python.exe"):
+            # Per machine installs sit at Python312, per user ones at Programs/Python/Python312.
+            try:
+                places.extend(sorted(str(path) for path in Path(root).glob(pattern)))
+            except OSError:
+                continue
+    if local:
+        places.append(str(Path(local) / "Microsoft" / "WindowsApps" / "python.exe"))
+    return places
+
+
+def python_places():
+    return windows_python_places() if WINDOWS else list(PYTHON_PLACES)
 
 
 def python_candidates(skip=()):
@@ -373,13 +404,14 @@ def python_candidates(skip=()):
             seen.add(Path(path).resolve())
         except OSError:
             pass
-    places = list(PYTHON_PLACES)
+    named = PYTHON_NAMED[WINDOWS]
+    places = python_places()
     for directory in os.environ.get("PATH", "").split(os.pathsep):
         if not directory:
             continue
         try:
             places.extend(sorted(str(entry) for entry in Path(directory).iterdir()
-                                 if PYTHON_NAME.fullmatch(entry.name)))
+                                 if named.fullmatch(entry.name)))
         except OSError:
             continue
     for path in places:
@@ -1326,7 +1358,7 @@ class Farm:
         if not host or not interpreter:
             return interpreter, None, False
         code, address, _ = self.probe_device(host, interpreter)
-        if code != errno.EHOSTUNREACH or not private_address(address):
+        if code not in NO_ROUTE or not private_address(address):
             return interpreter, None, False
         for candidate in python_candidates(skip=[interpreter])[:MOST_PYTHONS_TRIED]:
             found, _, version = self.probe_device(host, candidate)
@@ -1801,7 +1833,7 @@ class Farm:
         where = address or host
         if code == 0:
             print(f"Your Tiiny at {where} answered this Python in {took} ms.")
-        elif code == errno.EHOSTUNREACH and private_address(address):
+        elif code in NO_ROUTE and private_address(address):
             print(f"This Python cannot reach your Tiiny at {where},"
                   " because macOS is blocking it from your local network.")
             return False, [], True
