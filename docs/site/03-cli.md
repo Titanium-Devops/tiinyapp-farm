@@ -59,13 +59,53 @@ download over 512 MiB is refused, and unpacked contents are capped at 2 GiB and 
 ## farm update
 
 ```
+farm update
 farm update <id>
 farm update <id> --yes
+farm update --all
 ```
 
-The same work as `farm install`, with three differences: the new version must be strictly newer
-than the installed one or nothing happens, the running app is stopped only after the new archive is
-verified and unpacked, and the `data` directory is kept. It does not start the app again.
+| Flag | Meaning |
+| --- | --- |
+| `--yes`, `-y` | Take the update without asking. With no id, take every one of them |
+| `--all` | Take every app with a newer version without asking |
+
+With no id it asks the catalog about every app you have installed and numbers the ones with a newer
+version, each with the release's one-line note when the catalog carries one and the day the entry
+changed when it does not. Then it asks once:
+
+```
+Looking up all 2 apps you have installed in the catalog.
+1. AINode Pocket 0.0.9, 0.1.0 is out, dated 2026-09-14.
+2. Tiiny Brain 0.1.0, 0.1.1 is out, dated 2026-09-14.
+Update which? A number, "all", or Enter to leave them.
+```
+
+A number takes that one, `all` takes each in order, and Enter leaves them. With nothing newer it
+says so in one line and asks nothing. Run from a script, where nothing is a terminal, it prints the
+list and updates nothing; `--all` or `--yes` takes every one of them without asking. An app whose
+catalog entry cannot be read is named rather than silently skipped.
+
+With an id it asks about that app alone and the answer defaults to yes:
+
+```
+AINode Pocket 0.1.0 is installed and 0.1.1 is out. Update it? [Y/n]
+```
+
+Then it does the same work as `farm install` and says the same things, with four differences: the
+new version must be strictly newer than the installed one or nothing happens, the running app is
+stopped only after the new archive is verified and unpacked, the `data` directory is kept and said
+to be kept, and a running app is started again on the port it was really on. An app that is already
+the newest the catalog has says so in one line.
+
+## farm check
+
+```
+farm check
+farm check --all
+```
+
+The same command as `farm update` with no id, under the word most people reach for.
 
 ## farm start
 
@@ -90,8 +130,9 @@ Stop it with: farm stop ainode-pocket
 Log: /Users/you/tiinyapps/ainode-pocket/farm.log
 ```
 
-The link is `http://localhost:<port>` on the port the app really took, and the path is the root
-unless the manifest's `open` field names a first page. A `health` path is a probe, not a page, and
+A newer version in the catalog adds one line under the link, `Version 0.1.1 is out. Run: farm update
+<id>`. The link is `http://localhost:<port>` on the port the app really took, and the path is the
+root unless the manifest's `open` field names a first page. A `health` path is a probe, not a page, and
 is never used as the link. The process ID is not in that block; `farm status` has it.
 
 Runs the entry from the version directory with no shell involved. A Python entry becomes
@@ -125,9 +166,10 @@ farm list
 ```
 
 Prints installed apps with their id, version, name, whether each one is `[running]` or `[stopped]`,
-and its one-line summary, then every app in the catalog with its version, name and summary. Catalog
-entries with no release are marked `[No release yet]` and entries whose checksum is still pending
-are marked `[release pending]`.
+and its one-line summary, then every app in the catalog with its version, name and summary. An
+installed app the catalog has a newer version of carries it in the same brackets, as
+`[stopped, update available: 0.1.0]`. Catalog entries with no release are marked `[No release yet]`
+and entries whose checksum is still pending are marked `[release pending]`.
 
 ## farm status
 
@@ -140,7 +182,8 @@ With no argument this is a local command: it prints a header line of
 `APP PID PORT LINK UPTIME STATUS` and one row per running app. The link is the one `farm start`
 offered, on the port the app really took. The version shown is the one the app reports through its
 health path when it has one, and a mismatch with the installed version is reported as
-`restart to update`. Health that cannot be read is labelled rather than guessed.
+`restart to update`. A row whose app has a newer version in the catalog ends with
+`update available: 0.1.0`. Health that cannot be read is labelled rather than guessed.
 
 With an app id it is a remote command instead: it asks the farm about your own submission of that
 app and prints its state, each check with its status, and each review. It needs an API token.

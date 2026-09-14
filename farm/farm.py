@@ -36,6 +36,8 @@ API_ORIGIN = "https://tiinyapp.farm"
 ID = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*\Z")
 VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 START_TIMEOUT = 10.0
+# A line about a newer version is worth a moment, never a stall on an unreachable catalog.
+ADVISORY_TIMEOUT = 5.0
 # How an app takes its port when its manifest does not say.
 PORT_DEFAULT = {"env": "TIINYAPP_PORT"}
 PORT_FLAG = re.compile(r"--?[A-Za-z0-9][A-Za-z0-9-]*\Z")
@@ -392,6 +394,45 @@ def describe_requirements(requires):
     return ", ".join(parts) if parts else "nothing beyond Python"
 
 
+def newer(installed, available):
+    """Whether the catalog's version is strictly ahead of the one on disk."""
+    return tuple(map(int, available.split("."))) > tuple(map(int, installed.split(".")))
+
+
+def release_note(manifest):
+    """The one line a release may carry about what changed, when the catalog carries one."""
+    note = (manifest.get("release") or {}).get("notes")
+    lines = note.strip().splitlines() if isinstance(note, str) else []
+    return lines[0].strip()[:200] if lines else ""
+
+
+def update_available(installed, latest):
+    """The catalog version when it is a newer release a person could take, otherwise nothing."""
+    if not isinstance(latest, dict) or "release" not in latest or latest["release"]["sha256"] == "pending":
+        return ""
+    return latest["version"] if newer(installed["version"], latest["version"]) else ""
+
+
+def describe_update(latest, installed):
+    """One row of the update list: what is installed, what is out, and why it changed."""
+    line = f"{latest['name']} {installed['version']}, {latest['version']} is out"
+    note = release_note(latest)
+    if note:
+        return line + ". " + (note if note.endswith((".", "!", "?")) else note + ".")
+    day = latest.get("updatedAt")
+    if isinstance(day, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        return line + f", dated {day}."
+    return line + "."
+
+
+def interactive():
+    """Whether a person is there to answer a question, or this is a script."""
+    try:
+        return sys.stdin.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
 class Farm:
     def __init__(self, home=None, catalog=None, api_origin=None):
         self.home = Path(home) if home is not None else Path.home() / "tiinyapps"
@@ -708,12 +749,12 @@ class Farm:
             except OSError:
                 pass
 
-    def manifest(self, ident):
+    def manifest(self, ident, timeout=30):
         ident = app_id(ident)
         if self.local_catalog is not None:
             result = read_json(self.local_catalog / (ident + ".json"))
         else:
-            with open_url(self.catalog.rstrip("/") + "/" + ident + ".json") as response:
+            with open_url(self.catalog.rstrip("/") + "/" + ident + ".json", timeout=timeout) as response:
                 data = response.read(1024 * 1024 + 1)
             if len(data) > 1024 * 1024:
                 raise FarmError("This app's catalog entry is larger than 1 MiB.")
@@ -752,15 +793,23 @@ class Farm:
 
     def list(self):
         print("Installed:")
+        known = {}
         for current in sorted(self.home.glob("*/current")):
             ident = current.parent.name
             with self.guard(ident):
                 _, manifest = self.installed(ident)
                 state = "running" if self.active(ident) else "stopped"
+            try:
+                known[ident] = self.manifest(ident, timeout=ADVISORY_TIMEOUT)
+            except (FarmError, OSError, ValueError, HTTPException):
+                known[ident] = None
+            available = update_available(manifest, known[ident])
+            if available:
+                state += f", update available: {available}"
             print(f"  {manifest['id']} {manifest['version']} {manifest['name']} [{state}] - {manifest['pitch']}")
         print("Catalog:")
         for ident in self.catalog_ids():
-            manifest = self.manifest(ident)
+            manifest = known.get(ident) or self.manifest(ident)
             draft = (" [No release yet]" if "release" not in manifest else
                      " [release pending]" if manifest["release"]["sha256"] == "pending" else "")
             print(f"  {ident} {manifest['version']} {manifest['name']} - {manifest['pitch']}{draft}")
@@ -831,7 +880,7 @@ class Farm:
             return children[0]
         return destination
 
-    def install(self, ident, yes=False, update=False):
+    def install(self, ident, yes=False, update=False, restart=False):
         with self.guard(ident):
             print(f"Looking up {app_id(ident)} in the catalog.")
             manifest = self.manifest(ident)
@@ -882,11 +931,13 @@ class Farm:
                 (app / "data").mkdir(exist_ok=True, mode=0o700)
                 if (app / "data").is_symlink():
                     raise FarmError("Data directory must not be a symlink.")
+                if update:
+                    print(f"Your data in {app / 'data'} is kept.")
                 os.replace(root, destination)
                 atomic_write(app / "launcher.json", json.dumps({"id": ident, "entry": manifest["entry"]}) + "\n")
                 atomic_write(app / "current", manifest["version"] + "\n")
             if manifest["entry"] is not None:
-                print(f"Ready. Run: farm start {ident}")
+                print("Ready." if restart else f"Ready. Run: farm start {ident}")
                 return
             module = destination / (ident.replace("-", "_") + ".py")
             module = module if module.is_file() else destination / (ident + ".py")
@@ -894,6 +945,108 @@ class Farm:
             print(f"Copy {module.name} out of {destination} into your own app, or import it from there."
                   if module.is_file() else
                   f"Its files are in {destination}; import what you need from there.")
+
+    def running_port(self, ident):
+        """Whether an app is running now, and the port it really took, so an update can put it back."""
+        if not self.active(ident):
+            return False, None
+        try:
+            ports = read_json(self.app_dir(ident) / "process.json").get("ports") or []
+        except (OSError, ValueError):
+            ports = []
+        return True, (ports[0] if ports else None)
+
+    def newer_version(self, ident, installed):
+        """The catalog's newer version for one installed app, and silence when the catalog cannot be read."""
+        try:
+            return update_available(installed, self.manifest(ident, timeout=ADVISORY_TIMEOUT))
+        except (FarmError, OSError, ValueError, HTTPException):
+            return ""
+
+    def updates(self):
+        """Every installed app the catalog has a newer version of, and what could not be checked."""
+        found, unreachable = [], []
+        for current in sorted(self.home.glob("*/current")):
+            ident = current.parent.name
+            try:
+                with self.guard(ident):
+                    _, installed = self.installed(ident)
+            except (FarmError, OSError, ValueError):
+                continue
+            try:
+                latest = self.manifest(ident)
+            except (FarmError, OSError, ValueError, HTTPException):
+                unreachable.append(ident)
+                continue
+            if update_available(installed, latest):
+                found.append((ident, installed, latest))
+        return found, unreachable
+
+    def update(self, ident=None, yes=False, everything=False):
+        """One app, after asking, or with no id the whole list and one question."""
+        if ident is None:
+            return self.check(yes=yes, everything=everything)
+        ident = app_id(ident)
+        with self.guard(ident):
+            _, installed = self.installed(ident)
+            running, port = self.running_port(ident)
+        latest = self.manifest(ident)
+        available = update_available(installed, latest)
+        if not available:
+            print(f"{latest['name']} {latest['version']} is in the catalog with no release to install yet."
+                  if newer(installed["version"], latest["version"]) else
+                  f"{installed['name']} {installed['version']} is installed, and that is the newest the catalog has.")
+            return
+        if not yes:
+            asked = input(f"{installed['name']} {installed['version']} is installed and {available} is out."
+                          " Update it? [Y/n] ").strip().lower()
+            if asked and asked not in ("y", "yes"):
+                print("Left as it is.")
+                return
+        if running:
+            print(f"{installed['name']} is running on port {port}, so the farm stops it"
+                  f" and starts it again on {port}." if port is not None else
+                  f"{installed['name']} is running, so the farm stops it and starts it again.")
+        self.install(ident, yes=True, update=True, restart=running)
+        if running:
+            movable = port is not None and port_mechanism(latest) is not None
+            self.start(ident, port=port if movable else None)
+
+    def check(self, yes=False, everything=False):
+        """What the catalog has that you do not, and the one question that takes any of it."""
+        idents = sorted(path.parent.name for path in self.home.glob("*/current"))
+        if not idents:
+            print("Nothing is installed yet. Run: farm list to see what the catalog has.")
+            return
+        counted = "the app" if len(idents) == 1 else f"all {len(idents)} apps"
+        print(f"Looking up {counted} you have installed in the catalog.")
+        found, unreachable = self.updates()
+        for number, (_, installed, latest) in enumerate(found, 1):
+            print(f"{number}. {describe_update(latest, installed)}")
+        if unreachable:
+            print("The catalog had nothing to say about " + join_words(unreachable) + ".")
+        if not found:
+            print("Everything you have installed is the newest the catalog has.")
+            return
+        if everything or yes:
+            answer = "all"
+        elif not interactive():
+            print("Nothing was updated. Run: farm update <id> to take one,"
+                  " or farm update --all to take them all.")
+            return
+        else:
+            answer = input('Update which? A number, "all", or Enter to leave them. ').strip().lower()
+        if not answer:
+            print("Left as they are.")
+            return
+        if answer == "all":
+            for ident, _, _ in found:
+                self.update(ident, yes=True)
+            return
+        if answer.isascii() and answer.isdigit() and 1 <= int(answer) <= len(found):
+            self.update(found[int(answer) - 1][0], yes=True)
+            return
+        print(f"There is no {answer} in that list, so nothing was updated.")
 
     def device(self, base=None, key_stdin=False):
         scripted = base is not None or key_stdin or any(
@@ -1244,6 +1397,9 @@ class Farm:
                 print(f"Port {moved[0]} was busy, so it started on {moved[1]}.")
             if ports:
                 print("Open " + app_link(ports[0], manifest))
+            available = self.newer_version(ident, manifest)
+            if available:
+                print(f"Version {available} is out. Run: farm update {ident}")
             print(manifest["pitch"])
             print(f"Stop it with: farm stop {ident}")
             print(f"Log: {app / 'farm.log'}")
@@ -1314,6 +1470,9 @@ class Farm:
                     detail = f"running {version}"
                     if version != manifest["version"]:
                         detail += f", installed {manifest['version']}: restart to update"
+                    available = self.newer_version(ident, manifest)
+                    if available:
+                        detail += f", update available: {available}"
                     link = app_link(info["ports"][0], manifest) if info["ports"] else "-"
                     print(f"{ident} {pid} {ports} {link} {max(0, int(time.time() - info['started']))}s {detail}{note}")
 
@@ -1357,9 +1516,14 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("install", "update", "start", "stop", "remove"):
         command = commands.add_parser(name)
-        command.add_argument("id")
-        if name in ("install", "update"):
+        command.add_argument("id", nargs="?" if name == "update" else None,
+                             help="App id; with no id, farm update lists everything newer" if name == "update" else None)
+        if name == "install":
             command.add_argument("--yes", "-y", action="store_true", help="Accept the install prompt")
+        if name == "update":
+            command.add_argument("--yes", "-y", action="store_true", help="Update without asking")
+            command.add_argument("--all", dest="every", action="store_true",
+                                 help="Update everything with a newer version without asking")
         if name == "start":
             command.add_argument("--port", type=int, help="Override the app's primary listening port")
         if name == "remove":
@@ -1378,11 +1542,19 @@ def main(argv=None):
     status.add_argument("id", nargs="?", help="Show submission checks for this app")
     status.add_argument("--token", help="API token (otherwise FARM_TOKEN or ~/.tiinyapps/token)")
     commands.add_parser("list")
+    check = commands.add_parser("check")
+    check.add_argument("--yes", "-y", action="store_true", help="Update everything newer without asking")
+    check.add_argument("--all", dest="every", action="store_true",
+                       help="Update everything with a newer version without asking")
     args = parser.parse_args(argv)
     farm = Farm()
     try:
-        if args.command in ("install", "update"):
-            farm.install(args.id, yes=args.yes, update=args.command == "update")
+        if args.command == "install":
+            farm.install(args.id, yes=args.yes)
+        elif args.command == "update":
+            farm.update(args.id, yes=args.yes, everything=args.every)
+        elif args.command == "check":
+            farm.update(None, yes=args.yes, everything=args.every)
         elif args.command == "login":
             farm.login(token_stdin=args.token_stdin)
         elif args.command == "publish":
