@@ -60,5 +60,6 @@
   "media": {
     "icon": "/assets/art/ainode-pocket-icon.png",
     "header": "/assets/art/ainode-pocket-header.webp"
-  }
+  },
+  "updates": "manual"
 }
