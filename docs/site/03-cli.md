@@ -118,6 +118,7 @@ farm start <id> --port 7799
 | Flag | Meaning |
 | --- | --- |
 | `--port N` | Replace the app's first declared port. Must be 1 to 65535. Refused by an app whose manifest says its port is fixed |
+| `--python PATH` | Run this app with this Python, and keep it for later starts on this machine |
 
 With no id it numbers the installed apps that are not running and could be, then asks the same
 question `farm update` asks:
@@ -164,6 +165,31 @@ The chosen port is exported as `TIINYAPP_PORT`, and the manifest's `port` field 
 takes it: a flag on its command line, a different environment variable, or nothing at all when its
 port is fixed. An app with a fixed port refuses `--port` in one line naming the port it runs on,
 and a busy port on such an app is not answered with advice that cannot work.
+
+Before it launches anything, when a Tiiny is on file, it asks the device for its page from the Python
+the app would run under. If macOS is refusing that Python the local network, the farm tries the other
+Pythons on this machine, runs the app with the first one that reaches your Tiiny, says so in one
+line, and saves that choice for later starts. `--python PATH` makes the choice yourself and is never
+second guessed. None of this ever fails a start.
+
+## farm doctor
+
+```
+farm doctor
+```
+
+Checks the things a person would otherwise have to ask somebody else about, each as a sentence, with
+a line beginning `Fix:` under anything that fails:
+
+- the farm version and which Python it runs apps with
+- the Tiiny on file, whether that Python reaches it and how long it took
+- whether the key on file is accepted, asked by the Python that can reach the device, never printed
+- which other Pythons on this machine reach the Tiiny
+- every installed app, the port it declares, and whether it is free or who is holding it
+- the models your Tiiny lists
+
+It exits 0 when everything passes and 1 when anything does not, and prints plain text you can paste
+to somebody who can help.
 
 ## farm stop
 

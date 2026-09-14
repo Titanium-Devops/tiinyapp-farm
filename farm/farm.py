@@ -159,6 +159,7 @@ def open_url(url, timeout=30):
     try:
         return urlopen(request, timeout=timeout)
     except HTTPError as error:
+        error.close()
         raise FarmError(f"HTTP {error.code} from {urlsplit(url).netloc}{urlsplit(url).path}") from None
     except URLError as error:
         raise FarmError(f"Could not reach {urlsplit(url).netloc}: {error.reason}") from None
@@ -349,6 +350,52 @@ def url_host(address):
     return f"[{address}]" if ":" in address else address
 
 
+# The places a second Python 3 lives on a Mac, before anything on PATH.
+PYTHON_PLACES = ("/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3")
+PYTHON_NAME = re.compile(r"python3(\.[0-9]+)?")
+MOST_PYTHONS_TRIED = 6
+
+
+def runnable(path):
+    try:
+        return Path(path).is_file() and os.access(path, os.X_OK)
+    except OSError:
+        return False
+
+
+def python_candidates(skip=()):
+    """Every Python 3 worth trying on this machine, the well known places first, then PATH,
+    one entry per real binary and never one we already know cannot reach the Tiiny."""
+    found = []
+    seen = set()
+    for path in skip:
+        try:
+            seen.add(Path(path).resolve())
+        except OSError:
+            pass
+    places = list(PYTHON_PLACES)
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        if not directory:
+            continue
+        try:
+            places.extend(sorted(str(entry) for entry in Path(directory).iterdir()
+                                 if PYTHON_NAME.fullmatch(entry.name)))
+        except OSError:
+            continue
+    for path in places:
+        if not runnable(path):
+            continue
+        try:
+            real = Path(path).resolve()
+        except OSError:
+            continue
+        if real in seen:
+            continue
+        seen.add(real)
+        found.append(path)
+    return found
+
+
 def private_address(address):
     """Only a local network address can be the one macOS is refusing."""
     try:
@@ -357,10 +404,36 @@ def private_address(address):
         return False
 
 
+# Run by the interpreter that reaches the Tiiny, with the key on stdin so no command line
+# anywhere on this machine ever carries it.
+MODELS_PROBE = """import json, sys, urllib.error, urllib.request
+base, timeout = sys.argv[1], float(sys.argv[2])
+key = sys.stdin.readline().strip()
+answer = {"state": "unreachable", "models": []}
+try:
+    request = urllib.request.Request(base.rstrip("/") + "/models", headers={
+        "Authorization": "Bearer " + key, "Accept": "application/json"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        payload = json.loads(response.read(1024 * 1024))
+    listed = payload.get("data") if isinstance(payload, dict) else payload
+    if isinstance(listed, list):
+        answer = {"state": "ok", "models": [m["id"] for m in listed
+                                            if isinstance(m, dict) and isinstance(m.get("id"), str)]}
+    else:
+        answer["state"] = "unreadable"
+except urllib.error.HTTPError as error:
+    error.close()
+    answer["state"] = "refused" if error.code in (401, 403) else "http " + str(error.code)
+except Exception:
+    answer["state"] = "unreachable"
+print(json.dumps(answer))
+"""
+
+
 # Run by the interpreter an app runs under, when that is not the one running the CLI.
 DEVICE_PROBE = """import json, socket, sys, urllib.error, urllib.request
 host, port, timeout = sys.argv[1], int(sys.argv[2]), float(sys.argv[3])
-answer = {"errno": 0, "address": ""}
+answer = {"errno": 0, "address": "", "python": list(sys.version_info[:2])}
 try:
     answer["address"] = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)[0][4][0]
     where = answer["address"]
@@ -539,6 +612,7 @@ class Farm:
                 detail = json.loads(error.read(1024 * 1024)).get("error")
             except (ValueError, AttributeError):
                 detail = None
+            error.close()
             raise FarmError(detail or f"The farm answered HTTP {error.code}.") from None
         except URLError:
             raise FarmError("Could not reach tiinyapp.farm.") from None
@@ -1207,53 +1281,78 @@ class Farm:
         atomic_write(self.config_home / "device.json", json.dumps({"base": base, "key": key}) + "\n")
         print("Device settings saved.")
         self.device_users()
-        # Apps get launched with this interpreter, so this is the one macOS has to have granted.
-        self.local_network_hint(base, sys.executable)
+        # Apps are launched with this interpreter, so this is the one macOS has to have granted.
+        _, refused = self.choose_python(self.app_python() or sys.executable, base)
+        if refused:
+            self.local_network_hint()
 
-    def probe_local_network(self, host, interpreter):
-        """One request to the Tiiny from the interpreter an app runs under. Returns whether the
-        local network was refused, and the address that refused it."""
+    def probe_device(self, host, interpreter):
+        """One request to the Tiiny from one interpreter. Returns the errno it met, 0 when the
+        device answered, the address it tried, and that interpreter's Python version."""
         if interpreter and Path(interpreter) != Path(sys.executable):
             try:
                 done = subprocess.run([interpreter, "-c", DEVICE_PROBE, host, str(DEVICE_PORT),
                                        str(LOCAL_NETWORK_TIMEOUT)], capture_output=True, text=True,
-                                      timeout=LOCAL_NETWORK_TIMEOUT + 8)
+                                      timeout=LOCAL_NETWORK_TIMEOUT + 5)
                 answer = json.loads(done.stdout.strip().splitlines()[-1])
-            except (OSError, ValueError, IndexError, subprocess.SubprocessError):
-                return False, ""
-            return answer.get("errno") == errno.EHOSTUNREACH, str(answer.get("address") or "")
+                version = tuple(answer.get("python") or ())
+            except (OSError, ValueError, IndexError, TypeError, subprocess.SubprocessError):
+                return None, "", ()
+            return answer.get("errno"), str(answer.get("address") or ""), version
+        version = sys.version_info[:2]
         try:
             address = socket.getaddrinfo(host, DEVICE_PORT, type=socket.SOCK_STREAM)[0][4][0]
         except OSError:
-            return False, ""
+            return None, "", version
         try:
             urlopen(f"http://{url_host(address)}:{DEVICE_PORT}/device.json",
                     timeout=LOCAL_NETWORK_TIMEOUT).close()
         except HTTPError:
-            return False, address
+            return 0, address, version
         except URLError as error:
-            return getattr(error.reason, "errno", None) == errno.EHOSTUNREACH, address
+            return getattr(error.reason, "errno", None), address, version
         except OSError as error:
-            return error.errno == errno.EHOSTUNREACH, address
-        return False, address
+            return error.errno, address, version
+        return 0, address, version
 
-    def local_network_hint(self, base, interpreter=None):
-        """Jason, 2026-09-14: AINode Pocket under miniconda Python could not see his Tiiny at all,
-        while the same code under Homebrew Python found it in 5 ms. macOS Local Network privacy
-        refuses a binary it has never been granted, and a detached app is refused silently rather
-        than prompted, so the app's own log says only that nothing answered. This is a hint and
-        nothing more: it never fails a start, whatever it runs into."""
+    def working_python(self, interpreter, base):
+        """Jason, 2026-09-14: "How is an end user going to know that's an issue when they install
+        it? They may not have you sitting there to fix it." macOS Local Network privacy refuses a
+        binary it has never been granted, silently for a detached app, so when the Python an app
+        would run under cannot reach the Tiiny the farm tries the other Pythons on the machine and
+        keeps the first one that can. Returns the interpreter to use, the one it moved to, and
+        whether the local network was refused at all."""
+        host = urlsplit(base).hostname if base else None
+        if not host or not interpreter:
+            return interpreter, None, False
+        code, address, _ = self.probe_device(host, interpreter)
+        if code != errno.EHOSTUNREACH or not private_address(address):
+            return interpreter, None, False
+        for candidate in python_candidates(skip=[interpreter])[:MOST_PYTHONS_TRIED]:
+            found, _, version = self.probe_device(host, candidate)
+            if found == 0 and version >= (3, 9):
+                self.save_setting("python", candidate)
+                return candidate, candidate, True
+        return interpreter, None, True
+
+    def choose_python(self, interpreter, base, app=None):
+        """Say what the farm is doing about a Python macOS will not let near the Tiiny. This is a
+        repair and a hint, never a reason to fail a command, whatever it runs into."""
         try:
-            host = urlsplit(base).hostname if base else None
-            if not host:
-                return
-            refused, address = self.probe_local_network(host, interpreter)
-            if refused and private_address(address):
-                print("macOS is blocking this Python from your local network.")
-                print("System Settings, Privacy and Security, Local Network, turn on Python,"
-                      " then farm stop and farm start again.")
+            interpreter, moved, refused = self.working_python(interpreter, base)
         except Exception:  # noqa: BLE001 - a hint must never be the reason a command fails.
-            return
+            return interpreter, False
+        if moved:
+            print("This Python cannot reach your Tiiny, so the farm "
+                  + (f"is running {app} with {moved} instead." if app
+                     else f"will run apps with {moved} instead."))
+        return interpreter, refused and not moved
+
+    @staticmethod
+    def local_network_hint():
+        print("macOS is blocking this Python from your local network.")
+        print("System Settings, Privacy and Security, Local Network, turn on Python,"
+              " then farm stop and farm start again.")
 
     def device_users(self):
         """Name the installed apps these settings reach, and one command that proves they work."""
@@ -1385,6 +1484,38 @@ class Farm:
     def device_configured(self):
         return (self.config_home / "device.json").exists() or (self.home / "device.json").exists()
 
+    def device_settings(self):
+        """The device address and key on file, or None when there is nothing saved."""
+        config = self.config_home / "device.json"
+        if not config.exists():
+            config = self.home / "device.json"  # Settings from a pre-0.1 installation.
+        try:
+            settings = read_json(config)
+        except (OSError, ValueError):
+            return None
+        if not isinstance(settings, dict) or not all(isinstance(settings.get(k), str) for k in ("base", "key")):
+            return None
+        return settings
+
+    def settings(self):
+        """What this machine has told the farm, such as which Python to run apps with."""
+        try:
+            saved = read_json(self.config_home / "settings.json")
+        except (OSError, ValueError):
+            return {}
+        return saved if isinstance(saved, dict) else {}
+
+    def save_setting(self, name, value):
+        saved = self.settings()
+        saved[name] = value
+        self.config_home.mkdir(parents=True, exist_ok=True, mode=0o700)
+        atomic_write(self.config_home / "settings.json", json.dumps(saved, indent=2) + "\n")
+
+    def app_python(self):
+        """The interpreter the farm runs apps with, when it has had to pick one and it is still there."""
+        saved = self.settings().get("python")
+        return saved if isinstance(saved, str) and runnable(saved) else None
+
     def start_failure(self, app, ident, manifest, message, port=None, exited=False):
         """Add the two causes of a failed start that leave nothing useful in the log."""
         declared = list(manifest["requires"]["ports"])
@@ -1412,13 +1543,17 @@ class Farm:
         raise FarmError(f"Port {busy} is already in use and nothing above it up to {busy + span} is free;"
                         f" use farm start {ident} --port N.")
 
-    def start(self, ident=None, port=None):
+    def start(self, ident=None, port=None, python=None):
         if ident is None:
             if port is not None:
                 raise FarmError("A port belongs to one app, so name it: farm start <id> --port N.")
+            if python is not None:
+                raise FarmError("A Python belongs to one app, so name it: farm start <id> --python PATH.")
             return self.choose_to_start()
         if port is not None and (type(port) is not int or not 1 <= port <= 65535):  # noqa: E721
             raise FarmError("Port must be an integer between 1 and 65535.")
+        if python is not None and not runnable(python):
+            raise FarmError(f"There is no Python to run at {python}.")
         with self.guard(ident):
             root, manifest = self.installed(ident)
             app = self.app_dir(ident)
@@ -1435,13 +1570,17 @@ class Farm:
             entry = manifest["entry"]
             if entry is None:
                 raise FarmError(f"{ident} is a library, not a runnable app.")
-            command = ([sys.executable, "-m", entry["python"], *entry["args"]]
+            # The one this machine has settled on, unless the person names one on the spot.
+            chosen = python or self.app_python() or sys.executable
+            command = ([chosen, "-m", entry["python"], *entry["args"]]
                        if "python" in entry else shlex.split(entry["command"]))
             if command[0] in ("python", "python3"):
-                command[0] = sys.executable
+                command[0] = chosen
             # The binary macOS has to have granted is the one the app itself runs under.
             interpreter = (command[0] if "python" in entry
                            or Path(command[0]).name.lower().startswith("python") else None)
+            if python:
+                self.save_setting("python", python)
             ports = list(manifest["requires"]["ports"])
             takes = port_mechanism(manifest)
             if port is not None and takes is None:
@@ -1465,6 +1604,10 @@ class Farm:
                                     if takes is not None else
                                     f"Port {candidate} is already in use, and {ident} cannot be moved off it.")
             env = self.environment(ident, manifest)
+            refused = False
+            if interpreter and not python:
+                interpreter, refused = self.choose_python(interpreter, env.get("TIINY_BASE"), manifest["name"])
+                command[0] = interpreter
             if ports:
                 # Every app is told the farm's port; the manifest says how this one takes it.
                 env["TIINYAPP_PORT"] = str(ports[0])
@@ -1541,8 +1684,8 @@ class Farm:
             print(manifest["pitch"])
             print(f"Stop it with: farm stop {ident}")
             print(f"Log: {app / 'farm.log'}")
-            if interpreter:
-                self.local_network_hint(env.get("TIINY_BASE"), interpreter)
+            if refused:
+                self.local_network_hint()
 
     def _stop(self, ident):
         app = self.app_dir(ident)
@@ -1616,6 +1759,153 @@ class Farm:
                     link = app_link(info["ports"][0], manifest) if info["ports"] else "-"
                     print(f"{ident} {pid} {ports} {link} {max(0, int(time.time() - info['started']))}s {detail}{note}")
 
+    def device_models(self, settings, interpreter=None, timeout=5.0):
+        """What the Tiiny lists on /v1/models, using the saved key, asked by the interpreter that
+        can reach the device. The key is never printed, and neither is any error text, because
+        both can carry it."""
+        if interpreter and Path(interpreter) != Path(sys.executable):
+            try:
+                done = subprocess.run([interpreter, "-c", MODELS_PROBE, settings["base"], str(timeout)],
+                                      input=settings["key"] + "\n", capture_output=True, text=True,
+                                      timeout=timeout + 5)
+                answer = json.loads(done.stdout.strip().splitlines()[-1])
+            except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+                return "unreachable", []
+            listed = answer.get("models")
+            return (str(answer.get("state") or "unreachable"),
+                    [name for name in listed if isinstance(name, str)] if isinstance(listed, list) else [])
+        request = Request(settings["base"].rstrip("/") + "/models",
+                          headers={"Authorization": "Bearer " + settings["key"],
+                                   "Accept": "application/json",
+                                   "User-Agent": "tiinyapp-farm/" + _version()})
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                payload = json.loads(response.read(1024 * 1024))
+        except HTTPError as error:
+            error.close()
+            return ("refused" if error.code in (401, 403) else f"http {error.code}"), []
+        except (OSError, URLError, ValueError, HTTPException):
+            return "unreachable", []
+        listed = payload.get("data") if isinstance(payload, dict) else payload
+        if not isinstance(listed, list):
+            return "unreadable", []
+        return "ok", [model["id"] for model in listed
+                      if isinstance(model, dict) and isinstance(model.get("id"), str)]
+
+    def doctor_device(self, settings, interpreter):
+        """The address on file, whether this Python reaches it, and whether the key is taken."""
+        host = urlsplit(settings["base"]).hostname
+        started = time.monotonic()
+        code, address, _ = self.probe_device(host, interpreter)
+        took = max(1, int((time.monotonic() - started) * 1000))
+        where = address or host
+        if code == 0:
+            print(f"Your Tiiny at {where} answered this Python in {took} ms.")
+        elif code == errno.EHOSTUNREACH and private_address(address):
+            print(f"This Python cannot reach your Tiiny at {where},"
+                  " because macOS is blocking it from your local network.")
+            return False, [], True
+        else:
+            print(f"Nothing answered at {where}, port {DEVICE_PORT}.")
+            print("Fix: switch the Tiiny on and put it on this network, or run farm device"
+                  " if its address has changed.")
+            return False, [], False
+        state, models = self.device_models(settings, interpreter)
+        if state == "ok":
+            print("The key on file is accepted by your Tiiny.")
+            return True, models, False
+        print("Your Tiiny refused the key on file." if state == "refused" else
+              f"Your Tiiny would not answer for the key on file ({state}).")
+        print("Fix: copy the key again from TiinyOS, Settings, API Key, then run farm device.")
+        return False, models, False
+
+    def doctor_pythons(self, host, interpreter):
+        """Which other Pythons on this machine can reach the Tiiny, and the first that can."""
+        said, working = [], None
+        for candidate in python_candidates(skip=[interpreter])[:MOST_PYTHONS_TRIED]:
+            code, _, version = self.probe_device(host, candidate)
+            reaches = code == 0 and version >= (3, 9)
+            working = working or (candidate if reaches else None)
+            said.append(f"{candidate} {'reaches it' if reaches else 'does not'}")
+        print("Other Pythons here: " + join_words(said) + "." if said else
+              "There is no other Python on this machine to fall back to.")
+        return working
+
+    def doctor_apps(self):
+        """Every installed app, the port it declares, and who is holding it."""
+        idents = sorted(path.parent.name for path in self.home.glob("*/current"))
+        if not idents:
+            print("No apps are installed yet. Run: farm list to see what the catalog has.")
+            return True
+        ok = True
+        for ident in idents:
+            with self.guard(ident):
+                try:
+                    _, manifest = self.installed(ident)
+                except (FarmError, OSError, ValueError):
+                    print(f"{ident} is installed but the farm cannot read it.")
+                    print(f"Fix: install it again with farm remove {ident} and farm install {ident}.")
+                    ok = False
+                    continue
+                running = self.active(ident)
+                live = []
+                if running:
+                    try:
+                        live = read_json(self.app_dir(ident) / "process.json").get("ports") or []
+                    except (OSError, ValueError):
+                        live = []
+            if manifest["entry"] is None:
+                print(f"{ident} is a library, so it has no port and nothing to start.")
+                continue
+            if not manifest["requires"]["ports"]:
+                print(f"{ident} declares no port.")
+                continue
+            for port in manifest["requires"]["ports"]:
+                if not self.tcp_ready(port):
+                    print(f"{ident} declares port {port}, and it is free.")
+                elif port in live:
+                    print(f"{ident} declares port {port}, and {ident} itself is holding it.")
+                else:
+                    print(f"{ident} declares port {port}, and something else is holding it.")
+                    print(f"Fix: stop whatever has it, or put the app somewhere else:"
+                          f" farm start {ident} --port N.")
+                    ok = False
+        return ok
+
+    def doctor(self):
+        """Everything a person would otherwise have to ask somebody else to check for them."""
+        interpreter = self.app_python() or sys.executable
+        version = ".".join(map(str, sys.version_info[:3]))
+        print(f"farm {_version()}, running apps with {interpreter}"
+              + (f" (Python {version})." if Path(interpreter) == Path(sys.executable) else "."))
+        settings = self.device_settings()
+        models, working = [], None
+        if not settings:
+            print("No Tiiny is on file, so no app can reach one.")
+            print("Fix: run farm device with the device address and its API key.")
+            ok = False
+        else:
+            print(f"The Tiiny on file is at {settings['base']}.")
+            ok, models, blocked = self.doctor_device(settings, interpreter)
+            working = self.doctor_pythons(urlsplit(settings["base"]).hostname, interpreter)
+            if blocked and working:
+                print(f"Fix: the farm can run apps with {working}, which does reach it."
+                      f" Take it with: farm start <id> --python {working}")
+            elif blocked:
+                print("Fix: System Settings, Privacy and Security, Local Network, turn on Python,"
+                      " then run farm doctor again.")
+        listed = ok
+        ok = self.doctor_apps() and ok
+        if listed and models:
+            counted = "1 model" if len(models) == 1 else f"{len(models)} models"
+            print(f"Your Tiiny lists {counted}: " + join_words(models) + ".")
+        elif listed:
+            print("Your Tiiny has no models on it right now.")
+            print("Fix: load one from TiinyOS, or from an app that manages them.")
+        print("Everything the farm checks is working." if ok else
+              "Something above needs attention, and each Fix line says what to do.")
+        return ok
+
     def remove(self, ident, purge=False):
         with self.guard(ident):
             app = self.app_dir(ident)
@@ -1668,6 +1958,7 @@ def main(argv=None):
                                  help="Update everything with a newer version without asking")
         if name == "start":
             command.add_argument("--port", type=int, help="Override the app's primary listening port")
+            command.add_argument("--python", help="Run this app with this Python, and keep it for later starts")
         if name == "remove":
             command.add_argument("--purge", action="store_true", help="Also delete saved data")
     device = commands.add_parser("device")
@@ -1684,6 +1975,7 @@ def main(argv=None):
     status.add_argument("id", nargs="?", help="Show submission checks for this app")
     status.add_argument("--token", help="API token (otherwise FARM_TOKEN or ~/.tiinyapps/token)")
     commands.add_parser("list")
+    commands.add_parser("doctor")
     check = commands.add_parser("check")
     check.add_argument("--yes", "-y", action="store_true", help="Update everything newer without asking")
     check.add_argument("--all", dest="every", action="store_true",
@@ -1709,8 +2001,10 @@ def main(argv=None):
             farm.device(base=args.base, key_stdin=args.key_stdin)
         elif args.command == "remove":
             farm.remove(args.id, purge=args.purge)
+        elif args.command == "doctor":
+            return 0 if farm.doctor() else 1
         elif args.command == "start":
-            farm.start(args.id, port=args.port)
+            farm.start(args.id, port=args.port, python=args.python)
         elif args.command == "stop":
             farm.stop(args.id)
         else:
