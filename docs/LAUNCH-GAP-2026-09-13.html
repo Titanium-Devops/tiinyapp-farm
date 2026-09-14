@@ -1,0 +1,715 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Launch gap, tiinyapp.farm, 2026-09-13</title>
+<meta name="description" content="Can Jason announce tiinyapp.farm tomorrow? Measured blockers, should-fix items and a ten minute go and no-go checklist.">
+<style>
+/* Dark is the base, because the farm is a dark site. Light follows the reader's
+   system preference, and the toggle overrides both. */
+:root{
+  --night:#090D14; --soil:#12171F; --fence:#1E2732; --sunk:#0B1017;
+  --hay:#F2C462; --cyan:#00C8F0; --mint:#7FE3DC; --bad:#F0A08F;
+  --ink:#E8EEF2; --ink2:#C9D3DC; --mute:#9AA7B4;
+  --shadow:0 24px 60px rgba(0,0,0,.45);
+  --display:Fraunces,Georgia,"Times New Roman",serif;
+  --body:Nunito,-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --night:#F6F2EA; --soil:#FFFFFF; --fence:#E1DACD; --sunk:#F1ECE2;
+    --hay:#9A6B12; --cyan:#006B85; --mint:#0B6F68; --bad:#A8402A;
+    --ink:#161C24; --ink2:#3A444F; --mute:#5D6A76;
+    --shadow:0 18px 44px rgba(31,26,16,.10);
+    color-scheme:light;
+  }
+}
+:root[data-theme="light"]{
+  --night:#F6F2EA; --soil:#FFFFFF; --fence:#E1DACD; --sunk:#F1ECE2;
+  --hay:#9A6B12; --cyan:#006B85; --mint:#0B6F68; --bad:#A8402A;
+  --ink:#161C24; --ink2:#3A444F; --mute:#5D6A76;
+  --shadow:0 18px 44px rgba(31,26,16,.10);
+  color-scheme:light;
+}
+:root[data-theme="dark"]{
+  --night:#090D14; --soil:#12171F; --fence:#1E2732; --sunk:#0B1017;
+  --hay:#F2C462; --cyan:#00C8F0; --mint:#7FE3DC; --bad:#F0A08F;
+  --ink:#E8EEF2; --ink2:#C9D3DC; --mute:#9AA7B4;
+  --shadow:0 24px 60px rgba(0,0,0,.45);
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box;min-width:0}
+html,body{overflow-x:clip}
+html{background:var(--night)}
+body{margin:0;background:var(--night);color:var(--ink);font:16px/1.6 var(--body);overflow-wrap:anywhere;-webkit-text-size-adjust:100%}
+h1,h2,h3{font-family:var(--display);font-weight:700;letter-spacing:-.01em;margin:0;text-wrap:balance}
+a{color:var(--cyan)}
+a:hover{color:var(--mint)}
+code,kbd{font-family:var(--mono);font-size:.9em;background:var(--sunk);border:1px solid var(--fence);border-radius:6px;padding:1px 5px;color:var(--mint)}
+pre{margin:12px 0;background:var(--sunk);border:1px solid var(--fence);border-radius:12px;padding:14px 16px;color:var(--mint);font:13px/1.6 var(--mono);overflow-x:auto;white-space:pre}
+pre code{background:none;border:0;padding:0;font-size:inherit}
+:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+
+.wrap{max-width:1000px;margin:0 auto;padding-inline:20px}
+
+/* Header */
+header{border-bottom:1px solid var(--fence);background:var(--night);position:sticky;top:0;z-index:10}
+header .wrap{display:flex;align-items:center;gap:16px;min-height:64px;flex-wrap:wrap;padding-block:12px}
+.brand{display:flex;align-items:center;gap:10px;font:700 17px var(--display);color:var(--ink);text-decoration:none}
+.mark{width:32px;height:32px;flex:none;border-radius:50%;background:radial-gradient(circle at 34% 30%, var(--hay), #8a5f14 72%);display:grid;place-items:center;color:#12171F;font:800 14px var(--body)}
+.spacer{flex:1}
+.toggle{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--fence);background:var(--soil);color:var(--mute);border-radius:999px;padding:8px 14px;min-height:40px;font:700 13px var(--body);cursor:pointer}
+.toggle:hover{color:var(--ink)}
+
+/* Hero */
+.hero{padding-block:44px 12px}
+.eyebrow{font:700 12px var(--body);letter-spacing:.1em;text-transform:uppercase;color:var(--hay);margin:0 0 10px}
+.hero h1{font-size:clamp(30px,5.4vw,52px);line-height:1.05}
+.hero h1 em{font-style:normal;color:var(--hay)}
+.lede{color:var(--ink2);font-size:clamp(17px,2.2vw,19px);margin:16px 0 0;max-width:62ch}
+
+/* Verdict */
+.verdict{background:var(--soil);border:1px solid var(--fence);border-left:4px solid var(--hay);border-radius:16px;padding:24px;margin:28px 0 8px;box-shadow:var(--shadow)}
+.verdict h2{font-size:24px;margin-bottom:10px}
+.verdict p{margin:0;color:var(--ink2)}
+.answer{display:inline-flex;align-items:center;gap:8px;background:var(--hay);color:#12171F;border-radius:999px;padding:4px 14px;font:800 13px var(--body);letter-spacing:.04em;text-transform:uppercase;margin-bottom:14px}
+
+/* Machine strip */
+.machine{border:1px dashed var(--fence);border-radius:12px;padding:16px 18px;margin:24px 0 8px;color:var(--mute);font-size:14px}
+.machine strong{color:var(--ink);font-weight:700}
+
+section{padding-block:36px 8px}
+.sechead{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin:0 0 6px}
+.sechead h2{font-size:clamp(24px,3.4vw,32px)}
+.sechead .note{color:var(--mute);font-size:15px;margin:0}
+.count{border:1px solid var(--fence);border-radius:999px;padding:2px 10px;font:700 12px var(--body);color:var(--mute)}
+
+/* Rows as cards, which is the only shape that survives 390px */
+.rows{display:grid;gap:16px;margin-top:22px}
+.row{background:var(--soil);border:1px solid var(--fence);border-radius:16px;padding:20px;border-left:4px solid var(--fence)}
+.row.blocker{border-left-color:var(--bad)}
+.row.should{border-left-color:var(--cyan)}
+.row.nice{border-left-color:var(--mute)}
+.rowtop{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.id{font:800 12px var(--mono);letter-spacing:.06em;color:var(--night);background:var(--mute);border-radius:6px;padding:3px 8px}
+.row.blocker .id{background:var(--bad)}
+.row.should .id{background:var(--cyan)}
+.chip{border:1px solid var(--fence);border-radius:999px;padding:2px 10px;font:700 11px var(--body);letter-spacing:.06em;text-transform:uppercase;color:var(--mute)}
+.chip.measured{color:var(--mint);border-color:color-mix(in srgb, var(--mint) 45%, transparent)}
+.chip.planned{color:var(--hay);border-color:color-mix(in srgb, var(--hay) 45%, transparent)}
+.chip.time{color:var(--ink2)}
+.row h3{font-family:var(--body);font-size:17px;font-weight:800;line-height:1.35;margin:0 0 10px}
+.row p{margin:0 0 12px;color:var(--ink2);font-size:15px}
+dl.meta{display:grid;grid-template-columns:112px minmax(0,1fr);gap:8px 16px;margin:0;font-size:14px;border-top:1px solid var(--fence);padding-top:14px}
+dl.meta dt{color:var(--mute);font-weight:700}
+dl.meta dd{margin:0;color:var(--ink2)}
+
+/* Pull request table */
+.prs{display:grid;gap:14px;margin-top:22px}
+.pr{background:var(--soil);border:1px solid var(--fence);border-radius:14px;padding:18px}
+.pr .rowtop{margin-bottom:8px}
+.state{font:700 12px var(--body);letter-spacing:.04em;text-transform:uppercase}
+.state.green{color:var(--mint)}
+.state.red{color:var(--bad)}
+.pr p{margin:0;color:var(--ink2);font-size:15px}
+
+/* Prose block */
+.prose{background:var(--soil);border:1px solid var(--fence);border-radius:16px;padding:24px;margin-top:22px}
+.prose h3{font-size:21px;margin:0 0 12px}
+.prose p{color:var(--ink2);margin:0 0 14px}
+.prose p:last-child{margin-bottom:0}
+
+/* Checklist */
+ol.check{list-style:none;counter-reset:s;margin:22px 0 0;padding:0;display:grid;gap:12px}
+ol.check>li{counter-increment:s;background:var(--soil);border:1px solid var(--fence);border-radius:14px;padding:18px 18px 18px 60px;position:relative}
+ol.check>li::before{content:counter(s);position:absolute;left:16px;top:16px;width:30px;height:30px;border-radius:50%;background:var(--sunk);border:1px solid var(--fence);display:grid;place-items:center;font:800 14px var(--body);color:var(--hay)}
+ol.check>li h3{font-family:var(--body);font-size:16px;font-weight:800;margin:0 0 6px}
+ol.check>li p{margin:0;color:var(--ink2);font-size:15px}
+ol.check>li .chip{margin-top:10px;display:inline-block}
+.stop{background:var(--soil);border:1px solid var(--fence);border-left:4px solid var(--bad);border-radius:12px;padding:14px 18px;margin-top:20px;color:var(--ink2);font-size:15px}
+
+ul.plain{margin:22px 0 0;padding:0;list-style:none;display:grid;gap:14px}
+ul.plain li{background:var(--soil);border:1px solid var(--fence);border-radius:14px;padding:18px;color:var(--ink2);font-size:15px}
+ul.plain li strong{color:var(--ink)}
+
+footer{border-top:1px solid var(--fence);margin-top:56px;padding-block:28px 48px;color:var(--mute);font-size:14px}
+footer p{margin:0 0 6px}
+
+@media (max-width:720px){
+  dl.meta{grid-template-columns:minmax(0,1fr);gap:4px 0}
+  dl.meta dt{margin-top:8px}
+  dl.meta dt:first-child{margin-top:0}
+  .row,.pr,.prose,ol.check>li,ul.plain li{padding:16px}
+  ol.check>li{padding-left:16px;padding-top:52px}
+  ol.check>li::before{top:14px;left:16px}
+  .verdict{padding:18px}
+  header .wrap{min-height:0}
+}
+@media print{
+  header,.toggle{display:none}
+  body{background:#fff;color:#000}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <span class="brand"><span class="mark" aria-hidden="true">tf</span> tiinyapp.farm</span>
+    <span class="spacer"></span>
+    <button class="toggle" id="theme" type="button" aria-live="polite">Switch theme</button>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <div class="hero">
+    <p class="eyebrow">Launch gap analysis &middot; 2026-09-13</p>
+    <h1>Can Jason announce <em>tiinyapp.farm</em> tomorrow?</h1>
+    <p class="lede">Every row on this page is either measured on one named machine at a named
+    time, or marked planned because nothing here could run it. Nothing was posted, merged,
+    submitted or created.</p>
+  </div>
+
+  <div class="verdict">
+    <span class="answer">Yes, after four things</span>
+    <h2>Verdict</h2>
+    <p>The farm works. farm 0.1.3 is on PyPI, the whole owner path runs end to end from a clean
+    virtual environment against the live catalog, all 66 anonymous fetches answer as expected,
+    44 page loads across two browser engines produce zero broken images, zero dead links, zero
+    horizontal scroll and no console error that is not an expected signed-out probe, the
+    deploy-on-merge pipeline is green on its last six pushes, and the submission checks post a
+    readable results table on real pull requests. What is not ready is the paperwork and one
+    question only a Tiiny can answer. The repository is public with no license while the farm
+    requires every submitted app to declare one. The announcement draft tells people nothing is
+    reviewed, and every app page on the live site now reads "Verified". Two of the four listed
+    apps are pinned at 0.1.0 releases the brief says do not work on Tiiny 1.0 firmware, and the
+    draft's headline install command names one of them. And a fifth app is sitting green and
+    mergeable, which changes what the post says. Fix those four and the announcement is true.
+    Everything else on this page can ship broken and be fixed next week.</p>
+  </div>
+
+  <div class="machine">
+    <strong>Measured on.</strong> Jason's MacBook Pro (Mac17,6), macOS 26.6.2 build 25G83,
+    Python 3.14.6, Node 22.23.1, home broadband in Central Texas, 2026-09-13 between 19:50 and
+    20:01 CDT, against the live site at https://tiinyapp.farm. The CLI came from the real PyPI in
+    a fresh virtual environment, never from the checkout. Browser work used playwright-core,
+    headless Chromium at 1440x900 and headless WebKit at 390x844, with no cookie and no session.
+    Screenshots of all 44 page loads are in <code>docs/launch-gap-shots/</code>.
+  </div>
+
+  <section id="blockers">
+    <div class="sechead">
+      <h2>Blockers</h2>
+      <span class="count">5</span>
+      <p class="note">Must be true before the post goes out.</p>
+    </div>
+    <div class="rows">
+
+      <article class="row blocker">
+        <div class="rowtop"><span class="id">B-1</span><span class="chip measured">Measured</span><span class="chip time">10 min</span><span class="chip">Owner: Jason</span></div>
+        <h3>The repository is public and has no license</h3>
+        <p><code>pyproject.toml</code> declares none either, so PyPI shows
+        <code>license: None</code>. Meanwhile the manifest schema makes <code>license</code>
+        required and <code>docs/SUBMIT.md</code> step 1 tells makers to include theirs in the
+        archive. The first stranger who opens a pull request is contributing under undefined
+        terms.</p>
+        <dl class="meta">
+          <dt>Next action</dt><dd>Add <code>LICENSE</code> at the repository root, add
+          <code>license = "MIT"</code> and the matching classifier to <code>pyproject.toml</code>,
+          commit to main.</dd>
+          <dt>Evidence</dt><dd>20:00 CDT. <code>git ls-files</code> returns only the three font
+          licenses under <code>site/fonts/</code>. The PyPI JSON for tiinyapp-farm 0.1.3 reports
+          <code>license = None</code>.</dd>
+        </dl>
+      </article>
+
+      <article class="row blocker">
+        <div class="rowtop"><span class="id">B-2</span><span class="chip planned">Planned</span><span class="chip time">20 min</span><span class="chip">Owner: Jason, with a Tiiny</span></div>
+        <h3>Two listed apps are pinned at releases that may not work on Tiiny 1.0</h3>
+        <p>The catalog lists OneLane 0.1.0 and Story Lantern 0.1.0. Both repositories are at
+        0.1.1, and the brief says both 0.1.0 releases are known not to work on Tiiny 1.0
+        firmware. The old announcement draft's headline command was
+        <code>farm install story-lantern</code>, so the first thing a stranger ran would have been
+        the broken one.</p>
+        <dl class="meta">
+          <dt>Next action</dt><dd>Install both from the live catalog on a machine with a Tiiny and
+          see whether they work. If they do not, either land the 0.1.1 bumps (B-2a) or keep the
+          post's example app as <code>titanium-tiiny-bot</code>, which is measured working.</dd>
+          <dt>Evidence</dt><dd>Planned. This machine has no Tiiny, so nothing here can settle it.
+          The refreshed draft already leads with <code>titanium-tiiny-bot</code>, which removes
+          the sharpest edge.</dd>
+        </dl>
+      </article>
+
+      <article class="row blocker">
+        <div class="rowtop"><span class="id">B-2a</span><span class="chip measured">Measured</span><span class="chip time">1 h</span><span class="chip">Owner: Jason</span></div>
+        <h3>The 0.1.1 bumps that would fix B-2 are both red on the shell scan</h3>
+        <p>Pull request 7 fails because OneLane's source tarball carries
+        <code>examples/two_apps.py</code> and <code>tests/fake_device_test.py</code>, which import
+        subprocess, and shell is forbidden. Pull request 8 fails because <code>device.py:39</code>
+        in Story Lantern imports subprocess, which is real application code rather than a test.</p>
+        <dl class="meta">
+          <dt>Next action</dt><dd>Either move subprocess behind a lazy import the way Tiiny Brain
+          did and cut 0.1.2 tags, or publish a release asset that excludes examples and tests. A
+          worker is replacing both pull requests tonight.</dd>
+          <dt>Evidence</dt><dd>19:55 CDT, from the check job logs. Pull request 7 job
+          103777168251 and pull request 8 job 103777190409, both failing at "Validate submissions
+          and TiinyVerse ownership", static scan FAIL with those exact file and line numbers.</dd>
+        </dl>
+      </article>
+
+      <article class="row blocker">
+        <div class="rowtop"><span class="id">B-3</span><span class="chip measured">Measured</span><span class="chip time">5 min</span><span class="chip">Owner: Jason</span></div>
+        <h3>The announcement draft contradicts the live site</h3>
+        <p>It said "There are no reviews on anything yet, including my own four apps". All four
+        manifests carry <code>verified: true</code> and all four app pages read "Verified".</p>
+        <dl class="meta">
+          <dt>Next action</dt><dd>Read the refreshed <code>docs/ANNOUNCE.md</code> in this commit,
+          which fixes that line, the app count and the install example, then change whatever still
+          sounds wrong and post it.</dd>
+          <dt>Evidence</dt><dd>19:58 CDT. All four manifests parse with
+          <code>verified: true</code>, and the rendered page for titanium-tiiny-bot contains the
+          word "Verified".</dd>
+        </dl>
+      </article>
+
+      <article class="row blocker">
+        <div class="rowtop"><span class="id">B-4</span><span class="chip measured">Measured</span><span class="chip time">5 min</span><span class="chip">Owner: Jason</span></div>
+        <h3>Tiiny Brain is green and mergeable, and it changes the post</h3>
+        <p>Pull request 9 would make the catalog five apps. Whether it is in changes the
+        announcement's numbers and its list of apps, so it has to be decided before the post, not
+        after.</p>
+        <dl class="meta">
+          <dt>Next action</dt><dd>Decide, then merge before posting if in. It belongs in. The
+          reasoning is below.</dd>
+          <dt>Evidence</dt><dd>19:53 CDT. Every check SUCCESS,
+          <code>mergeable: MERGEABLE</code>, <code>mergeStateStatus: CLEAN</code>. Its archive
+          downloaded here hashes to <code>0c0d7c50&hellip;b5a3d</code> at exactly 48424 bytes,
+          which equals the manifest.</dd>
+        </dl>
+      </article>
+
+    </div>
+  </section>
+
+  <section id="should">
+    <div class="sechead">
+      <h2>Should</h2>
+      <span class="count">8</span>
+      <p class="note">Announce anyway. Fix these this week.</p>
+    </div>
+    <div class="rows">
+
+      <article class="row should">
+        <div class="rowtop"><span class="id">S-1</span><span class="chip measured">Measured</span><span class="chip time">15 min</span></div>
+        <h3>Ten documentation pages are live and the header never mentions them</h3>
+        <p>Every page's navigation is Apps, Catalog, Install, Submit an app, Sign in, including
+        <code>/docs/</code> itself, which does not highlight where you are. Documentation is one
+        footer link.</p>
+        <dl class="meta">
+          <dt>Next action</dt><dd>Add Docs to the navigation list in
+          <code>scripts/build-site.py</code> beside Install, and let <code>/docs/</code> mark
+          itself current. Cheap enough to land before the post.</dd>
+          <dt>Evidence</dt><dd>20:00 CDT. The nav and footer link sets are identical on
+          <code>/</code>, <code>/catalog/</code>, <code>/install/</code>, <code>/docs/</code> and
+          <code>/apps/onelane/</code>. Docs appears only in the footer.</dd>
+        </dl>
+      </article>
+
+      <article class="row should">
+        <div class="rowtop"><span class="id">S-2</span><span class="chip measured">Measured</span><span class="chip time">10 min</span></div>
+        <h3>Featured is the whole catalog</h3>
+        <p>All four manifests carry <code>featured: true</code>, so the same four apps fill the
+        "Featured, picked by the maintainers" shelf and the "All apps" list below it.</p>
+        <dl class="meta">
+          <dt>Next action</dt><dd>Merging Tiiny Brain fixes half of this on its own, because it
+          carries no <code>featured</code> flag and the shelf becomes four of five. Then pick one
+          or two deliberately and clear the rest.</dd>
+          <dt>Evidence</dt><dd>19:58 CDT, from the four manifests and from the rendered home page,
+          which shows OneLane, Story Lantern, TiinyBench and Titanium Tiiny Bot under Featured and
+          again below.</dd>
+        </dl>
+      </article>
+
+      <article class="row should">
+        <div class="rowtop"><span class="id">S-3</span><span class="chip measured">Measured</span><span class="chip time">30 min</span></div>
+        <h3>No app in the catalog has a screenshot</h3>
+        <p>All four pages end at "No screenshots yet" while the submit form asks makers for up to
+        eight.</p>
+        <dl class="meta">
+          <dt>Next action</dt><dd>Add two to <code>titanium-tiiny-bot</code> and two to
+          <code>tiiny-bench</code> so the farm does what it asks of makers. Tiiny Brain already
+          ships an icon and a header image, which is more art than any of the four.</dd>
+          <dt>Evidence</dt><dd>19:58 CDT. <code>screenshots</code> is an empty array in all four
+          manifests.</dd>
+        </dl>
+      </article>
+
+      <article class="row should">
+        <div class="rowtop"><span class="id">S-4</span><span class="chip measured">Measured</span><span class="chip time">Fixed in this commit</span></div>
+        <h3>docs/LAUNCH.md sends the operator to fix two things that are already fixed</h3>
+        <p>Step 1 said the deploy workflow has never worked for want of a Cloudflare token. Step 2
+        said the PyPI trusted publisher is not set up. Both work today, and walking that document
+        tomorrow would burn the whole go and no-go window on solved problems.</p>
+        <dl class="meta">
+          <dt>Next action</dt><dd>Done here. Steps 1 and 2 are now marked done with today's
+          measurement, matching what step 4 already said. Use the checklist below instead.</dd>
+          <dt>Evidence</dt><dd>19:57 CDT. The last six "Build and deploy the farm" runs on main all
+          succeeded, the newest at 22:57 UTC. The publish workflow succeeded for 0.1.2 and 0.1.3,
+          and PyPI serves both.</dd>
+        </dl>
+      </article>
+
+      <article class="row should">
+        <div class="rowtop"><span class="id">S-5</span><span class="chip measured">Measured</span><span class="chip time">20 min</span></div>
+        <h3>A wall-clock assertion can turn any pull request red</h3>
+        <p><code>test_health_trickling_response_cannot_exceed_readiness_deadline</code> asserts a
+        deadline under 0.45 seconds and measured 0.4926 on a GitHub ubuntu runner at Python 3.9.
+        It reddened pull request 8 for a reason that has nothing to do with pull request 8.</p>
+        <dl class="meta">
+          <dt>Next action</dt><dd>Widen the bound, or assert the number of polls instead of elapsed
+          time. A flaky red on a stranger's first submission is the worst place for this to
+          land.</dd>
+          <dt>Evidence</dt><dd>19:55 CDT, job 103777190403:
+          <code>AssertionError: 0.4925659789999983 not less than 0.45</code>, 66 tests, 1
+          failure.</dd>
+        </dl>
+      </article>
+
+      <article class="row should">
+        <div class="rowtop"><span class="id">S-6</span><span class="chip measured">Measured</span><span class="chip time">20 min</span></div>
+        <h3>The check bot reports a failed scan as raw JSON</h3>
+        <p>The results comment's detail column prints
+        <code>[{"file": "onelane-0.1.1/examples/two_apps.py", "line": 20, &hellip;}]</code> where a
+        sentence belongs. This is the same class of problem the use-check just fixed in the install
+        prompt.</p>
+        <dl class="meta">
+          <dt>Next action</dt><dd>Render the findings as one line per file and line number in plain
+          words.</dd>
+          <dt>Evidence</dt><dd>19:56 CDT, from the bot comment on pull request 7.</dd>
+        </dl>
+      </article>
+
+      <article class="row should">
+        <div class="rowtop"><span class="id">S-7</span><span class="chip measured">Measured</span><span class="chip time">10 min</span></div>
+        <h3>farm start does not name the port it bound</h3>
+        <p><code>docs/LAUNCH.md</code> step 3 tells the operator to watch for exactly that. It
+        prints the pid and the log path and nothing else. <code>farm status</code> does carry the
+        port.</p>
+        <dl class="meta">
+          <dt>Next action</dt><dd>Add the port to the start line, or drop the expectation from
+          LAUNCH.md.</dd>
+          <dt>Evidence</dt><dd>20:01 CDT. <code>farm start story-lantern --port 7871</code> answered
+          <code>Started story-lantern: pid 10955; log &hellip;/farm.log</code>. The app did bind
+          7871, confirmed by a 302 from <code>http://127.0.0.1:7871/</code>.</dd>
+        </dl>
+      </article>
+
+      <article class="row should">
+        <div class="rowtop"><span class="id">S-8</span><span class="chip measured">Measured</span><span class="chip time">10 min</span></div>
+        <h3>farm release is documented and is not in the published package</h3>
+        <p>It appears as a command on <code>/docs/cli/</code> and <code>/docs/publish/</code>. Both
+        sections carry a visible note saying it arrives with pull request 5 and is not live until
+        that merges, which is honest. What is not marked is the on-page index at the top of
+        <code>/docs/cli/</code>, which lists farm release beside ten commands that do exist.</p>
+        <dl class="meta">
+          <dt>Next action</dt><dd>Mark it in the index too, or merge pull request 5.</dd>
+          <dt>Evidence</dt><dd>19:59 CDT. <code>farm --help</code> from PyPI 0.1.3 lists install,
+          update, start, stop, remove, device, login, publish, status, list. <code>farm
+          release</code> answers <code>invalid choice: 'release'</code>. The live page's note
+          renders as a styled paragraph.</dd>
+        </dl>
+      </article>
+
+    </div>
+  </section>
+
+  <section id="nice">
+    <div class="sechead">
+      <h2>Nice</h2>
+      <span class="count">5</span>
+      <p class="note">Neither blocks nor needs this week.</p>
+    </div>
+    <div class="rows">
+
+      <article class="row nice">
+        <div class="rowtop"><span class="id">N-1</span><span class="chip measured">Measured</span><span class="chip time">20 min</span></div>
+        <h3>An unknown maker URL returns bare JSON, not the site's 404 page</h3>
+        <p><code>/makers/nobody/</code> answers 404 with
+        <code>{"error":"That maker was not found."}</code> as <code>application/json</code>, so a
+        mistyped maker link shows a browser's raw JSON view.</p>
+        <dl class="meta">
+          <dt>Next action</dt><dd>Return the built 404 page for <code>/makers/*</code> misses,
+          keeping JSON only when the request asks for it.</dd>
+          <dt>Evidence</dt><dd>19:52 CDT by curl and again in both browser engines, where the page
+          has no title and no images.</dd>
+        </dl>
+      </article>
+
+      <article class="row nice">
+        <div class="rowtop"><span class="id">N-2</span><span class="chip measured">Measured</span><span class="chip time">20 min</span></div>
+        <h3>Tiiny Brain cannot be moved off its port, and the manifest has no way to say so</h3>
+        <p><code>cockpit.py:705</code> reads the port from <code>sys.argv[1]</code> with a default
+        of 8500 and the archive never mentions <code>TIINYAPP_PORT</code>. The <code>port</code>
+        field understands a flag, an environment variable, or null, and has no word for a bare
+        positional argument.</p>
+        <dl class="meta">
+          <dt>Next action</dt><dd>Add <code>--port</code> to <code>cockpit.py</code> and set
+          <code>{"argv": "--port"}</code> in the manifest. Until then
+          <code>farm start tiiny-brain --port N</code> will not move it, though 0.1.3 diagnoses the
+          failure instead of hiding it.</dd>
+          <dt>Evidence</dt><dd>19:51 CDT, by reading the released archive rather than a local
+          checkout. A grep for TIINYAPP_PORT across the unpacked tarball returns nothing.</dd>
+        </dl>
+      </article>
+
+      <article class="row nice">
+        <div class="rowtop"><span class="id">N-3</span><span class="chip measured">Measured</span><span class="chip time">10 min</span></div>
+        <h3>/submit/done/ logs a 401 to the browser console when signed out</h3>
+        <p>It is the session probe doing its job, and nothing visible breaks.</p>
+        <dl class="meta">
+          <dt>Next action</dt><dd>Swallow the expected 401 so a clean page has a clean
+          console.</dd>
+          <dt>Evidence</dt><dd>19:54 CDT in both engines. One console error on that page, none on
+          the other twenty.</dd>
+        </dl>
+      </article>
+
+      <article class="row nice">
+        <div class="rowtop"><span class="id">N-4</span><span class="chip measured">Measured</span><span class="chip time">15 min</span></div>
+        <h3>check-live.py does not sweep the documentation site</h3>
+        <p>It covers 33 paths including <code>/docs/agents/</code>, and the sitemap lists
+        <code>/docs/</code> and nine more pages it never fetches.</p>
+        <dl class="meta">
+          <dt>Next action</dt><dd>Add the docs pages to the path list so a broken docs deploy fails
+          the sweep.</dd>
+          <dt>Evidence</dt><dd>19:50 CDT. The sweep reports 33 paths and 66 fetches. The live
+          sitemap lists 19 URLs including ten under <code>/docs/</code>.</dd>
+        </dl>
+      </article>
+
+      <article class="row nice">
+        <div class="rowtop"><span class="id">N-5</span><span class="chip measured">Measured</span><span class="chip time">2 min</span></div>
+        <h3>SPEC.md names the wrong device config path</h3>
+        <p>It says <code>~/tiinyapps/device.json</code>. The code and the live install page both
+        say <code>~/.tiinyapps/device.json</code>. Carried from the use-check as row F-6.</p>
+        <dl class="meta">
+          <dt>Next action</dt><dd>One word in SPEC.md.</dd>
+          <dt>Evidence</dt><dd>20:01 CDT. A real run wrote <code>~/.tiinyapps/device.json</code>
+          and created no <code>device.json</code> under <code>~/tiinyapps</code>.</dd>
+        </dl>
+      </article>
+
+    </div>
+  </section>
+
+  <section id="prs">
+    <div class="sechead">
+      <h2>The four open pull requests</h2>
+      <p class="note">All four read on 2026-09-13 at 19:53 CDT. None was merged, closed or
+      commented on.</p>
+    </div>
+    <div class="prs">
+
+      <article class="pr">
+        <div class="rowtop"><span class="id">PR 5</span><span class="state green">Nine checks green, mergeable, clean</span></div>
+        <h3>The release path</h3>
+        <p>An hourly poller, a "Check for a new release" button, and <code>farm release</code>.
+        Not needed for launch, and the documentation already tells readers it is not live. It needs
+        two GitHub App secrets before any of it works, per <code>docs/GITHUB-APP.md</code>. Merging
+        it without those secrets leaves the poller reporting that it is switched off, which is safe
+        but pointless. Leave it until after the announcement.</p>
+      </article>
+
+      <article class="pr">
+        <div class="rowtop"><span class="id">PR 7</span><span class="state red">Static scan FAIL</span></div>
+        <h3>OneLane 0.1.1</h3>
+        <p>Subprocess in <code>examples/two_apps.py:20</code> and
+        <code>tests/fake_device_test.py:17</code>. The GitHub source tarball carries the whole
+        repository, examples and tests included, so the scan sees code the app never runs. Being
+        replaced tonight.</p>
+      </article>
+
+      <article class="pr">
+        <div class="rowtop"><span class="id">PR 8</span><span class="state red">Static scan FAIL, plus one flaky test</span></div>
+        <h3>Story Lantern 0.1.1</h3>
+        <p>Subprocess in <code>device.py:39</code>, which is real application code rather than a
+        test. Needs the Tiiny Brain treatment: one lazy import behind the thing that needs it. The
+        second red is S-5 and has nothing to do with this change. Being replaced tonight.</p>
+      </article>
+
+      <article class="pr">
+        <div class="rowtop"><span class="id">PR 9</span><span class="state green">Nine checks green, mergeable, clean</span></div>
+        <h3>Tiiny Brain 0.1.0</h3>
+        <p>It belongs in the launch catalog. The reasoning is below.</p>
+      </article>
+
+    </div>
+
+    <div class="prose">
+      <h3>Why Tiiny Brain should be in</h3>
+      <p>Merge it. Four reasons, three of them measured here rather than taken from the pull
+      request.</p>
+      <p>The archive is what the manifest says it is. Downloaded from the release URL on this
+      machine, it hashes to
+      <code>0c0d7c50565c78f9ff5f07d5057011005034742aa4012026d1773b54b90b5a3d</code> at exactly
+      48424 bytes, which matches the manifest byte for byte. Every check on the pull request
+      passed, including the offline selfcheck, and the results comment says so in the same table a
+      stranger would get.</p>
+      <p>It is the only submission that did the subprocess work voluntarily. The author split the
+      PDF scanning half out of the archive and moved poppler and tesseract behind a lazy import so
+      <code>archive.py</code> imports no subprocess at all. That is exactly what pull requests 7
+      and 8 are red for not doing, and it is a useful thing to point at when the first outside
+      maker hits the same wall.</p>
+      <p>It fixes the featured shelf by existing. It carries no <code>featured</code> flag, so the
+      home page becomes four featured out of five apps instead of four out of four, and the shelf
+      starts meaning something.</p>
+      <p>The test it changes is not a weakened test.
+      <code>test_home_uses_featured_editorial_items_and_ledger_rows</code> built the featured list
+      as a filtered, capped subset and then asserted that every app in the catalog is featured,
+      which cannot both be what the test means. The two assertions that carry the real invariant
+      are untouched: the count of featured articles still has to equal the filtered list, and the
+      count of catalog rows still has to equal every manifest. Removing the contradiction is the
+      right fix, and the pull request says so up front instead of burying it.</p>
+      <p>Two things to settle before or just after merging. Its manifest carries
+      <code>verified: false</code>, which is what <code>docs/SUBMIT.md</code> tells submitters to
+      do, so its page will read "Not reviewed yet" beside four that read "Verified". That is honest
+      and it shows the review step is real, but it is Jason's call whether the fifth app launches
+      reviewed. And <code>farm start tiiny-brain --port N</code> will not move it, for the reason
+      in N-2.</p>
+    </div>
+  </section>
+
+  <section id="checklist">
+    <div class="sechead">
+      <h2>Go and no-go, tomorrow morning</h2>
+      <p class="note">Ten minutes, top to bottom, from a checkout of main on the Mac.</p>
+    </div>
+
+    <pre><code>cd ~/code/tiinyapp-farm &amp;&amp; git checkout main &amp;&amp; git pull</code></pre>
+
+    <ol class="check">
+      <li>
+        <h3>The site answers everyone</h3>
+        <p>Ends with "All 66 fetches answered as expected" and exits 0. Anything else is a no.</p>
+        <pre><code>python3 scripts/check-live.py</code></pre>
+        <span class="chip time">About 8 seconds</span>
+      </li>
+      <li>
+        <h3>PyPI serves the CLI people will install</h3>
+        <p>Prints 0.1.3 or newer.</p>
+        <pre><code>curl -s https://pypi.org/pypi/tiinyapp-farm/json \
+  | python3 -c "import json,sys; print(json.load(sys.stdin)['info']['version'])"</code></pre>
+        <span class="chip time">About 2 seconds</span>
+      </li>
+      <li>
+        <h3>A stranger's install works</h3>
+        <p>In a scratch directory. Lists every app in the catalog.</p>
+        <pre><code>python3 -m venv v &amp;&amp; ./v/bin/pip install tiinyapp-farm &amp;&amp; ./v/bin/farm list</code></pre>
+        <span class="chip time">About 10 seconds</span>
+      </li>
+      <li>
+        <h3>The license exists</h3>
+        <p>This is B-1 and it is the one item that is pure typing.</p>
+        <pre><code>ls LICENSE &amp;&amp; grep license pyproject.toml</code></pre>
+        <span class="chip time">Instant</span>
+      </li>
+      <li>
+        <h3>The announcement is true</h3>
+        <p>Open <code>docs/ANNOUNCE.md</code>, read the refreshed draft, and check three things
+        against the live site: the number of apps, whether it claims anything is unreviewed, and
+        which app the headline install command names.</p>
+        <span class="chip time">About 3 minutes</span>
+      </li>
+      <li>
+        <h3>Decide Tiiny Brain</h3>
+        <p>If in, merge pull request 9, watch the deploy go green, then reload
+        <code>https://tiinyapp.farm/apps/tiiny-brain/</code> and confirm the page exists.</p>
+        <pre><code>gh run list --repo Titanium-Devops/tiinyapp-farm \
+  --workflow "Build and deploy the farm" --limit 1</code></pre>
+        <span class="chip time">About 3 minutes</span>
+      </li>
+      <li>
+        <h3>The firmware question</h3>
+        <p>If a Tiiny is on the desk, install and start Story Lantern and see whether it works. If
+        no Tiiny, the refreshed draft already leads with <code>titanium-tiiny-bot</code>, so this
+        is not a stop. This is B-2.</p>
+        <span class="chip time">About 2 minutes</span>
+      </li>
+      <li>
+        <h3>Post it</h3>
+        <p>Nothing in this list needs the Cloudflare dashboard, a GitHub secret or a PyPI setting.
+        All three were open questions in <code>docs/LAUNCH.md</code> and all three were measured
+        working today.</p>
+      </li>
+    </ol>
+
+    <p class="stop">Stop at the first no. Steps 1 through 4 are the ones that can genuinely fail;
+    5 through 7 are judgment calls with a safe default already written into the draft.</p>
+  </section>
+
+  <section id="untested">
+    <div class="sechead">
+      <h2>What this could not measure</h2>
+    </div>
+    <ul class="plain">
+      <li><strong>Anything that needs a Tiiny.</strong> No device on this machine. Whether the four
+      listed apps do useful work against real firmware, and specifically whether OneLane 0.1.0 and
+      Story Lantern 0.1.0 fail on Tiiny 1.0 as the brief says, is untested here. That is B-2 and it
+      is the one leg only an operator with hardware can walk.</li>
+      <li><strong>Anything behind a sign-in.</strong> No account was created, so email codes, GitHub
+      sign-in, TiinyVerse profile verification, the submit form itself, media upload,
+      <code>farm publish</code> with a real token and the pull request it opens were read and never
+      exercised. The submission path is proven from the other end instead: pull requests 7, 8 and 9
+      all ran the real checks and all three carry the bot's results table.</li>
+      <li><strong>farm update actually installing a newer version.</strong> Every app is at its
+      catalog version, so every update takes the no-op path.</li>
+      <li><strong>Windows and Linux.</strong> macOS only, though the test matrix covers both on
+      every pull request.</li>
+    </ul>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Launch gap analysis for tiinyapp.farm, written 2026-09-13 on branch
+    <code>launch-gap</code>. The markdown twin of this page is
+    <code>docs/LAUNCH-GAP-2026-09-13.md</code>.</p>
+    <p>Self-contained. No external requests, no analytics, no fonts fetched over the network. The
+    display face is Fraunces and the body face is Nunito where they are installed locally, falling
+    back to Georgia and the system sans so the page never reaches out.</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var btn = document.getElementById('theme');
+  var root = document.documentElement;
+  function stored() { try { return localStorage.getItem('lg-theme'); } catch (e) { return null; } }
+  function save(v) { try { localStorage.setItem('lg-theme', v); } catch (e) {} }
+  function current() {
+    var t = root.getAttribute('data-theme');
+    if (t) return t;
+    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+  function label() { btn.textContent = current() === 'dark' ? 'Light theme' : 'Dark theme'; }
+  var saved = stored();
+  if (saved === 'light' || saved === 'dark') root.setAttribute('data-theme', saved);
+  label();
+  btn.addEventListener('click', function () {
+    var next = current() === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    save(next);
+    label();
+  });
+})();
+</script>
+
+</body>
+</html>
