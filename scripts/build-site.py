@@ -560,6 +560,8 @@ def build(source=ROOT, output=None, today=None):
     output = Path(output) if output else source / "site" / "dist"
     today = today or datetime.now(timezone.utc).date()
     render_card = runpy.run_path(str(ROOT / 'scripts/share-cards.py'))['render_card']
+    # The one description of the HTTP surface, served at /docs/openapi.json.
+    openapi = runpy.run_path(str(ROOT / 'worker/openapi.py'))['spec']
     snapshot = source / 'site/makers.json'
     makers = json.loads(snapshot.read_text()) if snapshot.exists() else []
     for maker in makers:
@@ -624,6 +626,7 @@ def build(source=ROOT, output=None, today=None):
                                          ensure_ascii=False) + '\n')
         write('categories.json', json.dumps({'map': CATEGORIES, 'order': CATEGORY_ORDER}, ensure_ascii=False) + '\n')
         write('llms.txt', guide)
+        write('docs/openapi.json', json.dumps(openapi(), indent=2, ensure_ascii=False) + '\n')
         write('site.webmanifest', json.dumps({'name': 'tiinyapp.farm', 'short_name': 'tiinyapp.farm',
               'start_url': '/', 'display': 'standalone', 'theme_color': '#090D14', 'background_color': '#090D14',
               'icons': [{'src': '/brand/favicon-192.png', 'sizes': '192x192', 'type': 'image/png'},
