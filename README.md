@@ -197,6 +197,10 @@ What the farm reads:
 | `FARM_NO_UPDATE_CHECK` | Set to anything and the farm never looks for a newer farm |
 | `TIINY_BASE` | Device base URL for `farm device` in its scripted form |
 | `TIINY_KEY` | Device API key for `farm device` in its scripted form |
+| `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` | The proxy the farm fetches through, and the hosts it does not |
+
+The farm takes its proxy from those variables and never from macOS System Settings, because asking
+the machine corrupts the process it is asked in and everything that process then starts.
 
 What the farm hands an app it starts:
 

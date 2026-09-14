@@ -28,7 +28,8 @@ import time
 import threading
 from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urljoin, urlsplit
-from urllib.request import Request, urlopen, url2pathname
+from urllib.request import (ProxyHandler, Request, build_opener, getproxies_environment,
+                            url2pathname)
 import warnings
 
 CATALOG = "https://tiinyapp.farm/manifests/"
@@ -176,6 +177,46 @@ def private_mode(path):
     except OSError:
         if not WINDOWS:
             raise
+
+
+# One opener for everything the farm fetches, with a proxy handler that is handed the environment
+# rather than left to ask the machine.
+#
+# Measured on macOS 25.6 on 2026-09-14. Two things that are each harmless on their own corrupt this
+# process when they happen in order: the macOS system proxy lookup that urllib's default
+# ProxyHandler runs when nobody hands it a dict, and then any name lookup. After those two, every
+# fork in this process yields a child that dies of SIGSEGV before it reaches exec. Building the
+# handler once from the environment keeps the first of them from ever running.
+#
+# It has to be fixed at the fetch rather than at the fork, because Farm.start cannot avoid forking.
+# CPython posix_spawns only when cwd is None, pass_fds is empty and start_new_session is off, and a
+# started app needs all three: the directory it runs in, the lock it inherits, and the session that
+# detaches it. So an app launched after a poisoned fetch would exit -11, and no launch flag can fix
+# that.
+#
+# HTTP_PROXY, HTTPS_PROXY, NO_PROXY and their lowercase spellings go on working, because that is
+# what getproxies_environment reads and what proxy_bypass consults first. What is given up is a
+# proxy configured in macOS System Settings and named nowhere else.
+def farm_opener():
+    """Every handler urllib would install, with the proxy one handed the environment.
+
+    A proxy handler with nothing in it has no hooks to register, so an environment with no proxy
+    set leaves the opener with no proxy handler at all, which is the quiet version of the same
+    thing: nobody asks the machine.
+    """
+    return build_opener(ProxyHandler(getproxies_environment()))
+
+
+_OPENER = farm_opener()
+
+
+def urlopen(url, timeout):
+    """Fetch one URL through the farm's own opener.
+
+    Stands in for urllib.request.urlopen, and takes the timeout as an argument rather than a
+    default because everything the farm opens has to carry one.
+    """
+    return _OPENER.open(url, timeout=timeout)
 
 
 def open_url(url, timeout=30):
