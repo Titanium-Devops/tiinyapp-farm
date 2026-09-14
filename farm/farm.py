@@ -2124,6 +2124,11 @@ def main(argv=None):
     check.add_argument("--yes", "-y", action="store_true", help="Update everything newer without asking")
     check.add_argument("--all", dest="every", action="store_true",
                        help="Update everything with a newer version without asking")
+    for command in commands.choices.values():
+        # The docs say "on any command", so the flag is taken after the command too; a
+        # subparser default would overwrite the top-level one, hence SUPPRESS.
+        command.add_argument("--no-update-check", action="store_true", default=argparse.SUPPRESS,
+                             help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     farm = Farm()
     code = 0
