@@ -131,3 +131,21 @@ footer{border-top:1px solid var(--fence);color:var(--mute);font-size:14px}footer
 .docs-foot{margin:44px 0 0;border-top:1px solid var(--fence);padding-top:18px;display:flex;gap:20px;flex-wrap:wrap;font-size:14px}
 @media(max-width:820px){.docs{grid-template-columns:1fr;gap:0;max-width:760px}.docs-nav{position:static;padding:28px 0 0}.docs-nav ul{grid-template-columns:repeat(auto-fill,minmax(min(200px,100%),1fr))}.docs-body{padding-top:24px}}
 @media(max-width:640px){.docs{padding-left:16px;padding-right:16px}.docs-table table{min-width:320px}}
+.art-panel{display:grid;gap:12px;border:1px solid var(--fence);border-radius:14px;background:#0b1017;padding:14px 16px}
+.art-panel[hidden]{display:none}
+.art-panel>p{margin:0;color:var(--mute)}
+.art-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.art-actions .small{margin:0;color:var(--mute);flex:1 1 14ch;min-width:0}
+.art-result{display:grid;gap:0}
+.art-result[hidden]{display:none}
+.art-header{display:block;width:100%;aspect-ratio:3/2;object-fit:cover;border-radius:12px;border:1px solid var(--fence);background:var(--night)}
+.art-icon{width:92px;height:92px;object-fit:contain;justify-self:start;margin:-46px 0 0 12px;border-radius:16px;background:var(--night);border:2px solid var(--soil);padding:4px}
+.art-result .art-actions{margin-top:14px}
+.owner-art{margin:26px 0 0;padding:20px 22px;background:var(--soil)}
+.owner-art h2{margin:0;font-size:22px}
+.owner-art .fine{color:var(--mute)}
+/* An app page has none of the submit form's field styling, so the panel brings its own. */
+.owner-art label{display:grid;gap:6px;font:700 14px var(--body)}
+.owner-art label small{font:400 13px var(--body);color:var(--mute)}
+.owner-art input{width:100%;box-sizing:border-box;border:1px solid #2a3542;background:#0b1017;color:var(--ink);border-radius:12px;padding:10px 12px;font:15px var(--body)}
+@media(max-width:480px){.art-icon{width:72px;height:72px;margin-top:-36px}}

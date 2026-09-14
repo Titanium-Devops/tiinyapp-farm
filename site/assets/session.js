@@ -30,14 +30,18 @@ export function refreshSession() {
         label.textContent = firstName;
         anchor.append(avatar, label);
       });
-      const update = document.querySelector('[data-seed-update]');
-      if (update) {
-        update.hidden = true;
+      // Parts of an app page only its own maker sees: the update link and the art panel.
+      const mine = [...document.querySelectorAll('[data-seed-update], [data-art-owner]')];
+      if (mine.length) {
+        for (const part of mine) part.hidden = true;
         if (user?.tiinyverse) {
           const response = await fetch('/api/seeds/mine', { credentials: 'same-origin', cache: 'no-store' });
           if (response.ok) {
             const { seeds } = await response.json();
-            update.hidden = !seeds.some(seed => seed.id === update.dataset.seedUpdate && seed.canUpdate);
+            for (const part of mine) {
+              const id = part.dataset.seedUpdate || part.dataset.artOwner;
+              part.hidden = !seeds.some(seed => seed.id === id && seed.canUpdate);
+            }
           }
         }
       }

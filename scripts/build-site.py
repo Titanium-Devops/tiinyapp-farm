@@ -278,6 +278,27 @@ def social_strip(app):
 <noscript><p>JavaScript is needed to load thumbs and comments.</p></noscript></section>'''
 
 
+def art_panel(app):
+    """The maker's own scene field and Generate art button. session.js reveals it for the owner."""
+    return (f'<section class="art-panel owner-art" data-art-panel data-art-owner="{e(app["id"])}" hidden>'
+            f'<h2>Art in the farm\'s hand</h2>'
+            '<p class="sub">Describe this app\'s scene in one sentence and the farm draws a header and an icon '
+            'in the same style as every other app on the shelf. '
+            '<a href="/docs/art/">How this works</a>.</p>'
+            '<label class="seed-field" for="scene">Describe your app\'s scene in one sentence '
+            '<small>name the objects in the picture, not your app</small>'
+            '<input id="scene" maxlength="200" placeholder="a corkboard of pinned cards joined by threads of light"></label>'
+            '<div class="art-actions"><button class="btn ghost" id="art-generate" type="button">Generate art</button>'
+            '<span class="small" id="art-state" role="status" aria-live="polite">Three drawings a day for one app.</span></div>'
+            f'<div class="art-result" id="art-result" hidden>'
+            f'<img class="art-header" id="art-header" alt="The header the farm drew for {e(app["name"])}">'
+            f'<img class="art-icon" id="art-icon" alt="The icon the farm drew for {e(app["name"])}">'
+            '<div class="art-actions"><button class="btn hay" id="art-use" type="button">Use these</button>'
+            '<button class="btn ghost" id="art-again" type="button">Try again</button></div></div>'
+            '<p class="fine">Use these opens the update form with the new pair attached. A published app\'s '
+            'images change through the same pull request as everything else.</p></section>')
+
+
 def app_page(app, today, makers=()):
     band, visual_media = seed_media(app)
     links = app.get('links', {})
@@ -323,7 +344,7 @@ def app_page(app, today, makers=()):
     return f'''<section class="app wrap">{band}<div class="head">{app_icon}<div><h1>{e(app['name'])}</h1><div class="sub">v{e(app['version'])} · {e(app['license'])} · {review} · Grown by {link(maker_url, app['author']['name'])}</div></div></div>
 <p class="pitch">{e(app['pitch'])}</p>
 <a hidden data-seed-update="{e(app['id'])}" href="/submit/?update={e(app['id'])}">Update this app</a>
-<div class="two"><div>{install}<h2>What it does</h2><p class="desc">{e(app['description'])}</p>{'<p>' + link(homepage, 'Home page') + '</p>' if homepage else ''}{images}{social_strip(app)}</div><aside class="rail">
+<div class="two"><div>{install}<h2>What it does</h2><p class="desc">{e(app['description'])}</p>{'<p>' + link(homepage, 'Home page') + '</p>' if homepage else ''}{images}{art_panel(app)}{social_strip(app)}</div><aside class="rail">
 <div class="card"><h3>Needs</h3><dl><dt>Python</dt><dd>{python}</dd><dt>Port</dt><dd>{e(', '.join(map(str, req['ports'])) or 'None')}</dd>{movable}<dt>Models</dt><dd>{e(', '.join(req['device']['models']) or 'None')}</dd><dt>NPU</dt><dd>{e(req['device']['npuUnits'])} units</dd><dt>Uses</dt><dd><div class="chips">{permissions}</div></dd></dl></div>
 <div class="card"><h3>Release</h3>{release_details}</div>
 <div class="card"><h3>Maker</h3><div class="maker">{avatar}<div><b>{link(maker_url, app['author']['name'])}</b><br>{owner}</div></div></div>
@@ -580,7 +601,7 @@ def build(source=ROOT, output=None, today=None):
         pages['/manifests/'] = ('App manifests', listing + '</ul></section>')
         for url, (title, body) in pages.items():
             scripts = ('/assets/catalog.js',) if url in ('/', '/catalog/') else (
-                ('/assets/catalog.js', '/assets/share.js', '/assets/seed-media.js', '/assets/social.js')
+                ('/assets/catalog.js', '/assets/share.js', '/assets/seed-media.js', '/assets/social.js', '/assets/art.js')
                 if url.startswith('/apps/') else ())
             write(url.lstrip('/') + 'index.html', page(title, body, url, scripts))
         write('404.html', page('Page not found', '<section class="sect"><h1>Page not found</h1><p>This page does not exist. ' + link('/', 'Return to the catalog') + '.</p></section>', '/404.html'))
@@ -595,7 +616,7 @@ def build(source=ROOT, output=None, today=None):
         shutil.copytree(source / 'brand', dest / 'brand')
         shutil.copytree(source / 'site/fonts', dest / 'fonts')
         write('robots.txt', f'User-agent: *\nAllow: /\nSitemap: {ORIGIN}/sitemap.xml\n')
-        for folder, files in {'assets': ['hero.jpg', 'site.css', 'catalog.js', 'seeds.js', 'session.js', 'farm.js', 'seed-media.js', 'social.js', 'share.js', 'titanium-icon.png', 'titanium-header.webp'], 'docs': ['manifest.schema.json', 'SUBMIT.md']}.items():
+        for folder, files in {'assets': ['hero.jpg', 'site.css', 'catalog.js', 'seeds.js', 'session.js', 'farm.js', 'seed-media.js', 'social.js', 'share.js', 'art.js', 'titanium-icon.png', 'titanium-header.webp'], 'docs': ['manifest.schema.json', 'SUBMIT.md']}.items():
             for name in files:
                 origin = source / ('site/assets' if folder == 'assets' else folder) / name
                 (dest / folder).mkdir(exist_ok=True)

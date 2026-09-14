@@ -40,6 +40,9 @@ the other side reads it once.
 
 **About and look.** Name, id, one-line summary, what it does, a category, a license, and optionally
 an icon, a header image and up to eight screenshots. Images are PNG, JPEG or WebP up to 2 MiB each.
+No art yet? Write one sentence describing your app's scene and press Generate art, and the farm
+draws a header and an icon in the same style as every other app on the shelf. See
+[Art in the farm's hand](/docs/art/).
 The id is lowercase letters, digits and single dashes, it becomes your page URL and your
 `farm install` command, and it can never change.
 

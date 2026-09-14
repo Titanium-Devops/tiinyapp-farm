@@ -219,12 +219,14 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
     [{ tiinyverse: {} }, [{ id: 'seed', canUpdate: true }], true],
   ]) {
     const link = { hidden: true, dataset: { seedUpdate: 'seed' } };
+    const art = { hidden: true, dataset: { artOwner: 'seed' } };
     vm.runInNewContext(source, {
-      document: { querySelectorAll: () => [], querySelector: () => link },
+      document: { querySelectorAll: selector => selector.includes('data-art-owner') ? [link, art] : [], querySelector: () => null },
       fetch: async path => ({ ok: true, json: async () => path === '/api/me' ? { user } : { seeds } }),
     });
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(link.hidden, !visible);
+    assert.equal(art.hidden, !visible, 'the art panel follows the same owner check as the update link');
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
@@ -268,11 +270,13 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
                 expected.append({'type': 'module', 'src': '/assets/catalog.js'})
             elif relative in ('submit/index.html', 'submit/done/index.html'):
                 expected.append({'type': 'module', 'src': '/assets/seeds.js'})
+                expected.append({'type': 'module', 'src': '/assets/art.js'})
             elif relative.startswith('apps/'):
                 expected.append({'type': 'module', 'src': '/assets/catalog.js'})
                 expected.append({'type': 'module', 'src': '/assets/share.js'})
                 expected.append({'type': 'module', 'src': '/assets/seed-media.js'})
                 expected.append({'type': 'module', 'src': '/assets/social.js'})
+                expected.append({'type': 'module', 'src': '/assets/art.js'})
             elif relative == 'account/index.html':
                 expected.append({'type': 'module', 'src': '/assets/farm.js'})
             expected.append({'type': 'module', 'src': '/assets/session.js'})
