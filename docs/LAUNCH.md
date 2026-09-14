@@ -6,7 +6,18 @@ not need repeating unless the code moved.
 
 ## Operator does
 
-### 1. Give the deploy workflow its Cloudflare token
+### 1. Give the deploy workflow its Cloudflare token. DONE, nothing to do
+
+The token was added between the launch pass and 2026-09-13. Re-measured that day at 19:57 CDT
+from Jason's MacBook Pro (Mac17,6), macOS 26.6.2, on home broadband in Central Texas: the last
+six `Build and deploy the farm` runs on main all succeeded, the newest at 22:57 UTC for
+`farm 0.1.3`. Deploy on merge works. Check it again after any secret rotation:
+
+```sh
+gh run list --repo Titanium-Devops/tiinyapp-farm --workflow "Build and deploy the farm" --limit 1
+```
+
+The rest of this step is the launch-pass text and no longer describes the repository.
 
 Deploy on merge is wired in `.github/workflows/site.yml` and it has never worked. The repo
 has `CLOUDFLARE_ACCOUNT_ID` but not `CLOUDFLARE_API_TOKEN`, so the `site` job fails on every
@@ -34,7 +45,18 @@ gh run list --repo Titanium-Devops/tiinyapp-farm --workflow "Build and deploy th
 gh run watch <run-id> --repo Titanium-Devops/tiinyapp-farm
 ```
 
-### 2. Set up the PyPI trusted publisher
+### 2. Set up the PyPI trusted publisher. DONE, nothing to do
+
+The publisher was added between the launch pass and 2026-09-13. Re-measured that day at 19:57
+CDT, same machine: the `Publish farm to PyPI` workflow succeeded for 0.1.2 at 22:34 UTC and for
+0.1.3 at 22:57 UTC, and PyPI serves both. Cutting the next version is now a tag push and
+nothing else:
+
+```sh
+curl -s https://pypi.org/pypi/tiinyapp-farm/json | python3 -c "import json,sys; print(json.load(sys.stdin)['info']['version'])"
+```
+
+The rest of this step is the launch-pass text and no longer describes the project.
 
 `tiinyapp-farm` 0.1.0 and 0.1.1 are on PyPI, but the publish workflow did not put them
 there. Both tag pushes failed with `invalid-publisher: valid token, but no corresponding
@@ -90,7 +112,7 @@ farm stop tiiny-bench
 What to watch for: `farm device` must refuse to echo the key, `farm status` must report the
 version the app's health endpoint claims, and the start line must name the port it bound.
 
-### 4. Let the standard library read the site — DONE, nothing to do
+### 4. Let the standard library read the site. DONE, nothing to do
 
 Someone widened the rule between the launch pass and 2026-09-13. Re-measured that day at
 22:10 UTC from Jason's MacBook Pro (Mac17,6), macOS 26.6.2, Python 3.14.6, on home
@@ -164,7 +186,7 @@ anything answers differently. App pages, share cards and manifests come from the
 
 **Superseded.** The table below is the launch-pass run of 2026-09-12 21:47 CDT and is kept
 as history. The same script on 2026-09-13 22:10 UTC, same machine, answers "All 66 fetches
-answered as expected" — the python column is green now. Read this table only to see what
+answered as expected", so the python column is green now. Read this table only to see what
 the Cloudflare rule used to do.
 
 Run 2026-09-12 21:47 CDT from Jason's MacBook Pro (Mac17,6), macOS 26.6.2, Python 3.14.6,
