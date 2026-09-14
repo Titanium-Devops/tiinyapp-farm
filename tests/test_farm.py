@@ -34,6 +34,15 @@ REAL_CABLE = farm_module.host_addresses
 REAL_RESPONDER = farm_module.udp_devices
 REAL_CLIENT = farm_module.tiinyos_serving
 
+# Interpreters that are certainly not the one running these tests. A probe goes to a child only
+# when the interpreter it is given is not this one, so a test that names a real path can land on
+# the wrong side of that and quietly assert nothing: sys.executable is not a fixed string, and the
+# same python3 on one Mac reports /opt/homebrew/bin/python3 or the versioned path underneath it
+# depending on how it was started. Naming a path that cannot be this interpreter settles it
+# everywhere, including on a runner.
+ANOTHER_PYTHON = str(Path(sys.executable).with_name("another-python3"))
+AN_OLD_PYTHON = str(Path(sys.executable).with_name("python3.8"))
+
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("check_manifest", ROOT / "scripts/check-manifest.py")
 assert spec is not None and spec.loader is not None
@@ -772,6 +781,35 @@ class FarmTests(unittest.TestCase):
         self.assertIn("No Tiiny answered.", self.output.getvalue())
         self.assertIn("--key-stdin < key-file", self.output.getvalue())
 
+    def test_a_broadcast_that_could_not_be_sent_is_not_a_refused_network(self):
+        """A host can forbid broadcast and route everything else, which is what a GitHub macOS
+        runner does. Reaching a box over the cable in the same pass settles it, and saying the
+        local network was refused in the line under one that just found a Tiiny on it is nonsense
+        a person would have to talk themselves out of."""
+        with patch("farm.farm.host_addresses", return_value=["172.17.7.178"]), \
+                patch("farm.farm.urlopen",
+                      return_value=io.BytesIO(json.dumps(TIINY_JSON).encode())), \
+                patch("farm.farm.udp_devices", return_value=([], errno.EHOSTUNREACH)), \
+                patch("farm.farm.python_candidates", return_value=[]) as walked:
+            answer = self.farm.find_device()
+        self.assertFalse(answer["blocked"])
+        self.assertEqual([record["serial"] for record in answer["found"]],
+                         ["TNYM26072400300011Q"])
+        walked.assert_not_called()
+        self.assertNotIn("refused your local network", self.output.getvalue())
+
+    def test_only_the_loopback_client_answering_is_still_a_refused_network(self):
+        """The TiinyOS client answers a refused interpreter as readily as an allowed one, so it
+        cannot be the thing that clears one."""
+        with patch("farm.farm.host_addresses", return_value=["172.17.7.178"]), \
+                patch("farm.farm.device_json", return_value=(None, errno.EHOSTUNREACH)), \
+                patch("farm.farm.tiinyos_serving", return_value=True), \
+                patch("farm.farm.python_candidates", return_value=[]):
+            answer = self.farm.find_device()
+        self.assertTrue(answer["blocked"])
+        self.assertEqual(answer["found"][0]["via"], "TiinyOS client")
+        self.assertIn("was refused your local network", self.output.getvalue())
+
     def test_a_refused_python_is_never_reported_as_no_tiiny(self):
         """Jason, 2026-09-14: macOS grants the local network per binary. Last night miniconda got
         EHOSTUNREACH to the same Tiiny that Homebrew Python answered in milliseconds. Saying "no
@@ -792,7 +830,7 @@ class FarmTests(unittest.TestCase):
 
     def test_a_refused_python_hands_the_search_to_one_that_is_not(self):
         """The same walk a failed start does, and the interpreter it lands on is saved."""
-        other = "/opt/homebrew/bin/python3"
+        other = ANOTHER_PYTHON
         reached = {"found": [dict(ON_THE_CABLE)], "errno": 0, "python": [3, 14]}
         blocked = {"found": [], "errno": errno.EHOSTUNREACH, "python": list(sys.version_info[:2])}
         with patch("farm.farm.host_addresses", return_value=["172.17.7.178"]), \
@@ -815,7 +853,7 @@ class FarmTests(unittest.TestCase):
         self.assertNotIn("No Tiiny answered", printed)
 
     def test_a_python_too_old_to_run_apps_does_not_win_the_walk(self):
-        old = "/usr/bin/python3.8"
+        old = AN_OLD_PYTHON
         found = {"found": [dict(ON_THE_CABLE)], "errno": 0, "python": [3, 8]}
         blocked = {"found": [], "errno": errno.EHOSTUNREACH, "python": list(sys.version_info[:2])}
         with patch("farm.farm.host_addresses", return_value=["172.17.7.178"]), \
@@ -831,7 +869,7 @@ class FarmTests(unittest.TestCase):
     def test_the_search_runs_under_the_python_the_farm_runs_apps_with(self):
         """The CLI and an app can be two binaries, and macOS grants them separately, so the answer
         that counts is the one from the binary that will be doing the reaching."""
-        other = "/opt/homebrew/bin/python3"
+        other = ANOTHER_PYTHON
         answer = json.dumps({"found": [dict(ON_THE_CABLE)], "errno": 0, "python": [3, 14]})
         done = subprocess.CompletedProcess([], 0, answer, "")
         with patch.object(self.farm, "app_python", return_value=other), \
@@ -846,15 +884,73 @@ class FarmTests(unittest.TestCase):
         self.assertEqual([record["serial"] for record in found], ["TNYM26072400300011Q"])
 
     def test_the_child_probe_source_runs_and_answers_in_json(self):
-        """Nothing is plugged into a peer list of nothing, so the answer is empty, not a crash."""
-        done = subprocess.run([sys.executable, "-c", farm_module.FIND_PROBE,
-                               str(Path(farm_module.__file__).resolve().parents[1]), "[]", "0.5"],
-                              capture_output=True, text=True, timeout=60)
+        """A fresh interpreter carries none of this test's patches, so the child gets a Tiiny of
+        its own on loopback and a broadcast that cannot leave the machine.
+
+        The first version of this test ran the child against an empty peer list and let it
+        broadcast for real. A GitHub macOS runner forbids that, answers EHOSTUNREACH, and the test
+        failed there for a reason that had nothing to do with the child source it is about.
+        """
+        with self.a_tiiny_on_loopback() as served:
+            done = subprocess.run([sys.executable, "-c", farm_module.FIND_PROBE,
+                                   str(ROOT), json.dumps(["127.0.0.1"]), "0.5"],
+                                  capture_output=True, text=True, timeout=60,
+                                  env=dict(os.environ, PYTHONPATH=served))
         self.assertEqual(done.returncode, 0, done.stderr)
         answer = json.loads(done.stdout.strip().splitlines()[-1])
         self.assertEqual(answer["errno"], 0)
-        self.assertIsInstance(answer["found"], list)
         self.assertEqual(tuple(answer["python"]), sys.version_info[:2])
+        self.assertEqual(answer["found"], [{
+            "serial": "TNYM26072400300011Q", "name": "jason's Tiiny", "address": "127.0.0.1",
+            "via": "cable", "base": "http://127.0.0.1/v1", "addresses": ["127.0.0.1"],
+            "interfaces": [{"interface": "usb0", "address": "172.17.7.177"},
+                           {"interface": "wlan0", "address": "192.168.100.94"}]}])
+
+    @contextlib.contextmanager
+    def a_tiiny_on_loopback(self):
+        """A discovery page on 127.0.0.1, and a PYTHONPATH that keeps a child's broadcast at home.
+
+        The child is another process and cannot be patched from here, so the one thing it does that
+        would leave this machine, the datagram to 255.255.255.255, is pointed at loopback by a
+        sitecustomize instead. Yields the directory to put on the child's PYTHONPATH.
+        """
+        payload = json.dumps(TIINY_JSON).encode()
+
+        class Discovery(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802 - the name BaseHTTPRequestHandler dispatches to.
+                body = payload if self.path == "/device.json" else b"{}"
+                self.send_response(200 if self.path == "/device.json" else 404)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *_):
+                pass
+
+        try:
+            server = ThreadingHTTPServer(("127.0.0.1", DEVICE_PORT), Discovery)
+        except OSError as error:
+            self.skipTest(f"port {DEVICE_PORT} on loopback is not free here: {error}")
+        home = self.root / "loopback"
+        home.mkdir()
+        (home / "sitecustomize.py").write_text(textwrap.dedent("""
+            import socket
+            _sendto = socket.socket.sendto
+            def sendto(self, data, *rest):
+                if rest and isinstance(rest[-1], tuple) and str(rest[-1][0]).endswith(".255"):
+                    rest = rest[:-1] + (("127.0.0.1", rest[-1][1]),)
+                return _sendto(self, data, *rest)
+            socket.socket.sendto = sendto
+        """), encoding="utf-8")
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield str(home)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
 
     def test_a_child_that_will_not_run_is_an_empty_answer_not_a_crash(self):
         with patch.object(self.farm, "app_python", return_value="/no/such/python"), \
@@ -903,10 +999,10 @@ class FarmTests(unittest.TestCase):
         answer = subprocess.CompletedProcess([], 0, json.dumps({"errno": 0, "address": "",
                                                                 "python": [3, 14]}), "")
         with patch("farm.farm.subprocess.run", return_value=answer) as child:
-            self.farm.probe_device("172.17.7.177", "/opt/homebrew/bin/python3")
+            self.farm.probe_device("172.17.7.177", ANOTHER_PYTHON)
             self.farm.device_models({"base": "http://172.17.7.177/v1", "key": "not-a-real-key"},
-                                    "/opt/homebrew/bin/python3")
-            self.farm.probed("/opt/homebrew/bin/python3", ["172.17.7.177"], 1.0)
+                                    ANOTHER_PYTHON)
+            self.farm.probed(ANOTHER_PYTHON, ["172.17.7.177"], 1.0)
         self.assertEqual(len(child.call_args_list), 3)
         for held in child.call_args_list:
             self.assertFalse(held.kwargs["close_fds"])
@@ -1803,11 +1899,11 @@ while True: time.sleep(0.1)
         answer = json.dumps({"errno": errno.EHOSTUNREACH, "address": "172.17.7.177", "python": [3, 13]})
         done = subprocess.CompletedProcess([], 0, answer, "")
         with patch("farm.farm.subprocess.run", return_value=done) as child:
-            code, address, version = self.farm.probe_device("172.17.7.177", "/opt/conda/bin/python3")
+            code, address, version = self.farm.probe_device("172.17.7.177", ANOTHER_PYTHON)
         self.assertEqual(code, errno.EHOSTUNREACH)
         self.assertEqual(address, "172.17.7.177")
         self.assertEqual(version, (3, 13))
-        self.assertEqual(child.call_args.args[0][0], "/opt/conda/bin/python3")
+        self.assertEqual(child.call_args.args[0][0], ANOTHER_PYTHON)
         self.assertEqual(child.call_args.args[0][3], "172.17.7.177")
 
     def test_the_probe_source_runs_and_answers_in_json(self):
@@ -2457,15 +2553,15 @@ while True: time.sleep(0.1)
         self.configure_device()
         self.install()
         answers = {sys.executable: (errno.EHOSTUNREACH, "172.17.7.177", (3, 14)),
-                   "/opt/homebrew/bin/python3": (0, "172.17.7.177", (3, 14))}
-        with patch("farm.farm.python_candidates", return_value=["/opt/homebrew/bin/python3"]), \
+                   ANOTHER_PYTHON: (0, "172.17.7.177", (3, 14))}
+        with patch("farm.farm.python_candidates", return_value=[ANOTHER_PYTHON]), \
                 patch.object(self.farm, "probe_device", side_effect=self.answers_from(answers)):
             self.assertFalse(self.farm.doctor())
         printed = self.output.getvalue()
         self.assertIn("This Python cannot reach your Tiiny at 172.17.7.177, because macOS is"
                       " blocking it from your local network.", printed)
-        self.assertIn("Other Pythons here: /opt/homebrew/bin/python3 reaches it.", printed)
-        self.assertIn("farm start <id> --python /opt/homebrew/bin/python3", printed)
+        self.assertIn(f"Other Pythons here: {ANOTHER_PYTHON} reaches it.", printed)
+        self.assertIn(f"farm start <id> --python {ANOTHER_PYTHON}", printed)
         self.assertIn("Something above needs attention", printed)
 
     def test_doctor_reports_a_refused_key_and_never_prints_it(self):
@@ -2626,23 +2722,23 @@ while True: time.sleep(0.1)
         done = subprocess.CompletedProcess([], 0, answer, "")
         settings = {"base": "http://172.17.7.177/v1", "key": "device-key"}
         with patch("farm.farm.subprocess.run", return_value=done) as child:
-            state, models = self.farm.device_models(settings, "/opt/homebrew/bin/python3")
+            state, models = self.farm.device_models(settings, ANOTHER_PYTHON)
         self.assertEqual((state, models), ("ok", ["qwen3-8b"]))
-        self.assertEqual(child.call_args.args[0][0], "/opt/homebrew/bin/python3")
+        self.assertEqual(child.call_args.args[0][0], ANOTHER_PYTHON)
         self.assertNotIn("device-key", " ".join(child.call_args.args[0]))
         self.assertIn("device-key", child.call_args.kwargs["input"])
 
     def test_a_refused_key_is_never_answered_with_another_python(self):
         self.configure_device()
         answers = {sys.executable: (0, "172.17.7.177", (3, 14)),
-                   "/opt/homebrew/bin/python3": (0, "172.17.7.177", (3, 14))}
-        with patch("farm.farm.python_candidates", return_value=["/opt/homebrew/bin/python3"]), \
+                   ANOTHER_PYTHON: (0, "172.17.7.177", (3, 14))}
+        with patch("farm.farm.python_candidates", return_value=[ANOTHER_PYTHON]), \
                 patch.object(self.farm, "probe_device", side_effect=self.answers_from(answers)), \
                 patch.object(self.farm, "device_models", return_value=("refused", [])):
             self.assertFalse(self.farm.doctor())
         printed = self.output.getvalue()
         self.assertIn("Your Tiiny refused the key on file.", printed)
-        self.assertNotIn("--python /opt/homebrew/bin/python3", printed)
+        self.assertNotIn(f"--python {ANOTHER_PYTHON}", printed)
 
     def test_the_models_probe_source_runs_and_never_echoes_the_key(self):
         done = subprocess.run([sys.executable, "-c", MODELS_PROBE, "http://127.0.0.1:1/v1", "2.0"],

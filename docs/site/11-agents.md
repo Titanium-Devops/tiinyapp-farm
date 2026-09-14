@@ -71,7 +71,9 @@ farm device --find --json
 network per binary and grants it silently, so a Python that has not been allowed gets EHOSTUNREACH
 where another gets the device in milliseconds. `blocked` true means the farm could not see, not that
 nothing is there, and the right thing to say is the Local Network settings path, not "check your
-cable". `python` is the interpreter that did the looking, and `moved` is the one the farm changed to
+cable". Reaching a box over the cable or the network clears it, whatever else could not be sent: a
+host can forbid broadcast and route everything else, so one datagram that went nowhere is not
+evidence on its own. `python` is the interpreter that did the looking, and `moved` is the one the farm changed to
 and saved when it had to find another. Do the same in your own code: the answer that counts is the
 one from the binary that will be doing the reaching.
 
