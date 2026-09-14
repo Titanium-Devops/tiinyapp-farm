@@ -2195,6 +2195,14 @@ while True: time.sleep(0.1)
             self.assertEqual(main(["list"]), 0)
             notice.assert_called_once_with()
 
+    def test_the_cli_flag_is_taken_after_the_command_too(self):
+        with patch("farm.farm.Farm", return_value=self.farm), \
+                patch.object(self.farm, "list") as listing, \
+                patch.object(self.farm, "update_notice") as notice:
+            self.assertEqual(main(["list", "--no-update-check"]), 0)
+            listing.assert_called_once_with()
+            notice.assert_not_called()
+
     def test_a_command_that_failed_is_not_given_a_version_notice(self):
         errors = io.StringIO()
         with patch("farm.farm.Farm", return_value=self.farm), \
