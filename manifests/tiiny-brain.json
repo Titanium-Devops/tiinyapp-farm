@@ -15,8 +15,8 @@
   "screenshots": [],
   "release": {
     "url": "https://github.com/webdevtodayjason/archiver/releases/download/v0.1.1/tiiny-brain-0.1.1.tar.gz",
-    "sha256": "4c9762c90d9b6d246d6505bbf9ca3ee3eb61b045114b30c22714589bdbab46a9",
-    "size": 66801
+    "sha256": "cc3f9d0d9331cacef18674a45218406cd4a07f7ac58fa0d5d8435e989ca6971f",
+    "size": 65940
   },
   "entry": {
     "command": "python3 cockpit.py"
