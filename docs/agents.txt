@@ -44,6 +44,34 @@ farm publish reads farm.json when present and asks for missing required values. 
 
 For an existing app use `farm publish --update`. To inspect its review and checks later use `farm status <id>`.
 
+After a tagged release: farm release
+-----------------------------------
+
+Once an app is in the catalog, its listing is bumped from its GitHub release rather than
+re-uploaded. Tag the repository, publish the release on GitHub, then run from the project folder:
+
+    farm release
+
+It reads the app id from farm.json, or takes it as an argument (`farm release my-app`). It asks
+GitHub for the newest full release of the repository named in the catalog manifest, downloads that
+archive, measures its SHA-256 and exact size itself, and opens a pull request that bumps version,
+release.url, release.sha256, release.size and updatedAt. It prints that pull request URL. A
+maintainer merges it; the checks run on it like any other submission.
+
+This command uses the person's own GitHub login through the gh CLI, not their farm token. If they
+cannot push to the catalog it opens the pull request from their fork. It never invents a checksum:
+numbers in release notes are ignored and the archive is measured from the bytes GitHub serves.
+
+There is nothing to run on a schedule. The farm checks every listed app hourly and opens the same
+pull request on its own, and the maker can press "Check for a new release" on their app page. One
+pull request per app: an open one is refreshed rather than stacked on.
+
+Two optional catalog manifest fields control this, and they are set by pull request, not from
+farm.json:
+
+* updates: "auto" (the default) or "manual". manual leaves the app's version alone.
+* prereleases: false by default, so only full GitHub releases are considered. Drafts never are.
+
 farm.json
 ---------
 

@@ -1,22 +1,12 @@
 import { fail, json, remote, sha256 } from './index.mjs';
 import { checkManifest } from './manifest.mjs';
 import { catalog } from './makers.mjs';
-const LEGACY = new Set(['tiiny-bench', 'onelane', 'story-lantern', 'titanium-tiiny-bot']);
-function compareVersion(a, b) {
-  const left = a.split('.').map(BigInt), right = b.split('.').map(BigInt);
-  for (let i = 0; i < 3; i++) if (left[i] !== right[i]) return left[i] > right[i] ? 1 : -1;
-  return 0;
-}
+import { FARM_REPO, GITHUB, compareVersion, ownsSeed, releaseURL } from './catalog.mjs';
+import { releaseState } from './release.mjs';
+export { releaseURL };
 const ORIGIN = 'https://tiinyapp.farm';
-const API = 'https://api.github.com/repos/Titanium-Devops/tiinyapp-farm';
+const API = `${GITHUB}/repos/${FARM_REPO}`;
 const MAX = 50 * 1024 * 1024;
-export function releaseURL(value) {
-  let url; try { url = new URL(value); } catch { fail(400, 'Use a public HTTPS release URL.'); }
-  // Reject IP literals, local names, credentials and nonstandard ports. Every redirect hop is checked here too.
-  if (url.protocol !== 'https:' || url.username || url.password || url.hash || (url.port && url.port !== '443') ||
-      !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(url.hostname) || /(^|\.)(localhost|local|internal|test|invalid)$/i.test(url.hostname)) fail(400, 'Use a public HTTPS release URL.');
-  return url.href;
-}
 // A seed with no start command is a library, and says so, without the maker knowing the word.
 function tags(input) {
   const given = typeof input.tags === 'string' ? input.tags.split(',').map(t => t.trim().toLowerCase()).filter(Boolean) : [];
@@ -60,11 +50,7 @@ export async function seedRoutes(ctx) {
     if (!result.ok) fail(502, 'GitHub could not finish the app review request. Please try again.');
     return result.status === 204 ? {} : JSON.parse(result.text());
   }
-  const owns = async (user, manifest) => {
-    if (!user.tiinyverse) return false;
-    const owner = await get('seedowner:' + manifest.id);
-    return owner ? owner === user.id : LEGACY.has(manifest.id) && manifest.author?.tiinyverse === user.tiinyverse.profileUrl;
-  };
+  const owns = (user, manifest) => ownsSeed(user, manifest, get);
   if (path === '/api/seeds/mine' && request.method === 'GET') {
     const user = await requireUser(), keys = await get('user-seeds:' + user.id) || [];
     const seeds = [];
@@ -89,6 +75,7 @@ export async function seedRoutes(ctx) {
       }
       const social = await get('social:' + seed.id);
       item.thumbs = social?.thumbs?.length || 0; item.comments = social?.comments?.length || 0;
+      item.release = await releaseState(get, seed.id);
       try {
         const published = await env.ASSETS.fetch(new Request(ORIGIN + '/manifests/' + seed.id + '.json'));
         if (published.ok) {
@@ -109,7 +96,8 @@ export async function seedRoutes(ctx) {
         const social = await get('social:' + manifest.id);
         seeds.push({ id: manifest.id, name: manifest.name, version: manifest.version, icon: manifest.media?.icon,
           state: manifest.release ? 'published' : 'sprouting', url: '/apps/' + manifest.id + '/',
-          canUpdate: true, checks: [], reviews: [], thumbs: social?.thumbs?.length || 0, comments: social?.comments?.length || 0 });
+          canUpdate: true, checks: [], reviews: [], thumbs: social?.thumbs?.length || 0, comments: social?.comments?.length || 0,
+          release: await releaseState(get, manifest.id) });
       }
     }
     return json({ seeds });
@@ -197,7 +185,11 @@ export async function seedRoutes(ctx) {
     if (bytes && (bytes.length < 2 || bytes[0] !== 0x1f || bytes[1] !== 0x8b)) fail(400, 'The release must be a gzip archive.');
     if (bytes) { release.sha256 = await sha256(bytes); release.size = bytes.length; }
     manifest = buildManifest(input, user, release, now());
-    if (current) manifest.addedAt = current.addedAt;
+    if (current) {
+      manifest.addedAt = current.addedAt;
+      // Release tracking is set by pull request, so a site update must not drop it.
+      for (const key of ['updates', 'prereleases']) if (key in current) manifest[key] = current[key];
+    }
     const branch = 'farm/' + manifest.id + '-' + crypto.randomUUID();
     const record = { userId: user.id, id: manifest.id, name: manifest.name, version: manifest.version,
       icon: manifest.media?.icon, branch, state: 'preparing', createdAt: new Date(now()).toISOString() };

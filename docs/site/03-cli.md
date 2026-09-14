@@ -173,10 +173,6 @@ apps. See [Publish an app](/docs/publish/) for the whole path and the `farm.json
 
 ## farm release
 
-> Arrives with the release path. This command is on the open pull request
-> [#5](https://github.com/Titanium-Devops/tiinyapp-farm/pull/5) and is not in the published package
-> until that merges.
-
 ```
 farm release
 farm release <id>

@@ -212,9 +212,6 @@ reconciles the saved branch before you retry, and your uploaded archive is kept.
 
 ## Keep the listing current after a release
 
-> Arrives with the release path. Everything in this section is on the open pull request
-> [#5](https://github.com/Titanium-Devops/tiinyapp-farm/pull/5) and is not live until it merges.
-
 Once an app is listed, a new version reaches the catalog from the app's own GitHub release rather
 than by typing a manifest. Publish the release, then use any of three doors:
 

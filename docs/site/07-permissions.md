@@ -107,25 +107,23 @@ before anything is extracted, and a mismatch means the archive is never unpacked
 
 ## A worked example
 
-> The refusals below are live today. The two pull requests that show them come from the release
-> path on [#5](https://github.com/Titanium-Devops/tiinyapp-farm/pull/5), which has not merged yet.
-
-OneLane and Story Lantern were both tagged 0.1.1 and both bump pull requests went red. Schema,
+OneLane and Story Lantern were both tagged 0.1.1, and both bump pull requests went red. Schema,
 identity, owner, download and archive all passed on both. The static scan is what failed them:
 
-- OneLane 0.1.1 imports `subprocess` in `examples/two_apps.py` and in `tests/fake_device_test.py`.
-- Story Lantern 0.1.1 imports it in `device.py` at line 39, which is new in that version.
+- OneLane 0.1.1 imported `subprocess` in `examples/two_apps.py` and in `tests/fake_device_test.py`.
+- Story Lantern 0.1.1 imported it in `device.py`, to read addresses out of `ip` or `ifconfig`.
 
-Neither import is in the code path that runs on somebody's machine. One is an example, one is a
-test, one is a device helper. The scan does not care, because it reads every `.py` file in the
-archive and shell access has no permission that grants it.
+None of those imports was in the code path that runs on somebody's machine. One was an example, one
+was a test, one was a device helper. The scan does not care, because it reads every `.py` file in
+the archive and shell access has no permission that grants it.
 
-OneLane 0.1.0 is already listed and fails the same scan today, so this is not something 0.1.1
-introduced there. It is what happens when a rule is added after entries exist.
+OneLane 0.1.0 had been listed since before that rule existed, and it fails the same scan today. That
+is what happens when a rule arrives after the entries do.
 
-There are two honest ways out and both are a maintainer's call: the apps drop `subprocess` and cut
-0.1.2, or the scan changes, for instance by ignoring `examples/` and `tests/` or by adding a
-declared permission. Nothing has been decided, and both pull requests are open.
+There were two honest ways out: the apps drop `subprocess`, or the scan changes to allow it
+somewhere. The apps dropped it. Story Lantern finds this machine's addresses with sockets, OneLane
+starts its second process with `multiprocessing`, and 0.1.2 of each is what the catalog lists now.
+The rule did not move, and the pull requests that could not pass it were closed rather than merged.
 
 ## What none of this proves
 

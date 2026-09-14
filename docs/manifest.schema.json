@@ -251,6 +251,20 @@
         "minLength": 1
       }
     },
+    "updates": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "manual"
+      ],
+      "default": "auto",
+      "description": "How the catalog tracks new GitHub releases. auto lets the farm open a bump pull request when the repo publishes a newer tag; manual leaves this app alone. Defaults to auto."
+    },
+    "prereleases": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether release tracking considers GitHub prereleases. Defaults to false, so only full releases are picked up."
+    },
     "verified": {
       "type": "boolean",
       "description": "Only a human maintainer sets true in a follow-up commit after CI and manual review."

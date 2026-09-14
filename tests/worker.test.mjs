@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { gzipSync } from 'node:zlib';
+import { generateKeyPairSync, createPublicKey } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { spawnSync } from 'node:child_process';
@@ -8,6 +9,7 @@ import { createApp, sha256, boundedBody } from '../worker/index.mjs';
 import { proofRoutes } from '../worker/proof.mjs';
 import { seedRoutes, releaseURL } from '../worker/seeds.mjs';
 import { artRoutes, headerPrompt, iconPrompt, cleanScene, DAILY } from '../worker/art.mjs';
+import { releaseRoutes, appJWT, privateKeyBytes, pickRelease, pickURL, serialize } from '../worker/release.mjs';
 import { checkManifest } from '../worker/manifest.mjs';
 import worker, { FarmCoordinator } from '../worker/main.mjs';
 const ORIGIN = 'https://tiinyapp.farm';
@@ -17,21 +19,39 @@ const DRAWINGS = 'https://api.openai.com/v1/images/generations';
 // Only the magic bytes matter: the Worker sniffs the type it was sent rather than trusting the ask.
 const drawnPNG = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.from('fixture icon pixels')]);
 const drawnWEBP = Buffer.concat([Buffer.from('RIFF'), Buffer.from([0, 0, 0, 0]), Buffer.from('WEBP'), Buffer.from('fixture header pixels')]);
+// A fake app repository with two releases, so the button never touches GitHub in tests.
+const APP_REPO = 'maker/fake-app';
+const ARCHIVES = new Map(['v0.1.0', 'v0.1.1', 'v0.2.0'].map(tag => [tag, gzipSync(Buffer.from('fake-app ' + tag + ' source'))]));
+const archiveURL = tag => `https://github.com/${APP_REPO}/archive/refs/tags/${tag}.tar.gz`;
+const assetURL = (tag, name) => `https://github.com/${APP_REPO}/releases/download/${tag}/${name}`;
+const githubRelease = (tag, extra = {}) => ({ tag_name: tag, draft: false, prerelease: false, assets: [], body: 'sha256: ' + '0'.repeat(64), ...extra });
+const KEYS = generateKeyPairSync('rsa', { modulusLength: 2048, publicKeyEncoding: { type: 'spki', format: 'pem' }, privateKeyEncoding: { type: 'pkcs1', format: 'pem' } });
+function listedApp(changes = {}) {
+  return { id: 'fake-app', name: 'Fake App', pitch: 'A stand-in app.', description: 'Two releases on GitHub.',
+    version: '0.1.0', author: { name: 'Aster & Fern', url: PROFILE, tiinyverse: PROFILE }, license: 'MIT',
+    homepage: 'https://github.com/maker/fake-app', repo: 'https://github.com/maker/fake-app', screenshots: [],
+    release: { url: archiveURL('v0.1.0'), sha256: 'a'.repeat(64), size: 11 }, entry: { command: 'python3 app.py' },
+    requires: { ports: [7788], device: { models: ['chat'], npuUnits: 4 } }, permissions: ['network'],
+    tags: ['developer-tools'], verified: false, addedAt: '2026-09-12', updatedAt: '2026-09-12', ...changes };
+}
 class Store {
   values = new Map();
   async get(key, type) { const value = this.values.get(key); return type === 'json' && value ? JSON.parse(value) : value ?? null; }
   async put(key, value) { this.values.set(key, value); }
   async delete(key) { this.values.delete(key); }
 }
-function fixture() {
+function fixture({ appKeys = true } = {}) {
   let clock = Date.parse('2026-09-12T12:00:00Z');
   const store = new Store(), objects = new Map(), mails = [], calls = [], manifests = [], published = new Map();
+  const branches = new Map(), releasePulls = [];
+  let releases = [githubRelease('v0.1.0'), githubRelease('v0.1.1')], publicOnly = false;
   let html = '<h1>Aster &amp; Fern</h1>', githubId = 42, githubFail = '', profileStatus = 200, resendStatus = 200;
   const draws = [];
   let drawStatus = 200, drawPayload = null;
   const env = { FARM: store, SESSION_SECRET: 'test-secret-with-at-least-32-characters', RESEND_API_KEY: 'resend-secret',
     GITHUB_CLIENT_ID: 'client', GITHUB_CLIENT_SECRET: 'client-secret', FARM_GITHUB_TOKEN: 'farm-only-secret',
     OPENAI_API_KEY: 'drawing-only-secret',
+    ...(appKeys ? { FARM_APP_ID: '456', FARM_APP_PRIVATE_KEY: KEYS.privateKey } : {}),
     SEEDS: { async put(key, value, options) { objects.set(key, { value, options }); },
       async get(key) { const object = objects.get(key); return object && { body: object.value, size: object.value.length, httpEtag: '"fixture"' }; },
       async delete(key) { objects.delete(key); } },
@@ -60,19 +80,58 @@ function fixture() {
     }
     if (String(url) === 'https://github.com/login/oauth/access_token') return reply({ access_token: 'never-store-this-token' });
     if (String(url) === 'https://api.github.com/user') return reply({ id: githubId, login: 'gardener' + githubId, name: 'GitHub name', avatar_url: 'https://example.org/avatar.png' });
+    if (String(url).startsWith('https://api.github.com/repos/' + APP_REPO + '/releases')) {
+      if (publicOnly && options.headers?.Authorization) return reply({ message: 'Not Found' }, 404);
+      return reply(releases);
+    }
+    if (ARCHIVES.has(String(url).match(/\/(v\d+\.\d+\.\d+)[./]/)?.[1]) && /github\.com/.test(String(url))) {
+      const tag = String(url).match(/\/(v\d+\.\d+\.\d+)[./]/)[1];
+      return new Response(ARCHIVES.get(tag));
+    }
+    if (String(url) === 'https://api.github.com/app/installations/7/access_tokens') {
+      assert.match(options.headers.Authorization, /^Bearer eyJ/, 'the installation token is minted with the app JWT');
+      return reply({ token: 'app-installation-token' }, 201);
+    }
     if (String(url).startsWith('https://api.github.com/repos/Titanium-Devops/tiinyapp-farm')) {
-      if (String(url).includes('/commits/')) assert.equal(options.headers.Authorization, undefined);
-      else assert.equal(options.headers.Authorization, 'Bearer farm-only-secret');
       const route = String(url).replace('https://api.github.com/repos/Titanium-Devops/tiinyapp-farm', '');
+      if (String(url).includes('/commits/')) assert.equal(options.headers.Authorization, undefined);
+      else if (route === '/installation') assert.match(options.headers.Authorization, /^Bearer eyJ/);
+      else assert.ok(['Bearer farm-only-secret', 'Bearer app-installation-token'].includes(options.headers.Authorization),
+        'unexpected credential ' + options.headers.Authorization);
       if (githubFail && route.includes(githubFail)) return reply({ error: 'fake failure' }, 500);
+      if (route === '/installation') return reply({ id: 7 });
       if (route === '') return reply({ default_branch: 'main' });
       if (route.startsWith('/contents/') && options.method === 'GET') {
-        const seed = published.get(route.match(/manifests\/(.+)\.json$/)?.[1]);
+        const [, id, ref] = route.match(/manifests\/(.+?)\.json(?:\?ref=(.+))?$/) || [];
+        if (ref) {
+          const held = branches.get(decodeURIComponent(ref) + ':' + id);
+          return held ? reply({ sha: 'd'.repeat(40), content: Buffer.from(held).toString('base64') }) : reply({}, 404);
+        }
+        const seed = published.get(id);
         return seed ? reply({ sha: 'c'.repeat(40), content: Buffer.from(JSON.stringify(seed)).toString('base64') }) : reply({}, 404);
       }
-      if (route.startsWith('/contents/') && options.method === 'PUT') { manifests.push(JSON.parse(Buffer.from(JSON.parse(options.body).content, 'base64').toString())); return reply({ content: {} }); }
+      if (route.startsWith('/contents/') && options.method === 'PUT') {
+        const sent = JSON.parse(options.body), text = Buffer.from(sent.content, 'base64').toString();
+        manifests.push(JSON.parse(text));
+        if (sent.branch) branches.set(sent.branch + ':' + route.match(/manifests\/(.+?)\.json/)[1], text);
+        return reply({ content: {} });
+      }
       if (route.startsWith('/git/ref/')) return reply({ object: { sha: 'a'.repeat(40) } });
       if (route.startsWith('/git/refs')) return reply({});
+      if (route.startsWith('/pulls?')) return reply(releasePulls.filter(pull => pull.state === 'open'));
+      if (/^\/pulls\/\d+$/.test(route) && options.method === 'PATCH') {
+        const pull = releasePulls.find(item => item.number === Number(route.split('/')[2]));
+        Object.assign(pull, JSON.parse(options.body));
+        return reply(pull);
+      }
+      if (route === '/pulls' && JSON.parse(options.body || '{}').head?.startsWith('farm-release/')) {
+        const sent = JSON.parse(options.body);
+        const pull = { number: 200 + releasePulls.length, state: 'open', title: sent.title, body: sent.body,
+          base: { ref: sent.base }, head: { ref: sent.head, repo: { full_name: 'Titanium-Devops/tiinyapp-farm' } },
+          html_url: 'https://github.com/Titanium-Devops/tiinyapp-farm/pull/' + (200 + releasePulls.length) };
+        releasePulls.push(pull);
+        return reply(pull, 201);
+      }
       if (route === '/pulls') return reply({ number: 123, html_url: 'https://github.com/Titanium-Devops/tiinyapp-farm/pull/123' }, 201);
       if (route === '/pulls/123') return reply({ state: 'open', head: { sha: 'b'.repeat(40) } });
       if (route.endsWith('/labels')) return reply([{ name: 'from-the-site' }]);
@@ -87,7 +146,7 @@ function fixture() {
     if (String(url) === 'https://loop.example.org/a') return new Response(null, { status: 302, headers: { location: 'https://loop.example.org/a' } });
     throw new Error('Unexpected fetch: ' + url);
   };
-  const app = createApp({ fetcher, now: () => clock, proofRoutes, seedRoutes, artRoutes });
+  const app = createApp({ fetcher, now: () => clock, proofRoutes, releaseRoutes, seedRoutes, artRoutes });
   const call = async (path, body, session = '', extra = {}, method = 'POST') => app(new Request(ORIGIN + path, {
     ...(body === undefined ? {} : { method, body: body instanceof FormData ? body : JSON.stringify(body) }),
     headers: { Origin: ORIGIN, ...(session ? { Cookie: session } : {}), ...(body && !(body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...extra },
@@ -107,6 +166,7 @@ function fixture() {
     assert.equal((await call('/api/tiinyverse/verify', {}, session)).status, 200);
   }
   return { env, store, objects, mails, manifests, published, calls, draws, call, email, proof, fetcher,
+    branches, releasePulls, setReleases: list => { releases = list; }, publicOnly: () => { publicOnly = true; },
     advance: n => { clock += n; }, html: s => { html = s; }, githubId: n => { githubId = n; }, githubFail: s => { githubFail = s; },
     profileStatus: n => { profileStatus = n; }, resendStatus: n => { resendStatus = n; }, now: () => clock,
     drawing: (status, payload = null) => { drawStatus = status; drawPayload = payload; } };
@@ -961,4 +1021,176 @@ test('drawing app art runs outside the coordinator queue, so no other maker wait
   const response = await worker.fetch(new Request(ORIGIN + '/api/seeds/little-library/art', { method: 'POST', headers: { Origin: ORIGIN, 'Content-Type': 'application/json' }, body: '{}' }), f.env);
   assert.equal(seen.at(-1), '/api/seeds/little-library/art');
   assert.equal(response.status, 401);
+});
+
+// The release-to-listing path: the maker's button, driven by the fake app repository above.
+async function ownedApp(f, manifest = listedApp()) {
+  const signed = await f.email();
+  await f.proof(signed.cookie);
+  f.published.set(manifest.id, manifest);
+  await f.store.put('seedowner:' + manifest.id, JSON.stringify(signed.user.id));
+  return signed;
+}
+const checkFor = (f, signed, id = 'fake-app') => f.call(`/api/seeds/${id}/release-check`, {}, signed.cookie);
+
+test('the release button opens one pull request and measures the archive itself', async () => {
+  const f = fixture(), signed = await ownedApp(f);
+  const response = await checkFor(f, signed);
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.status, 'found');
+  assert.equal(result.message, 'v0.1.1 found, checks running, a maintainer will review it');
+  assert.equal(f.releasePulls.length, 1);
+  assert.equal(f.releasePulls[0].head.ref, 'farm-release/fake-app');
+  assert.equal(f.releasePulls[0].base.ref, 'main');
+  assert.equal(result.prUrl, f.releasePulls[0].html_url);
+  const written = f.manifests.at(-1);
+  assert.equal(written.version, '0.1.1');
+  assert.equal(written.updatedAt, '2026-09-12');
+  assert.equal(written.release.url, archiveURL('v0.1.1'));
+  assert.equal(written.release.sha256, await sha256(ARCHIVES.get('v0.1.1')));
+  assert.equal(written.release.size, ARCHIVES.get('v0.1.1').length);
+  assert.notEqual(written.release.sha256, '0'.repeat(64), 'numbers in release notes are never copied');
+  checkManifest(written);
+  assert.equal(f.branches.get('farm-release/fake-app:fake-app'), serialize(written));
+  assert.match(f.releasePulls[0].body, new RegExp(written.release.sha256));
+  assert.ok(!f.releasePulls[0].body.includes('—'));
+  for (const call of f.calls.filter(item => item.url.includes('/repos/Titanium-Devops/') && !item.url.endsWith('/installation')))
+    assert.equal(call.headers.Authorization, 'Bearer app-installation-token', 'every catalog write uses the app token');
+});
+
+test('the button is limited to once a minute and then reuses the open pull request', async () => {
+  const f = fixture(), signed = await ownedApp(f);
+  const first = await (await checkFor(f, signed)).json();
+  const again = await checkFor(f, signed);
+  assert.equal(again.status, 429);
+  assert.match((await again.json()).message, /checked a moment ago, so try again in \d+ seconds/);
+  f.advance(61000);
+  const third = await checkFor(f, signed);
+  assert.equal(third.status, 200);
+  assert.equal((await third.json()).prUrl, first.prUrl);
+  assert.equal(f.releasePulls.length, 1, 'one pull request per app, never stacked');
+  assert.equal(f.manifests.length, 1, 'an unchanged branch is not rewritten');
+});
+
+test('a newer release refreshes the same pull request instead of opening another', async () => {
+  const f = fixture(), signed = await ownedApp(f);
+  const first = await (await checkFor(f, signed)).json();
+  f.setReleases([githubRelease('v0.1.0'), githubRelease('v0.1.1'), githubRelease('v0.2.0')]);
+  f.advance(61000);
+  const second = await (await checkFor(f, signed)).json();
+  assert.equal(second.version, '0.2.0');
+  assert.equal(second.prUrl, first.prUrl);
+  assert.equal(f.releasePulls.length, 1);
+  assert.equal(f.releasePulls[0].title, 'Fake App 0.2.0');
+  assert.equal(f.manifests.at(-1).version, '0.2.0');
+});
+
+test('a listed release, an older release and manual updates each answer without a pull request', async () => {
+  const f = fixture(), signed = await ownedApp(f, listedApp({ version: '0.1.1' }));
+  assert.equal((await (await checkFor(f, signed)).json()).message, 'already listed at v0.1.1');
+  assert.equal(f.releasePulls.length, 0);
+
+  const older = fixture(), olderSigned = await ownedApp(older, listedApp({ version: '0.1.1' }));
+  older.setReleases([githubRelease('v0.1.0')]);
+  assert.equal((await (await checkFor(older, olderSigned)).json()).message, 'no release newer than v0.1.1 on GitHub');
+  assert.equal(older.releasePulls.length, 0);
+
+  const none = fixture(), noneSigned = await ownedApp(none);
+  none.setReleases([]);
+  assert.equal((await (await checkFor(none, noneSigned)).json()).message, 'no release newer than v0.1.0 on GitHub');
+
+  const manual = fixture(), manualSigned = await ownedApp(manual, listedApp({ updates: 'manual' }));
+  const answer = await (await checkFor(manual, manualSigned)).json();
+  assert.equal(answer.status, 'manual');
+  assert.equal(manual.releasePulls.length, 0);
+  assert.equal(manual.manifests.length, 0);
+});
+
+test('drafts and prereleases are skipped unless the manifest opts in', async () => {
+  const releases = [githubRelease('v0.1.0'), githubRelease('v0.2.0', { prerelease: true }),
+    githubRelease('v0.3.0', { draft: true }), githubRelease('v0.1.1-rc.1')];
+  const f = fixture(), signed = await ownedApp(f);
+  f.setReleases(releases);
+  assert.equal((await (await checkFor(f, signed)).json()).message, 'already listed at v0.1.0');
+  assert.equal(f.releasePulls.length, 0);
+  const opted = fixture(), optedSigned = await ownedApp(opted, listedApp({ prereleases: true }));
+  opted.setReleases(releases);
+  const result = await (await checkFor(opted, optedSigned)).json();
+  assert.equal(result.version, '0.2.0', 'a draft is never a candidate');
+  assert.equal(opted.releasePulls.length, 1);
+});
+
+test('only the signed-in maker of the app can press the button', async () => {
+  const f = fixture(), signed = await ownedApp(f);
+  assert.equal((await f.call('/api/seeds/fake-app/release-check', {})).status, 401);
+  const stranger = await f.email('stranger@example.org');
+  assert.equal((await checkFor(f, stranger)).status, 403);
+  assert.equal((await f.call('/api/seeds/no-such-app/release-check', {}, signed.cookie)).status, 404);
+  assert.equal((await f.call('/api/seeds/fake-app/release-check', undefined, signed.cookie)).status, 405);
+  assert.equal((await f.call('/api/seeds/fake-app/release-check', {}, signed.cookie, { Origin: 'https://evil.example' })).status, 403);
+  assert.equal(f.releasePulls.length, 0);
+});
+
+test('Your apps carries the last release check for an app the maker owns', async () => {
+  const f = fixture(), signed = await ownedApp(f);
+  const checked = await (await checkFor(f, signed)).json();
+  const { seeds } = await (await f.call('/api/seeds/mine', undefined, signed.cookie)).json();
+  const mine = seeds.find(seed => seed.id === 'fake-app');
+  assert.equal(mine.canUpdate, true);
+  assert.equal(mine.release.message, checked.message);
+  assert.equal(mine.release.prUrl, checked.prUrl);
+  assert.equal(mine.release.status, 'found');
+});
+
+test('the app JWT is RS256 over the app id, from a PKCS#1 or a PKCS#8 key', async () => {
+  const moment = Date.parse('2026-09-12T12:00:00Z');
+  const token = await appJWT({ FARM_APP_ID: '456', FARM_APP_PRIVATE_KEY: KEYS.privateKey }, moment);
+  const [header, claims, signature] = token.split('.');
+  assert.deepEqual(JSON.parse(Buffer.from(header, 'base64url').toString()), { alg: 'RS256', typ: 'JWT' });
+  const body = JSON.parse(Buffer.from(claims, 'base64url').toString());
+  assert.equal(body.iss, '456');
+  assert.equal(body.iat, Math.floor(moment / 1000) - 60);
+  assert.equal(body.exp - body.iat, 600);
+  const der = Uint8Array.from(Buffer.from(KEYS.publicKey.replace(/-----[^-]*-----/g, '').replace(/\s+/g, ''), 'base64'));
+  const key = await crypto.subtle.importKey('spki', der, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+  assert.ok(await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, Buffer.from(signature, 'base64url'),
+    Buffer.from(`${header}.${claims}`)), 'the signature verifies with the app public key');
+  const pkcs8 = createPublicKey(KEYS.publicKey) && generateKeyPairSync('rsa', { modulusLength: 2048,
+    publicKeyEncoding: { type: 'spki', format: 'pem' }, privateKeyEncoding: { type: 'pkcs8', format: 'pem' } });
+  assert.match(await appJWT({ FARM_APP_ID: '7', FARM_APP_PRIVATE_KEY: pkcs8.privateKey }, moment), /^eyJ/);
+  assert.deepEqual(privateKeyBytes(pkcs8.privateKey),
+    Uint8Array.from(Buffer.from(pkcs8.privateKey.replace(/-----[^-]*-----/g, '').replace(/\s+/g, ''), 'base64')));
+});
+
+test('without the app credentials the button still answers, but says a found release needs them', async () => {
+  const quiet = fixture({ appKeys: false });
+  const signed = await ownedApp(quiet, listedApp({ version: '0.1.1' }));
+  assert.equal((await (await checkFor(quiet, signed)).json()).message, 'already listed at v0.1.1');
+  const f = fixture({ appKeys: false }), owner = await ownedApp(f);
+  const response = await checkFor(f, owner);
+  assert.equal(response.status, 503);
+  assert.match((await response.json()).error, /not switched on yet/);
+  assert.equal(f.releasePulls.length, 0);
+});
+
+test('the archive shape of the listing is kept: an asset stays an asset, a source archive stays one', () => {
+  const packaged = listedApp({ release: { url: assetURL('v0.1.0', 'fake-app-0.1.0.tar.gz'), sha256: 'c'.repeat(64), size: 4 } });
+  const release = githubRelease('v0.1.1', { assets: [{ name: 'fake-app-0.1.1.tar.gz', browser_download_url: assetURL('v0.1.1', 'fake-app-0.1.1.tar.gz') }] });
+  assert.equal(pickURL(packaged, APP_REPO, release, '0.1.1'), assetURL('v0.1.1', 'fake-app-0.1.1.tar.gz'));
+  assert.equal(pickURL(listedApp(), APP_REPO, githubRelease('v0.1.1'), '0.1.1'), archiveURL('v0.1.1'));
+  assert.equal(pickRelease([githubRelease('v0.1.0'), githubRelease('v0.1.1')]).version, '0.1.1');
+  assert.equal(pickRelease([githubRelease('v0.2.0', { draft: true })]), null);
+  assert.throws(() => pickURL(packaged, APP_REPO, githubRelease('v0.1.1', { assets: [
+    { name: 'one.tar.gz', browser_download_url: assetURL('v0.1.1', 'one.tar.gz') },
+    { name: 'two.tar.gz', browser_download_url: assetURL('v0.1.1', 'two.tar.gz') }] }), '0.1.1'),
+  /no tar.gz asset named fake-app-0.1.1.tar.gz/);
+});
+
+test('a maker repository the farm app cannot read is asked for without a credential', async () => {
+  const f = fixture(), signed = await ownedApp(f);
+  f.publicOnly();
+  const result = await (await checkFor(f, signed)).json();
+  assert.equal(result.status, 'found');
+  assert.equal(f.releasePulls.length, 1);
 });

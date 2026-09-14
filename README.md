@@ -6,7 +6,8 @@ Browse at https://tiinyapp.farm, install with one command, share the device with
 Brought to you by [Titanium Bot](https://titanium.bot). Made by Titanium Computing.
 
 - `manifests/` one JSON file per app, the whole catalog.
-- `farm/` the installer: `farm install <app>`, `farm start`, `farm stop`, `farm update`, `farm list`.
+- `farm/` the installer: `farm install <app>`, `farm start`, `farm stop`, `farm update`, `farm list`,
+  and `farm release` to bump a listing from a new GitHub release.
 - `site/` the static catalog, built from the manifests.
 - `.github/workflows/` the checks a submitted manifest must pass.
 
@@ -116,6 +117,16 @@ undeclared network access and secret patterns. A declared `"selfcheck": true`
 runs the entry with `--selfcheck` in an offline container for at most 120 seconds.
 Shell/subprocess use is forbidden. Microphone access is declared, not detected.
 Checks report one PR comment; only a maintainer sets `verified: true` after review.
+
+## Keep a listing current
+
+A listed app is bumped from its own GitHub release. `.github/workflows/release-poll.yml` checks
+every manifest hourly, the maker can press Check for a new release on their app page, and
+`farm release` does the same from a shell. Each downloads the release archive and measures its
+checksum and size before writing them, and opens one pull request per app for a maintainer to
+merge. The engine is `farm/release.py` and the poller is `scripts/poll-releases.py`. All three
+open their pull requests with the farm's GitHub App so that the manifest checks run on them;
+[docs/GITHUB-APP.md](docs/GITHUB-APP.md) has its settings and the two secret names.
 
 ## Publish the farm CLI
 

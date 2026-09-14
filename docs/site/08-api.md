@@ -218,9 +218,6 @@ it.
 
 ## Check for a new release
 
-> Arrives with the release path. This route is on the open pull request
-> [#5](https://github.com/Titanium-Devops/tiinyapp-farm/pull/5).
-
 | Method | Path | Answers |
 | --- | --- | --- |
 | POST | `/api/seeds/<id>/release-check` | `{"status", "message", "checkedAt", "version", "prUrl"}` |
