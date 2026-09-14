@@ -243,6 +243,8 @@ The button answers in three lines depending on what it finds: `v0.1.1 found, che
 maintainer will review it`, `already listed at v0.1.1`, or `no release newer than v0.1.0 on
 GitHub`.
 
+**A published tag never moves.** The farm records the checksum of the archive it downloaded when it listed your version. If you force-move that tag afterwards, GitHub serves different bytes under the same version, every `farm install` fails its checksum, and nobody can tell which copy they have. A fix is always a new version number.
+
 ## Limits in one place
 
 | Limit | Value |

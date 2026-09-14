@@ -133,3 +133,5 @@ never changes that value. Merge publishes the updated catalog after site tests.
 
 Release drafts may use `--allow-pending` for local schema checks only. They cannot
 pass submission CI or be installed until the real archive is published.
+
+**A published tag never moves.** The farm records the checksum of the archive it downloaded when it listed your version. If you force-move that tag afterwards, GitHub serves different bytes under the same version, every `farm install` fails its checksum, and nobody can tell which copy they have. A fix is always a new version number.
