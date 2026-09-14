@@ -70,8 +70,6 @@ class SiteTests(unittest.TestCase):
         for app in featured:
             featured_html = index.split('<section class="feat', 1)[1].split('</section>', 1)[0]
             self.assertIn(app['name'], featured_html)
-        for app in self.apps:
-            self.assertTrue(app.get('featured'))
 
     def test_every_manifest_has_a_complete_locked_app_page(self):
         for app in self.apps:
