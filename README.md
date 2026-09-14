@@ -103,6 +103,10 @@ app is stopped, started, updated or removed by it.
 A token is `farm_` followed by 40 characters. Create one on
 [Your apps](https://tiinyapp.farm/account/). It is shown once.
 
+Run `farm login` once and `publish`, `status` and the rest read the saved token, so you never have
+to pass one. `--token` works, but it puts the token in the process list where every other process on
+the machine can read it. `FARM_TOKEN` in the environment does the same job without that.
+
 ### On every command
 
 | Flag | Meaning |
@@ -191,6 +195,11 @@ What the farm hands an app it starts:
 | `PYTHONUNBUFFERED` | `1`, so output reaches `farm.log` as it happens |
 
 An app whose manifest names an environment variable in its `port` field also gets that variable.
+
+`TIINY_KEY` is the whole key, and every app the farm starts is handed it. That is how an app talks
+to your Tiiny at all, and it is what the install prompt means when it says an app can reach your
+Tiiny. Installing an app hands it nothing. Starting one does. Read what `farm install` says an app
+can reach before you start it, and remember that `verified` stays false until a human has looked.
 
 A local catalog may point at local tar archives by path or `file://` URL. A remote catalog must use
 HTTP or HTTPS release URLs, and for `farm list` it must serve either a JSON array of app ids, or
