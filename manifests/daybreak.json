@@ -25,8 +25,11 @@
       8811
     ],
     "device": {
-      "models": [],
-      "npuUnits": 0
+      "models": [
+        "chat",
+        "embedding"
+      ],
+      "npuUnits": 29
     }
   },
   "permissions": [
