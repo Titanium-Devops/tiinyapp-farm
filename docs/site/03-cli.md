@@ -453,6 +453,12 @@ Every shape is documented, with an example of each, in
 | `TIINY_BASE` | Device base URL for `farm device` in its scripted form |
 | `TIINY_KEY` | Device API key for `farm device` in its scripted form |
 | `FARM_NO_UPDATE_CHECK` | Set to anything and the farm never looks for a newer farm |
+| `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` | The proxy the farm fetches through, and the hosts it does not. Lowercase spellings work too |
+
+The farm reads its proxy from those variables only, and never from macOS System Settings. Asking
+the machine where its proxy is corrupts the process it is asked in: after that lookup and any name
+lookup, everything this process starts, an app included, is killed before it can run. If your proxy
+lives in System Settings and nowhere else, put it in `HTTPS_PROXY` as well.
 
 A local catalog may point at local tar archives by path or `file://` URL. A remote catalog must use
 HTTP or HTTPS release URLs, and for `farm list` it must serve either a JSON array of app ids, or

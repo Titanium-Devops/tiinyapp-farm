@@ -20,6 +20,7 @@ import textwrap
 import threading
 import time
 import unittest
+import urllib.request
 from unittest.mock import MagicMock, call, patch
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -1025,6 +1026,65 @@ class FarmTests(unittest.TestCase):
                               capture_output=True, text=True, timeout=120)
         self.assertEqual(done.stdout.strip().splitlines()[-1], "0",
                          "a probe was killed before it could answer: " + done.stderr[-400:])
+
+    def test_an_app_still_starts_after_urllib_met_a_name_it_could_not_fetch(self):
+        """The same regression where it would actually bite somebody.
+
+        An app is launched with a working directory, a lock to inherit and a session of its own,
+        and CPython forks rather than spawns for any one of those, so no launch flag can save a
+        process that has already been poisoned. The fetch has to stop doing it. Run in a child of
+        its own, because the state it is about belongs to the whole process.
+        """
+        self.install()
+        source = textwrap.dedent("""
+            import contextlib, sys
+            sys.path.insert(0, sys.argv[1])
+            from farm.farm import Farm, urlopen
+            with contextlib.suppress(Exception):
+                urlopen("http://farm-test.invalid/nothing", timeout=2).close()
+            farm = Farm(sys.argv[2], sys.argv[3])
+            farm.start("fake-app")
+            print("STARTED", farm.active("fake-app"))
+        """)
+        done = subprocess.run([sys.executable, "-c", source, str(ROOT), str(self.home),
+                               str(self.catalog)], capture_output=True, text=True, timeout=120)
+        self.assertIn("STARTED", done.stdout,
+                      "the app was killed before it could run: "
+                      + (done.stdout + done.stderr)[-600:])
+        self.assertIsNotNone(self.farm.active("fake-app"))
+
+    def test_the_farm_never_asks_the_machine_where_its_proxy_is(self):
+        """The macOS system proxy lookup is half of what corrupts this process, and urllib runs it
+        for any opener nobody hands a dict to."""
+        self.assertIsNot(farm_module.urlopen, urllib.request.urlopen)
+        if hasattr(urllib.request, "getproxies_macosx_sysconf"):
+            with patch("urllib.request.getproxies_macosx_sysconf") as machine:
+                farm_module.farm_opener()
+            machine.assert_not_called()
+        with patch("farm.farm.getproxies_environment") as environment:
+            farm_module.farm_opener()
+        environment.assert_called_once_with()
+
+    def test_a_proxy_in_the_environment_still_reaches_the_opener(self):
+        """What the farm gives up is a proxy a Mac holds in System Settings and nowhere else.
+        HTTP_PROXY and friends are what getproxies_environment reads, so they go on working."""
+        with patch.dict(os.environ, {"HTTP_PROXY": "http://proxy.test:8080",
+                                     "NO_PROXY": "127.0.0.1"}, clear=False):
+            opener = farm_module.farm_opener()
+        proxies = [handler.proxies for handler in opener.handlers
+                   if isinstance(handler, urllib.request.ProxyHandler)]
+        self.assertEqual(proxies, [{"http": "http://proxy.test:8080", "no": "127.0.0.1"}])
+        with patch.dict(os.environ, clear=True):
+            bare = farm_module.farm_opener()
+        self.assertEqual([handler for handler in bare.handlers
+                          if isinstance(handler, urllib.request.ProxyHandler)], [])
+
+    def test_the_farm_opens_nothing_without_a_timeout(self):
+        with patch("farm.farm._OPENER") as opener:
+            farm_module.urlopen("http://example.test/x", timeout=3)
+        self.assertEqual(opener.open.call_args.kwargs["timeout"], 3)
+        with self.assertRaises(TypeError):
+            farm_module.urlopen("http://example.test/x")
 
     def test_usb_peers_take_the_other_end_of_each_point_to_point_link(self):
         with patch("farm.farm.host_addresses",
