@@ -70,9 +70,10 @@ back to a prompt. The key never has to appear in a command argument, and the com
 it back.
 
 After saving, it asks your Tiiny for its device page once. If macOS is blocking that Python from the
-local network, which it does silently for a Python you installed yourself, it tells you to turn it on
-in System Settings, Privacy and Security, Local Network. See
-[The app cannot see my Tiiny](/docs/troubleshooting/) if an app starts but reaches nothing.
+local network, which it does silently for a Python you installed yourself, the farm finds another
+Python on this machine that can reach your Tiiny and runs your apps with that one instead. When
+anything at all looks wrong, `farm doctor` checks the lot in one go and prints a fix for each thing
+it finds. See [The app cannot see my Tiiny](/docs/troubleshooting/).
 
 ## Install an app
 

@@ -97,6 +97,18 @@ falls back to a prompt.
 
 ## The app cannot see my Tiiny
 
+Start here:
+
+```
+farm doctor
+```
+
+It says which Python the farm runs apps with, whether that Python reaches your Tiiny and how fast,
+whether the key on file is accepted, which other Pythons on this machine can reach it, and whether
+anything is sitting on a port an installed app needs. Every line that fails is followed by a line
+beginning `Fix:`. It exits 0 when everything passes and 1 when something does not, and the whole
+thing is plain text, so it pastes into a message to somebody who can help.
+
 The app starts, the page opens, and nothing on it can reach the device. Its log says something like
 `nothing answered http://172.17.7.177:39218/device.json`, and `farm device` saved the right address.
 
@@ -126,8 +138,21 @@ To see the refusal for yourself, ask that interpreter to fetch the device page:
 ```
 
 `URLError [Errno 65] No route to host` is the block. A line of JSON means the network is fine and the
-problem is elsewhere. `farm start` and `farm device` run this check for you and print the same advice
-when they hit it, and neither one fails because of it.
+problem is elsewhere.
+
+You usually will not have to do any of this. Before it launches an app, `farm start` asks the Tiiny
+for its device page from the Python that app would run under. If macOS refuses that Python, the farm
+tries the other Pythons on this machine, runs the app with the first one that does reach your Tiiny,
+and says so in one line:
+
+```
+This Python cannot reach your Tiiny, so the farm is running AINode Pocket with /opt/homebrew/bin/python3 instead.
+```
+
+That choice is remembered for this machine, so later starts use it without asking. `farm device`
+does the same check when you save your settings. To pick the Python yourself, name it, and the farm
+keeps it: `farm start <id> --python /opt/homebrew/bin/python3`. Only when no Python on the machine
+can reach your Tiiny do you get the advice above, and none of this ever fails a start.
 
 On Linux the same errno is 113, and it means what it says: no route to the host. Check the address
 you saved with `farm device` and whether the Tiiny is on the same network.

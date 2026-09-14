@@ -20,10 +20,11 @@ import threading
 import time
 import unittest
 from unittest.mock import call, patch
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 
-from farm.farm import DEVICE_PORT, DEVICE_PROBE, Farm, FarmError, describe_size, main
+from farm.farm import (DEVICE_PORT, DEVICE_PROBE, Farm, FarmError, MODELS_PROBE, describe_size,
+                       main, python_candidates)
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("check_manifest", ROOT / "scripts/check-manifest.py")
@@ -1089,7 +1090,7 @@ while True: time.sleep(0.1)
     def test_cli_port_option_dispatches_to_start(self):
         with patch('farm.farm.Farm', return_value=self.farm), patch.object(self.farm, 'start') as start:
             self.assertEqual(main(['start', 'fake-app', '--port', '43211']), 0)
-        start.assert_called_once_with('fake-app', port=43211)
+        start.assert_called_once_with('fake-app', port=43211, python=None)
 
     def test_status_legacy_record_uses_manifest_health(self):
         self.install()
@@ -1313,8 +1314,9 @@ while True: time.sleep(0.1)
         the same code under Homebrew Python found his Tiiny in 5 ms."""
         self.configure_device()
         self.install()
-        with patch("farm.farm.urlopen",
-                   side_effect=URLError(OSError(errno.EHOSTUNREACH, "No route to host"))) as probe:
+        with patch("farm.farm.python_candidates", return_value=[]), \
+                patch("farm.farm.urlopen",
+                      side_effect=URLError(OSError(errno.EHOSTUNREACH, "No route to host"))) as probe:
             self.farm.start("fake-app")
         printed = self.output.getvalue()
         self.assertIn("Fake app is running.", printed)
@@ -1359,7 +1361,7 @@ while True: time.sleep(0.1)
     def test_a_probe_that_breaks_never_fails_the_start(self):
         self.configure_device()
         self.install()
-        with patch.object(self.farm, "probe_local_network", side_effect=RuntimeError("probe exploded")):
+        with patch.object(self.farm, "probe_device", side_effect=RuntimeError("probe exploded")):
             self.farm.start("fake-app")
         self.assertIn("Fake app is running.", self.output.getvalue())
         self.assertNotIn("probe exploded", self.output.getvalue())
@@ -1367,6 +1369,7 @@ while True: time.sleep(0.1)
 
     def test_device_says_when_macos_is_blocking_the_local_network(self):
         with patch("getpass.getpass", side_effect=["http://172.17.7.177/v1", "secret-value"]), \
+                patch("farm.farm.python_candidates", return_value=[]), \
                 patch("farm.farm.urlopen",
                       side_effect=URLError(OSError(errno.EHOSTUNREACH, "No route to host"))):
             self.farm.device()
@@ -1377,12 +1380,13 @@ while True: time.sleep(0.1)
 
     def test_an_app_on_another_python_is_probed_with_that_python(self):
         """The CLI and the app can be two binaries, and macOS grants the local network one at a time."""
-        answer = json.dumps({"errno": errno.EHOSTUNREACH, "address": "172.17.7.177"})
+        answer = json.dumps({"errno": errno.EHOSTUNREACH, "address": "172.17.7.177", "python": [3, 13]})
         done = subprocess.CompletedProcess([], 0, answer, "")
         with patch("farm.farm.subprocess.run", return_value=done) as child:
-            refused, address = self.farm.probe_local_network("172.17.7.177", "/opt/conda/bin/python3")
-        self.assertTrue(refused)
+            code, address, version = self.farm.probe_device("172.17.7.177", "/opt/conda/bin/python3")
+        self.assertEqual(code, errno.EHOSTUNREACH)
         self.assertEqual(address, "172.17.7.177")
+        self.assertEqual(version, (3, 13))
         self.assertEqual(child.call_args.args[0][0], "/opt/conda/bin/python3")
         self.assertEqual(child.call_args.args[0][3], "172.17.7.177")
 
@@ -1857,5 +1861,218 @@ while True: time.sleep(0.1)
                 patch.object(self.farm, "start") as start, patch.object(self.farm, "stop") as stop:
             self.assertEqual(main(["start"]), 0)
             self.assertEqual(main(["stop"]), 0)
-        start.assert_called_once_with(None, port=None)
+        start.assert_called_once_with(None, port=None, python=None)
         stop.assert_called_once_with(None)
+
+    def other_python(self, name="other-python3"):
+        """A second interpreter that really runs this one, and leaves proof it was used."""
+        path = self.root / name
+        marker = self.root / (name + ".used")
+        path.write_text(f'#!/bin/sh\ntouch "{marker}"\nexec "{sys.executable}" "$@"\n')
+        path.chmod(0o755)
+        return str(path), marker
+
+    def answers_from(self, mapping):
+        return lambda host, which: mapping[which]
+
+    def test_a_python_that_cannot_reach_the_tiiny_is_swapped_for_one_that_can(self):
+        """Jason, 2026-09-14: "How is an end user going to know that's an issue when they install
+        it? They may not have you sitting there to fix it.\""""
+        self.configure_device()
+        self.install()
+        other, marker = self.other_python()
+        answers = {sys.executable: (errno.EHOSTUNREACH, "172.17.7.177", (3, 14)),
+                   other: (0, "172.17.7.177", (3, 14))}
+        with patch("farm.farm.python_candidates", return_value=[other]), \
+                patch.object(self.farm, "probe_device", side_effect=self.answers_from(answers)):
+            self.farm.start("fake-app")
+        printed = self.output.getvalue()
+        self.assertIn(f"This Python cannot reach your Tiiny, so the farm is running Fake app"
+                      f" with {other} instead.", printed)
+        self.assertIn("Fake app is running.", printed)
+        self.assertNotIn("macOS is blocking", printed)
+        self.wait_for(marker.exists)  # the app itself ran under the Python the farm chose
+        self.assertEqual(json.loads((self.home / "settings.json").read_text())["python"], other)
+
+    def test_the_python_the_farm_settled_on_is_used_again_without_asking(self):
+        self.configure_device()
+        self.install()
+        other, marker = self.other_python()
+        self.farm.save_setting("python", other)
+        with patch("farm.farm.python_candidates", side_effect=AssertionError("searched again")), \
+                patch.object(self.farm, "probe_device", return_value=(0, "172.17.7.177", (3, 14))) as probe:
+            self.farm.start("fake-app")
+        self.assertEqual(probe.call_args.args[1], other)
+        self.wait_for(marker.exists)
+        self.assertNotIn("This Python cannot reach", self.output.getvalue())
+
+    def test_an_explicit_python_is_used_saved_and_never_second_guessed(self):
+        self.configure_device()
+        self.install()
+        other, marker = self.other_python()
+        with patch.object(self.farm, "probe_device", side_effect=AssertionError("probed a choice")):
+            self.farm.start("fake-app", python=other)
+        self.wait_for(marker.exists)
+        self.assertEqual(json.loads((self.home / "settings.json").read_text())["python"], other)
+        self.assertNotIn("This Python cannot reach", self.output.getvalue())
+
+    def test_a_python_that_is_not_there_is_refused_before_anything_starts(self):
+        self.install()
+        with self.assertRaisesRegex(FarmError, "no Python to run at"):
+            self.farm.start("fake-app", python=str(self.root / "no-such-python"))
+        self.assertIsNone(self.farm.active("fake-app"))
+
+    def test_a_python_too_old_to_run_an_app_is_never_chosen(self):
+        answers = {sys.executable: (errno.EHOSTUNREACH, "172.17.7.177", (3, 14)),
+                   "/old/python3": (0, "172.17.7.177", (3, 8))}
+        with patch("farm.farm.python_candidates", return_value=["/old/python3"]), \
+                patch.object(self.farm, "probe_device", side_effect=self.answers_from(answers)):
+            interpreter, moved, refused = self.farm.working_python(sys.executable, "http://172.17.7.177/v1")
+        self.assertEqual(interpreter, sys.executable)
+        self.assertIsNone(moved)
+        self.assertTrue(refused)
+
+    def test_a_tiiny_that_is_switched_off_never_moves_the_python(self):
+        """Nothing answering is not the same as macOS refusing, and only one of them is fixable here."""
+        answers = {sys.executable: (errno.ECONNREFUSED, "172.17.7.177", (3, 14))}
+        with patch("farm.farm.python_candidates", side_effect=AssertionError("searched for a Python")), \
+                patch.object(self.farm, "probe_device", side_effect=self.answers_from(answers)):
+            interpreter, moved, refused = self.farm.working_python(sys.executable, "http://172.17.7.177/v1")
+        self.assertEqual(interpreter, sys.executable)
+        self.assertIsNone(moved)
+        self.assertFalse(refused)
+
+    def test_the_pythons_looked_for_are_the_known_places_then_path_without_repeats(self):
+        binaries = self.root / "bin"
+        binaries.mkdir()
+        real = binaries / "python3.12"
+        real.write_text("#!/bin/sh\nexit 0\n")
+        real.chmod(0o755)
+        (binaries / "python3").symlink_to(real)
+        (binaries / "python3-config").write_text("#!/bin/sh\nexit 0\n")
+        (binaries / "python3-config").chmod(0o755)
+        with patch.dict(os.environ, {"PATH": str(binaries)}), patch("farm.farm.PYTHON_PLACES", ()):
+            self.assertEqual(python_candidates(skip=[]), [str(binaries / "python3")])
+            self.assertEqual(python_candidates(skip=[str(real)]), [])
+
+    def test_doctor_passes_and_says_so(self):
+        self.configure_device()
+        self.install()
+        with patch.object(self.farm, "probe_device", return_value=(0, "172.17.7.177", (3, 14))), \
+                patch("farm.farm.python_candidates", return_value=[]), \
+                patch.object(self.farm, "device_models", return_value=("ok", ["qwen3-4b", "whisper-tiny"])):
+            self.assertTrue(self.farm.doctor())
+        printed = self.output.getvalue()
+        self.assertIn("running apps with " + sys.executable, printed)
+        self.assertIn("The Tiiny on file is at http://172.17.7.177/v1.", printed)
+        self.assertIn("Your Tiiny at 172.17.7.177 answered this Python in", printed)
+        self.assertIn("The key on file is accepted by your Tiiny.", printed)
+        self.assertIn("fake-app declares no port.", printed)
+        self.assertIn("Your Tiiny lists 2 models: qwen3-4b and whisper-tiny.", printed)
+        self.assertIn("Everything the farm checks is working.", printed)
+
+    def test_doctor_fails_and_names_the_python_that_does_reach_it(self):
+        self.configure_device()
+        self.install()
+        answers = {sys.executable: (errno.EHOSTUNREACH, "172.17.7.177", (3, 14)),
+                   "/opt/homebrew/bin/python3": (0, "172.17.7.177", (3, 14))}
+        with patch("farm.farm.python_candidates", return_value=["/opt/homebrew/bin/python3"]), \
+                patch.object(self.farm, "probe_device", side_effect=self.answers_from(answers)):
+            self.assertFalse(self.farm.doctor())
+        printed = self.output.getvalue()
+        self.assertIn("This Python cannot reach your Tiiny at 172.17.7.177, because macOS is"
+                      " blocking it from your local network.", printed)
+        self.assertIn("Other Pythons here: /opt/homebrew/bin/python3 reaches it.", printed)
+        self.assertIn("farm start <id> --python /opt/homebrew/bin/python3", printed)
+        self.assertIn("Something above needs attention", printed)
+
+    def test_doctor_reports_a_refused_key_and_never_prints_it(self):
+        self.configure_device()
+        with patch.object(self.farm, "probe_device", return_value=(0, "172.17.7.177", (3, 14))), \
+                patch("farm.farm.python_candidates", return_value=[]), \
+                patch("farm.farm.urlopen",
+                      side_effect=HTTPError("http://d/v1/models", 401, "no", {}, io.BytesIO(b"{}"))):
+            self.assertFalse(self.farm.doctor())
+        printed = self.output.getvalue()
+        self.assertIn("Your Tiiny refused the key on file.", printed)
+        self.assertIn("Fix: copy the key again from TiinyOS", printed)
+        self.assertNotIn("device-key", printed)
+
+    def test_doctor_says_when_something_else_holds_an_apps_port(self):
+        self.configure_device()
+        self.manifest["requires"]["ports"] = [43210]
+        self.save_manifest()
+        self.install()
+        with patch.object(self.farm, "probe_device", return_value=(0, "172.17.7.177", (3, 14))), \
+                patch("farm.farm.python_candidates", return_value=[]), \
+                patch.object(self.farm, "device_models", return_value=("ok", ["qwen3-4b"])), \
+                patch.object(self.farm, "tcp_ready", return_value=True):
+            self.assertFalse(self.farm.doctor())
+        printed = self.output.getvalue()
+        self.assertIn("fake-app declares port 43210, and something else is holding it.", printed)
+        self.assertIn("farm start fake-app --port N.", printed)
+
+    def test_doctor_knows_an_app_is_holding_its_own_port(self):
+        self.configure_device()
+        self.manifest["requires"]["ports"] = [43210]
+        self.save_manifest()
+        self.install()
+        with patch("farm.farm.socket.create_connection", side_effect=[
+                ConnectionRefusedError(), contextlib.nullcontext()]), \
+                patch.object(self.farm, "probe_device", return_value=(0, "172.17.7.177", (3, 14))), \
+                patch("farm.farm.python_candidates", return_value=[]):
+            self.farm.start("fake-app")
+        with patch.object(self.farm, "probe_device", return_value=(0, "172.17.7.177", (3, 14))), \
+                patch("farm.farm.python_candidates", return_value=[]), \
+                patch.object(self.farm, "device_models", return_value=("ok", ["qwen3-4b"])), \
+                patch.object(self.farm, "tcp_ready", return_value=True):
+            self.assertTrue(self.farm.doctor())
+        self.assertIn("fake-app declares port 43210, and fake-app itself is holding it.",
+                      self.output.getvalue())
+
+    def test_doctor_with_no_tiiny_on_file_says_what_to_run(self):
+        with patch.dict(os.environ), patch("farm.farm.python_candidates", return_value=[]):
+            os.environ.pop("TIINY_BASE", None)
+            self.assertFalse(self.farm.doctor())
+        printed = self.output.getvalue()
+        self.assertIn("No Tiiny is on file, so no app can reach one.", printed)
+        self.assertIn("Fix: run farm device with the device address and its API key.", printed)
+
+    def test_the_cli_exits_one_when_doctor_finds_something(self):
+        with patch("farm.farm.Farm", return_value=self.farm):
+            with patch.object(self.farm, "doctor", return_value=True):
+                self.assertEqual(main(["doctor"]), 0)
+            with patch.object(self.farm, "doctor", return_value=False):
+                self.assertEqual(main(["doctor"]), 1)
+
+    def test_the_key_is_checked_by_the_python_that_can_reach_the_tiiny(self):
+        """Measured on this Mac: the device answered the chosen Python while the CLI's own Python
+        was blocked, and asking from the wrong one called a good key bad."""
+        answer = json.dumps({"state": "ok", "models": ["qwen3-8b"]})
+        done = subprocess.CompletedProcess([], 0, answer, "")
+        settings = {"base": "http://172.17.7.177/v1", "key": "device-key"}
+        with patch("farm.farm.subprocess.run", return_value=done) as child:
+            state, models = self.farm.device_models(settings, "/opt/homebrew/bin/python3")
+        self.assertEqual((state, models), ("ok", ["qwen3-8b"]))
+        self.assertEqual(child.call_args.args[0][0], "/opt/homebrew/bin/python3")
+        self.assertNotIn("device-key", " ".join(child.call_args.args[0]))
+        self.assertIn("device-key", child.call_args.kwargs["input"])
+
+    def test_a_refused_key_is_never_answered_with_another_python(self):
+        self.configure_device()
+        answers = {sys.executable: (0, "172.17.7.177", (3, 14)),
+                   "/opt/homebrew/bin/python3": (0, "172.17.7.177", (3, 14))}
+        with patch("farm.farm.python_candidates", return_value=["/opt/homebrew/bin/python3"]), \
+                patch.object(self.farm, "probe_device", side_effect=self.answers_from(answers)), \
+                patch.object(self.farm, "device_models", return_value=("refused", [])):
+            self.assertFalse(self.farm.doctor())
+        printed = self.output.getvalue()
+        self.assertIn("Your Tiiny refused the key on file.", printed)
+        self.assertNotIn("--python /opt/homebrew/bin/python3", printed)
+
+    def test_the_models_probe_source_runs_and_never_echoes_the_key(self):
+        done = subprocess.run([sys.executable, "-c", MODELS_PROBE, "http://127.0.0.1:1/v1", "2.0"],
+                              input="device-key\n", capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout.strip().splitlines()[-1])["state"], "unreachable")
+        self.assertNotIn("device-key", done.stdout + done.stderr)
