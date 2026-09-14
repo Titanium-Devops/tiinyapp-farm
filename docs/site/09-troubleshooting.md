@@ -84,6 +84,15 @@ The install directory was edited by hand. `farm remove <id>` then `farm install 
 
 ## Connecting your Tiiny
 
+**You do not know its address.** You do not have to. `farm device --find` looks on every USB cable
+in this machine, then on this network, then at the TiinyOS client, and prints the address and base
+URL of anything that answers. It saves nothing and needs no key. `farm device` runs the same search
+and offers what it found as the default, so pressing enter at the first question takes it.
+
+**Nothing was found.** The Tiiny is off, or it is neither on the cable nor on this network. Switch
+it on, plug the cable in or put it on the same network, and run `farm device --find` again. The
+address can always be typed in by hand instead.
+
 **The prompt refuses to run.** `farm device` will not fall back to echoing what you type. Run it in
 a real terminal, or use the scripted form:
 `farm device --base http://openai.api.tiiny/v1 --key-stdin < key-file`.

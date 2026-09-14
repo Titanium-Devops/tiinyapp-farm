@@ -46,6 +46,28 @@ MAX_DOWNLOAD = 512 * 1024 * 1024
 # Where a Tiiny answers /device.json on the local network.
 DEVICE_PORT = 39218
 LOCAL_NETWORK_TIMEOUT = 2.0
+# A Tiiny on a cable sits on its own point to point /30 inside this /16, the box on the first
+# usable address of the /30 and this machine on the second, so four boxes plugged in at once are
+# four /30s. Nothing here shells out: an app that reads addresses out of ifconfig fails the archive
+# scan, and the CLI holds itself to the rule it holds apps to.
+USB_NET_PREFIX = "172.17."
+# device.json advertises both of these itself. Sending the token to the port, unicast or broadcast,
+# gets the whole of device.json back in one datagram, which finds a box whose address has moved
+# since somebody last wrote it down.
+UDP_DISCOVERY_PORT = 39217
+DISCOVERY_TOKEN = b"GADGET_DISCOVER_V1"
+# What the TiinyOS client on a Mac publishes for the box it is paired with.
+TIINYOS_BASE = "http://openai.api.tiiny/v1"
+# One probe, and the whole search. A box that is not there is absent rather than slow, so these are
+# ceilings that nothing reaches rather than waits that everything pays.
+FIND_TIMEOUT = 1.2
+FIND_BUDGET = 6.0
+# The cable never moves, a network address does, and the TiinyOS client knows its box by no serial
+# number at all, so that is the order a found device is worth offering in.
+VIA_CABLE, VIA_NETWORK, VIA_CLIENT = "cable", "network", "TiinyOS client"
+VIA_ORDER = (VIA_CABLE, VIA_NETWORK, VIA_CLIENT)
+VIA_WORDS = {VIA_CABLE: "over the cable", VIA_NETWORK: "on this network",
+             VIA_CLIENT: "through the TiinyOS client"}
 # 65 on macOS, 113 on Linux, and Windows sockets answer with the WSA number instead.
 NO_ROUTE = {errno.EHOSTUNREACH, 10065}
 # How often the farm looks to see whether the farm itself has moved on, and how long it waits.
@@ -444,6 +466,228 @@ def private_address(address):
         return ipaddress.ip_address(address).is_private
     except ValueError:
         return False
+
+
+# --------------------------------------------------------------- finding a Tiiny
+# Jason, 2026-09-14: "will the launcher not be able to FIND the tiiny?" It asked for an address
+# blind. A person with a Pocket Lab on the cable and no TiinyOS client had nothing to type.
+def _remaining(deadline, most):
+    """What is left of the search's budget, capped at one probe's own ceiling."""
+    return max(0.05, min(most, deadline - time.monotonic()))
+
+
+def host_addresses():
+    """Every 172.17 address this machine holds, settled by bind and nothing else.
+
+    bind succeeds only on an address the host really has, so asking it of each candidate says which
+    cables are plugged in without reading ifconfig and without sending a packet. A /30 has two
+    usable addresses and this machine takes one of them, so 32768 candidates cover the whole /16.
+    Measured at 0.35 s on an M-series Mac.
+    """
+    found = []
+    for third in range(256):
+        for block in range(0, 256, 4):
+            for last in (block + 2, block + 1):
+                address = f"{USB_NET_PREFIX}{third}.{last}"
+                probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                try:
+                    probe.bind((address, 0))
+                except OSError:
+                    continue
+                finally:
+                    probe.close()
+                found.append(address)
+                break
+    return found
+
+
+def usb_peers():
+    """The box's side of every cable in this machine, by arithmetic on our own side.
+
+    A /30 holds a network address, two usable addresses and a broadcast. Ours is one of the two, so
+    the box is the other, and no probe is needed to work out which.
+    """
+    peers = []
+    for address in host_addresses():
+        head, last = address.rsplit(".", 1)
+        ours = int(last)
+        network = ours & ~3
+        peer = f"{head}.{network + 2 if ours == network + 1 else network + 1}"
+        if peer not in peers:
+            peers.append(peer)
+    return peers
+
+
+def device_json(address, timeout=FIND_TIMEOUT):
+    """What the box at this address says about itself, or None.
+
+    No credential is involved. The discovery page is open, which is what lets the farm find a Tiiny
+    before anybody has handed it a key, and the serial number in the answer means this identifies a
+    box rather than merely finding an open port.
+    """
+    try:
+        with urlopen(f"http://{url_host(address)}:{DEVICE_PORT}/device.json", timeout=timeout) as answer:
+            found = json.loads(answer.read(256 * 1024))
+    except HTTPError as error:
+        error.close()
+        return None
+    except (OSError, ValueError, HTTPException):
+        return None
+    return found if isinstance(found, dict) and found.get("serial_number") else None
+
+
+def udp_devices(targets, timeout=FIND_TIMEOUT, grace=0.4):
+    """Ask every Tiiny in earshot to introduce itself, in one datagram each.
+
+    One packet finds what a port scan would need a whole sweep for, and it finds a box whose address
+    has moved. The wait ends shortly after the first answer, because the rest of the budget was only
+    ever for boxes that are not there.
+    """
+    found, seen = [], set()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        except OSError:
+            pass  # A host that forbids broadcast can still be asked directly.
+        asked = False
+        for target in targets:
+            try:
+                sock.sendto(DISCOVERY_TOKEN, (target, UDP_DISCOVERY_PORT))
+                asked = True
+            except OSError:
+                continue
+        if not asked:
+            return found
+        deadline = time.monotonic() + timeout
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                break
+            try:
+                sock.settimeout(max(0.05, left))
+                data, where = sock.recvfrom(65535)
+            except (socket.timeout, OSError):
+                break
+            try:
+                payload = json.loads(data.decode("utf-8", "replace"))
+            except ValueError:
+                continue
+            if not isinstance(payload, dict) or not payload.get("serial_number"):
+                continue
+            if (where[0], payload["serial_number"]) in seen:
+                continue
+            seen.add((where[0], payload["serial_number"]))
+            found.append((where[0], payload))
+            deadline = min(deadline, time.monotonic() + grace)
+    finally:
+        sock.close()
+    return found
+
+
+def tiinyos_serving(timeout=FIND_TIMEOUT):
+    """Whether the TiinyOS client on this Mac is serving a Tiiny's model API.
+
+    The client answers every name under api.tiiny on loopback, so a name that resolves proves
+    nothing and the surface has to be asked. It refuses an unknown caller with 401, which is the
+    answer that says a Tiiny is behind it; 404 or a refused connection says there is not. No key is
+    sent, and no body is read, because a body can carry one.
+    """
+    try:
+        with urlopen(TIINYOS_BASE + "/models", timeout=timeout) as answer:
+            return answer.status != 404
+    except HTTPError as error:
+        error.close()
+        return error.code != 404
+    except (OSError, ValueError, HTTPException):
+        return False
+
+
+def device_interfaces(payload):
+    """Every plane the box reports it is on, the cable and the network alike."""
+    found = []
+    for entry in (payload or {}).get("ipv4_addresses") or []:
+        if not isinstance(entry, dict):
+            continue
+        address, interface = entry.get("address"), entry.get("interface")
+        if isinstance(address, str) and address:
+            found.append({"interface": interface if isinstance(interface, str) else "",
+                          "address": address})
+    return found
+
+
+def device_base(payload, address):
+    """The base URL the farm would save for a box at this address.
+
+    Firmware 1.0 serves the model API on port 80 behind a virtual host, which is the form the docs
+    use and so carries no port. Older firmware served it on 8800, and a device.json that names a
+    backend port of its own is taken at its word rather than guessed at. Live firmware reports that
+    port as 0, meaning it is not saying.
+    """
+    backend = (payload or {}).get("backend")
+    port = backend.get("port") if isinstance(backend, dict) else None
+    if isinstance(port, int) and not isinstance(port, bool) and port not in (0, 80):
+        return f"http://{url_host(address)}:{port}/v1"
+    return f"http://{url_host(address)}/v1"
+
+
+def fold_device(records, address, payload, via):
+    """Register one answer, or merge it into the box that already answered.
+
+    One box answers on the cable and on the network at once, and answers the responder as well as
+    its own discovery page, so the serial number is what says how many Tiinys are really there. An
+    address only counts as the cable when it is the far end of a cable in this machine: a box on
+    somebody else's desk advertises its USB address too, and that address is not ours to use.
+    """
+    serial = payload.get("serial_number")
+    record = records.get(serial)
+    if record is None:
+        record = {"serial": serial, "name": payload.get("device_name") or payload.get("hostname"),
+                  "address": address, "via": via, "addresses": [],
+                  "interfaces": device_interfaces(payload), "payload": payload}
+        records[serial] = record
+    if address not in record["addresses"]:
+        record["addresses"].append(address)
+    if VIA_ORDER.index(via) < VIA_ORDER.index(record["via"]):
+        record.update(via=via, address=address, payload=payload)
+    if not record["interfaces"]:
+        record["interfaces"] = device_interfaces(payload)
+    return record
+
+
+def find_devices(budget=FIND_BUDGET):
+    """Every Tiiny this machine can see, folded together by serial number.
+
+    Three ways, in the order a found address is worth trusting. The cable is a /30 that never moves.
+    The responder answers a broadcast, so it finds a box on the network as well, and finds one whose
+    address has changed. The TiinyOS client is asked only when the first two found nothing, because
+    the box it serves is the box on the cable and naming it twice would read as two Tiinys.
+    """
+    deadline = time.monotonic() + budget
+    peers = usb_peers()
+    records = {}
+    for peer in peers:
+        payload = device_json(peer, timeout=_remaining(deadline, FIND_TIMEOUT))
+        if payload:
+            fold_device(records, peer, payload, VIA_CABLE)
+    for address, payload in udp_devices(["255.255.255.255"] + peers,
+                                        timeout=_remaining(deadline, FIND_TIMEOUT)):
+        fold_device(records, address, payload, VIA_CABLE if address in peers else VIA_NETWORK)
+    found = sorted(records.values(), key=lambda r: (VIA_ORDER.index(r["via"]), r["serial"] or ""))
+    for record in found:
+        record["base"] = device_base(record.pop("payload"), record["address"])
+    if not found and tiinyos_serving(timeout=_remaining(deadline, FIND_TIMEOUT)):
+        found = [{"serial": None, "name": None, "address": urlsplit(TIINYOS_BASE).hostname,
+                  "via": VIA_CLIENT, "base": TIINYOS_BASE, "interfaces": [], "addresses": []}]
+    return found
+
+
+def describe_device(record):
+    """One line: which box, where it is, how it was reached, and the base URL to save."""
+    named = record.get("name") or "A Tiiny"
+    serial = f" ({record['serial']})" if record.get("serial") else ""
+    return (f"{named}{serial} at {record['address']}, {VIA_WORDS[record['via']]},"
+            f" base {record['base']}")
 
 
 # Run by the interpreter that reaches the Tiiny, with the key on stdin so no command line
@@ -1330,7 +1574,57 @@ class Farm:
         for index in chosen:
             self.update(found[index][0], yes=True)
 
-    def device(self, base=None, key_stdin=False):
+    def find_device(self):
+        """farm device --find: what is out there, before anybody has typed an address."""
+        found = find_devices()
+        for record in found:
+            print(describe_device(record))
+        if len(found) > 1:
+            print("Run farm device to save one. It offers these and asks for the key.")
+        elif found:
+            print("Run farm device to save it. It offers this address and asks for the key.")
+        else:
+            print("No Tiiny answered. The farm looked on every USB cable in this machine, on this"
+                  f" network, and at the TiinyOS client on {TIINYOS_BASE}.")
+            print("Switch the Tiiny on, plug the cable in or put it on this network, then run:"
+                  " farm device --find")
+            print("To type the address in yourself: farm device --base http://<address>/v1"
+                  " --key-stdin < key-file")
+        return found
+
+    def offer_device(self):
+        """The base URL the hidden prompt offers, or nothing when there is nothing to offer.
+
+        Finding a Tiiny is a convenience on top of a command that has always worked by hand, so
+        whatever the search runs into it hands back nothing rather than becoming the reason nobody
+        can save an address.
+        """
+        try:
+            found = find_devices()
+        except Exception:  # noqa: BLE001 - an offer must never be the reason a command fails.
+            return ""
+        if not found:
+            return ""
+        if len(found) == 1:
+            print("Found " + describe_device(found[0]))
+            return found[0]["base"]
+        for number, record in enumerate(found, 1):
+            print(f"{number}. {describe_device(record)}")
+        chosen, answer = ask_which("Which one? A number, or Enter to type an address. ", len(found))
+        if chosen:
+            return found[chosen[0]]["base"]
+        if answer:
+            print(f"There is no {answer} in that list.")
+        return ""
+
+    def device(self, base=None, key_stdin=False, find=False):
+        if find:
+            # Looking and saving are different jobs, and a command that asked for both would
+            # quietly do one of them.
+            if base is not None or key_stdin:
+                raise FarmError("farm device --find looks and saves nothing; drop --base and"
+                                " --key-stdin, or drop --find.")
+            return bool(self.find_device())
         scripted = base is not None or key_stdin or any(
             name in os.environ for name in ("TIINY_BASE", "TIINY_KEY"))
         if scripted:
@@ -1339,10 +1633,13 @@ class Farm:
             if not base:
                 raise FarmError("Provide --base or TIINY_BASE for device import.")
         else:
+            # Look first, so the one thing a person cannot guess is offered rather than asked for.
+            offered = self.offer_device()
             # Refuse getpass's echoing fallback when no secure terminal is available.
             with warnings.catch_warnings():
                 warnings.simplefilter("error", getpass.GetPassWarning)
-                base = getpass.getpass("Device base URL (hidden): ").strip()
+                base = getpass.getpass(f"Device base URL [{offered}] (hidden): " if offered
+                                       else "Device base URL (hidden): ").strip() or offered
                 key = getpass.getpass("Device API key (hidden): ").strip()
         parsed = urlsplit(base)
         if (parsed.scheme not in ("http", "https") or not parsed.hostname
@@ -1359,6 +1656,7 @@ class Farm:
         _, refused = self.choose_python(self.app_python() or sys.executable, base)
         if refused:
             self.local_network_hint()
+        return True
 
     def probe_device(self, host, interpreter):
         """One request to the Tiiny from one interpreter. Returns the errno it met, 0 when the
@@ -1988,6 +2286,31 @@ class Farm:
                               "fix": fix or None, **detail})
         return ok
 
+    def doctor_nothing_on_file(self):
+        """No settings to check, so the next best answer is whether there is a Tiiny to save.
+
+        A person who has not run farm device yet is the person least able to work out what to type,
+        so doctor does the looking instead of telling them to go and look.
+        """
+        try:
+            found = find_devices()
+        except Exception:  # noqa: BLE001 - a finding must never be the reason doctor falls over.
+            found = []
+        seen = [{"serial": r["serial"], "name": r["name"], "address": r["address"],
+                 "via": r["via"], "base": r["base"]} for r in found]
+        if not found:
+            return self.note("device", False, "No Tiiny is on file, and nothing answered on the"
+                             " cable, on this network, or at the TiinyOS client.",
+                             "switch the Tiiny on and plug the cable in, then run farm device"
+                             " --find; or run farm device with the address and its API key.",
+                             found=seen)
+        counted = describe_device(found[0]) if len(found) == 1 else \
+            f"{len(found)} of them, the first " + describe_device(found[0])
+        return self.note("device", False, "No Tiiny is on file, so no app can reach one."
+                         f" The farm can see {counted}.",
+                         f"run farm device, take {found[0]['base']} when it offers it, and paste"
+                         " the key from TiinyOS, Settings, API Key.", found=seen)
+
     def doctor_device(self, settings, interpreter):
         """The address on file, whether this Python reaches it, and whether the key is taken."""
         host = urlsplit(settings["base"]).hostname
@@ -2092,8 +2415,7 @@ class Farm:
         settings = self.device_settings()
         models, working = [], None
         if not settings:
-            ok = self.note("device", False, "No Tiiny is on file, so no app can reach one.",
-                           "run farm device with the device address and its API key.")
+            ok = self.doctor_nothing_on_file()
         else:
             self.note("settings", True, f"The Tiiny on file is at {settings['base']}.",
                       base=settings["base"])
@@ -2140,7 +2462,8 @@ class Farm:
 
 # Every command that answers a machine as well as a person. The shapes are documented in the
 # agent guide at https://tiinyapp.farm/docs/agents/ and pinned by tests/test_farm.py.
-JSON_COMMANDS = ("list", "status", "check", "doctor", "install", "update", "start", "stop")
+JSON_COMMANDS = ("list", "status", "check", "doctor", "install", "update", "start", "stop",
+                 "device")
 
 
 def live_process(farm, ident):
@@ -2222,6 +2545,16 @@ def json_command(farm, args, ident):
     if args.command == "doctor":
         ok = farm.doctor()
         return {"command": "doctor", "ok": ok, "farm": _version(), "findings": farm.findings}
+    if args.command == "device":
+        if not args.find:
+            raise FarmError("farm device --json answers --find only; saving a key needs the"
+                            " hidden prompt or --key-stdin.")
+        found = farm.find_device()
+        return {"command": "device", "ok": bool(found),
+                "found": [{"serial": record["serial"], "name": record["name"],
+                           "address": record["address"], "via": record["via"],
+                           "base": record["base"], "interfaces": record["interfaces"]}
+                          for record in found]}
     if args.command == "install":
         if not args.yes:
             raise FarmError("Add --yes: with --json the farm never asks you to confirm an install.")
@@ -2312,6 +2645,9 @@ def main(argv=None):
         if name == "remove":
             command.add_argument("--purge", action="store_true", help="Also delete saved data")
     device = commands.add_parser("device")
+    device.add_argument("--find", action="store_true",
+                        help="Look for a Tiiny on the cable, on this network and at the TiinyOS"
+                             " client, and save nothing")
     device.add_argument("--base", help="Device HTTP(S) base URL (or TIINY_BASE)")
     device.add_argument("--key-stdin", action="store_true", help="Read the device API key from stdin (or TIINY_KEY)")
     login = commands.add_parser("login")
@@ -2363,7 +2699,7 @@ def main(argv=None):
         elif args.command == "status" and args.id:
             farm.submission_status(args.id, token=args.token)
         elif args.command == "device":
-            farm.device(base=args.base, key_stdin=args.key_stdin)
+            code = 0 if farm.device(base=args.base, key_stdin=args.key_stdin, find=args.find) else 1
         elif args.command == "remove":
             farm.remove(args.id, purge=args.purge)
         elif args.command == "doctor":

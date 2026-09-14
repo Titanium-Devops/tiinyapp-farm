@@ -40,7 +40,20 @@ nothing you have installed is touched by that. To never be told, pass `--no-upda
 
 ## Find your Tiiny
 
-The command needs two things once: the base URL of the device's API and its API key.
+The farm looks for it, so you do not have to know its address:
+
+```
+farm device --find
+```
+
+```
+jason's Tiiny (TNYM26072400300011Q) at 172.17.7.177, over the cable, base http://172.17.7.177/v1
+Run farm device to save it. It offers this address and asks for the key.
+```
+
+It looks on every USB cable in this machine, then on this network, then at the TiinyOS client. It
+saves nothing and asks for no key. If nothing answers it says so, and the address can still be typed
+in by hand:
 
 | Value | What to use |
 | --- | --- |
@@ -57,10 +70,20 @@ Anything else is refused.
 farm device
 ```
 
-It asks for both values without echoing them and writes `~/.tiinyapps/device.json` with mode 0600
-on macOS and Linux. On Windows the file follows the user folder's ACL, which is best effort. If
-there is no terminal that can hide what you type, it refuses rather than falling back to echoed
-input. Run it again at any time to change either value.
+It looks for your Tiiny first and offers what it found, so pressing enter at the first question
+takes it:
+
+```
+Found jason's Tiiny (TNYM26072400300011Q) at 172.17.7.177, over the cable, base http://172.17.7.177/v1
+Device base URL [http://172.17.7.177/v1] (hidden):
+Device API key (hidden):
+```
+
+Several Tiinys are numbered and it asks which one. Nothing found is the question on its own. It asks
+for both values without echoing them and writes `~/.tiinyapps/device.json` with mode 0600 on macOS
+and Linux. On Windows the file follows the user folder's ACL, which is best effort. If there is no
+terminal that can hide what you type, it refuses rather than falling back to echoed input. Run it
+again at any time to change either value.
 
 For a script, pass the base URL and pipe the key in, or put both in the environment:
 

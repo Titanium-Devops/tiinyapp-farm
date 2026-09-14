@@ -21,14 +21,61 @@ Save the device base URL and API key that every app is launched with.
 
 | Flag | Meaning |
 | --- | --- |
+| `--find` | Look for a Tiiny and print what answered. Saves nothing and needs no key |
 | `--base URL` | The device HTTP or HTTPS base URL. Also read from `TIINY_BASE` |
 | `--key-stdin` | Read the API key from standard input instead of prompting. Also read from `TIINY_KEY` |
+| `--json` | With `--find` only. One JSON object of what answered |
 
-With no flags and no `TIINY_BASE` or `TIINY_KEY` in the environment it prompts for both without
-echoing, and refuses to run if the terminal cannot hide the input. With either flag, or with either
-variable set, it takes the scripted path and fails rather than prompting for anything missing.
-Explicit flags win over the environment. The result is written atomically to
-`~/.tiinyapps/device.json` with mode 0600 on macOS and Linux.
+With no flags and no `TIINY_BASE` or `TIINY_KEY` in the environment it looks for a Tiiny first, then
+prompts for both values without echoing, and refuses to run if the terminal cannot hide the input.
+One Tiiny found is offered as the default, so pressing enter takes it:
+
+```
+Found jason's Tiiny (TNYM26072400300011Q) at 172.17.7.177, over the cable, base http://172.17.7.177/v1
+Device base URL [http://172.17.7.177/v1] (hidden):
+Device API key (hidden):
+```
+
+Several found are numbered and it asks which. Nothing found is the prompt as it always was. With
+either flag, or with either variable set, it takes the scripted path, skips the search, and fails
+rather than prompting for anything missing. Explicit flags win over the environment. The result is
+written atomically to `~/.tiinyapps/device.json` with mode 0600 on macOS and Linux.
+
+## farm device --find
+
+```
+farm device --find
+farm device --find --json
+```
+
+Where the Tiinys are, before anybody has typed an address. It saves nothing, and it never reads or
+asks for a key, because none of the three ways it looks needs one. Looking and saving are separate
+jobs, so `--find` with `--base` or `--key-stdin` is refused rather than quietly doing one of them.
+
+| Looked at | What it is |
+| --- | --- |
+| Every USB cable in this machine | A cable is a point to point /30 inside `172.17`, the box on the first usable address and this machine on the second. `bind` says which ones are ours, and arithmetic gives the box's side |
+| This network | One datagram, `GADGET_DISCOVER_V1` to UDP 39217, broadcast and to each cable. A Tiiny sends back the whole of its `device.json`, so this finds one whose address has moved |
+| The TiinyOS client | `http://openai.api.tiiny/v1`, asked only when the first two found nothing, because the box it serves is the box on the cable |
+
+One line per Tiiny: its name and serial number, the address to use, how it was reached, and the base
+URL `farm device` would save.
+
+```
+jason's Tiiny (TNYM26072400300011Q) at 172.17.7.177, over the cable, base http://172.17.7.177/v1
+Run farm device to save it. It offers this address and asks for the key.
+```
+
+One box that answers on the cable and on the network is one line, not two: the serial number in
+`device.json` is what says how many Tiinys are really there, and the cable is offered first because
+a /30 never moves and a network address does. Nothing found says what was tried, and exits 1.
+
+The whole search is capped at six seconds and every socket in it carries a timeout, so a filtered
+port cannot hang it. Measured at 0.9 seconds on an M-series Mac with one Tiiny on the cable.
+
+`--json` answers `{"command": "device", "ok": ..., "found": [...]}`, one entry per Tiiny with its
+`serial`, `name`, `address`, `via`, `base` and the `interfaces` its `device.json` lists. `ok` is
+false and the exit code 1 when nothing answered.
 
 After saving it names the installed apps these settings reach, which is every installed app that
 declares the `device` permission or asks for device models, and offers one `farm start` command to
@@ -361,7 +408,8 @@ what is newer without taking any of it unless you add `--all` or `--yes`. A fail
 exits 1. The line about a newer farm is left off a `--json` answer, and `farm doctor --json` carries
 it among its findings instead.
 
-`device`, `login`, `publish`, `release`, `remove` and `self-update` have no `--json`.
+`login`, `publish`, `release`, `remove` and `self-update` have no `--json`, and `device` takes it
+only with `--find`.
 
 Every shape is documented, with an example of each, in
 [The farm for AI assistants](/docs/agents/).

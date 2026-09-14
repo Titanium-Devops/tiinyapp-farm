@@ -49,6 +49,24 @@ with `farm_`. Ask them for it; never make one up. Send it only to `https://tiiny
 
 ## Find the person's Tiiny
 
+The farm does this for you, in one command that saves nothing and needs no key:
+
+```
+farm device --find --json
+```
+
+```json
+{"command": "device", "ok": true,
+ "found": [{"serial": "TNYM26072400300011Q", "name": "jason's Tiiny", "address": "172.17.7.177",
+            "via": "cable", "base": "http://172.17.7.177/v1",
+            "interfaces": [{"interface": "usb0", "address": "172.17.7.177"},
+                           {"interface": "wlan0", "address": "192.168.100.94"}]}]}
+```
+
+`via` is `cable`, `network` or `TiinyOS client`, `base` is the URL to hand `farm device --base`, and
+`ok` is false with exit 1 when nothing answered. The search is capped at six seconds. Use this
+before writing your own, and read the rest of this section to know what it is doing.
+
 A Tiiny answers `http://<address>:39218/device.json` on the local network, with no credential. That
 answer carries a serial number, so it identifies a box rather than merely finding an open port. It
 also lists every address that box has, on the cable and on the network, so one answer tells you the
@@ -62,7 +80,8 @@ Look in this order, and stop at the first answer:
 
 1. `TIINY_BASE` in the environment. The farm exports it to every app it starts.
 2. `~/.tiinyapps/device.json`, which is what `farm device` wrote: `{"base": ..., "key": ...}`.
-3. A search. Every USB cable first, then this machine's own network.
+3. `farm device --find --json`, or the same search by hand: every USB cable first, then this
+   machine's own network, then the TiinyOS client on `http://openai.api.tiiny/v1`.
 
 A cable is a point to point /30 inside `172.17`, so the box takes the first usable address of each
 /30 and the host takes the second. Finding our own side gives the box's side by arithmetic, and
@@ -171,6 +190,27 @@ The whole search takes about a second on a quiet network, and a box that is not 
 it is absent. If nothing answers, say so. An address that does not resolve reads better than a
 hostname that resolves on one Mac and nowhere else.
 
+There is a cheaper way than sweeping a /24, and the farm's own finder uses it: one datagram. Send
+`GADGET_DISCOVER_V1` to UDP port 39217, broadcast or unicast, and every Tiiny in earshot sends the
+whole of its `device.json` straight back. Both the port and the token come out of `device.json`
+itself. That finds a box whose network address has moved since anybody wrote it down, without
+touching the rest of somebody's network.
+
+```python
+import json, socket
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+sock.settimeout(1.5)
+sock.sendto(b"GADGET_DISCOVER_V1", ("255.255.255.255", 39217))
+data, where = sock.recvfrom(65535)
+print(where[0], json.loads(data)["serial_number"])
+```
+
+The TiinyOS client answers every name under `api.tiiny` on loopback, so a name resolving proves
+nothing about whether a Tiiny is there. Ask the surface instead: `http://openai.api.tiiny/v1/models`
+with no key answers 401 when a box is behind it, and 404 or a refused connection when there is not.
+
 ## Put the key where the farm reads it
 
 `farm device` saves the address and the key once. Ask the person for the key, take it on standard
@@ -191,8 +231,9 @@ It writes `~/.tiinyapps/device.json` with mode 0600, names the installed apps th
 and offers one command to try them with. Run it again to change either value. `TIINY_BASE` and
 `TIINY_KEY` in the environment do the same job without a file.
 
-`farm device` has no `--json`, and neither do `login`, `publish`, `release` or `remove`. They print
-prose and exit 0 or 1.
+`farm device` takes `--json` with `--find` and nowhere else, because saving a key needs the hidden
+prompt or standard input and no `--json` command reads either. `login`, `publish`, `release` and
+`remove` have no `--json` at all. They print prose and exit 0 or 1.
 
 ## Read the catalog
 

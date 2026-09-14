@@ -35,6 +35,7 @@ python3 -m pip install .
 ## Your first app
 
 ```sh
+farm device --find               # where is my Tiiny? saves nothing, needs no key
 farm device                      # save your Tiiny's address and API key, once
 farm install tiiny-brain         # fetch, verify and unpack it
 farm start tiiny-brain           # run it and wait for its port
@@ -70,12 +71,22 @@ uses where nobody is there to answer a question.
 
 | Command | What it does | Flags |
 | --- | --- | --- |
+| `farm device --find` | Looks for a Tiiny on the cable, on this network and at the TiinyOS client, and prints what answered | `--json` |
 | `farm device` | Saves the device base URL and API key that every app is launched with | `--base BASE`, `--key-stdin` |
 
-With no flags it prompts for both without echoing, and refuses to run if the terminal cannot hide
-the input. With either flag, or with `TIINY_BASE` or `TIINY_KEY` set, it takes the scripted path and
-fails rather than prompting for what is missing. Explicit flags win over the environment. Neither
-value is ever printed back.
+`--find` saves nothing and needs no key. It prints one line per Tiiny with its serial number, the
+address to use, how it was reached and the base URL to save, and exits 1 when nothing answered.
+
+```sh
+farm device --find
+jason's Tiiny (TNYM26072400300011Q) at 172.17.7.177, over the cable, base http://172.17.7.177/v1
+```
+
+With no flags `farm device` runs that search first and offers what it found as the default, then
+prompts for both values without echoing, and refuses to run if the terminal cannot hide the input.
+With either flag, or with `TIINY_BASE` or `TIINY_KEY` set, it skips the search, takes the scripted
+path and fails rather than prompting for what is missing. Explicit flags win over the environment.
+Neither value is ever printed back.
 
 ```sh
 farm device --base http://openai.api.tiiny/v1 --key-stdin < private-key-file
@@ -138,7 +149,8 @@ farm start tiiny-brain --json
 farm doctor --json
 ```
 
-`device`, `login`, `publish`, `release`, `remove` and `self-update` have no `--json`.
+`login`, `publish`, `release`, `remove` and `self-update` have no `--json`, and `device` takes it
+only with `--find`.
 
 ### Exit codes
 
