@@ -30,6 +30,10 @@ variable set, it takes the scripted path and fails rather than prompting for any
 Explicit flags win over the environment. The result is written atomically to
 `~/.tiinyapps/device.json` with mode 0600 on macOS and Linux.
 
+After saving it names the installed apps these settings reach, which is every installed app that
+declares the `device` permission or asks for device models, and offers one `farm start` command to
+try them with. Neither value is ever printed back.
+
 ## farm install
 
 ```
@@ -41,9 +45,12 @@ farm install <id> --yes
 | --- | --- |
 | `--yes`, `-y` | Accept the install prompt without asking |
 
-Fetches `<id>.json` from the catalog, prints the name, version, summary, declared access and
-requirements, and asks once. Then it downloads the release, checks the SHA-256 and the exact byte
-size, unpacks into a staging directory, and moves the result into
+Fetches `<id>.json` from the catalog and says what it is about to install: the name and version,
+the one-line summary, who made it and whether the farm has reviewed it, what it needs, and what it
+can reach. Then it asks once, and prints one line per step as it happens, naming the download size,
+the checksum result and where the files land. The last line is the command to run next, or for a
+library the file to copy or import. Under the printing it downloads the release, checks the SHA-256
+and the exact byte size, unpacks into a staging directory, and moves the result into
 `~/tiinyapps/<id>/<version>` before writing `launcher.json` and `current`. It refuses an app that
 is already installed, a release whose checksum is still `pending`, and an app that needs a newer
 Python than the interpreter running the command. A manifest larger than 1 MiB is refused, a
@@ -70,6 +77,22 @@ farm start <id> --port 7799
 | Flag | Meaning |
 | --- | --- |
 | `--port N` | Replace the app's first declared port. Must be 1 to 65535. Refused by an app whose manifest says its port is fixed |
+
+A start that worked ends with the link to open on its own line, the one-line summary, how to stop
+it, and the log path last:
+
+```
+AINode Pocket is running.
+Port 8430 was busy, so it started on 8431.
+Open http://localhost:8431
+One endpoint and one page for every Tiiny you own.
+Stop it with: farm stop ainode-pocket
+Log: /Users/you/tiinyapps/ainode-pocket/farm.log
+```
+
+The link is `http://localhost:<port>` on the port the app really took, and the path is the root
+unless the manifest's `open` field names a first page. A `health` path is a probe, not a page, and
+is never used as the link. The process ID is not in that block; `farm status` has it.
 
 Runs the entry from the version directory with no shell involved. A Python entry becomes
 `<interpreter> -m <module> <args>`; a command entry is split into arguments the way a shell would
@@ -101,9 +124,10 @@ error. If the process still will not die, the process records are kept rather th
 farm list
 ```
 
-Prints installed apps with their version and name, then every app in the catalog with its version
-and one-line summary. Catalog entries with no release are marked `[No release yet]` and entries
-whose checksum is still pending are marked `[release pending]`.
+Prints installed apps with their id, version, name, whether each one is `[running]` or `[stopped]`,
+and its one-line summary, then every app in the catalog with its version, name and summary. Catalog
+entries with no release are marked `[No release yet]` and entries whose checksum is still pending
+are marked `[release pending]`.
 
 ## farm status
 
@@ -112,10 +136,11 @@ farm status
 farm status <id>
 ```
 
-With no argument this is a local command: it prints a header line of `APP PID PORT UPTIME VERSION`
-and one row per running app. The version shown is the one the app reports through its health path
-when it has one, and a mismatch with the installed manifest is reported as `restart to update`.
-Health that cannot be read is labelled rather than guessed.
+With no argument this is a local command: it prints a header line of
+`APP PID PORT LINK UPTIME STATUS` and one row per running app. The link is the one `farm start`
+offered, on the port the app really took. The version shown is the one the app reports through its
+health path when it has one, and a mismatch with the installed version is reported as
+`restart to update`. Health that cannot be read is labelled rather than guessed.
 
 With an app id it is a remote command instead: it asks the farm about your own submission of that
 app and prints its state, each check with its status, and each review. It needs an API token.

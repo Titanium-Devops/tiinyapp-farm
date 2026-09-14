@@ -615,7 +615,8 @@ assert.equal(anonymous.children[0].children[0].tag, 'span');
                        'farm install titanium-tiiny-bot', 'farm start titanium-tiiny-bot',
                        'farm list', 'farm stop <id>', 'farm update <id>', 'farm remove <id>',
                        'farm install <id> -y',
-                       'Port 7788 is already in use; use farm start <id> --port N.',
+                       'the farm steps up to the next free port and says so',
+                       'Stop it with: farm stop <id>',
                        'farm start <id> --port 7799'):
             self.assertIn(phrase, install)
         steps = [attrs for tag, attrs in Document(html).tags if 'stp' in attrs.get('class', '').split()]
