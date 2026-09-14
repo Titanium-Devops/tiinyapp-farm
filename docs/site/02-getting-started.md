@@ -77,9 +77,24 @@ Browse the [catalog](/catalog/), then install by the app's id.
 farm install titanium-tiiny-bot
 ```
 
-Before anything is downloaded it prints the name, version and one-line summary, the access the app
-declares, and what it needs, then asks once. Answer `y` to go ahead. In a script, `-y` answers that
-prompt for you.
+Before anything is downloaded it tells you what it is about to install, then asks once. Answer `y`
+to go ahead. In a script, `-y` prints the same lines and answers the prompt for you.
+
+```
+Looking up titanium-tiiny-bot in the catalog.
+Titanium Tiiny Bot 0.1.15
+A local assistant with chat, files, memories and voice.
+Made by Titanium Computing. The farm has reviewed it.
+Needs: Python 3.11 or newer, port 7788, your Tiiny, for chat, tts, 57 NPU units
+It can reach your microphone, your files, the network and your Tiiny.
+Install this release? [y/N] y
+Downloading 456 KB from github.com.
+The download matches the checksum the catalog lists.
+Unpacking it into /Users/you/tiinyapps/titanium-tiiny-bot/0.1.15.
+Ready. Run: farm start titanium-tiiny-bot
+```
+
+A library has nothing to start, so its last line names the file to copy or import instead.
 
 What happens next, in order: the release archive is downloaded, its SHA-256 and its exact byte size
 are compared with the manifest, it is unpacked into a staging directory with the archive guards
@@ -99,6 +114,20 @@ farm status
 farm stop titanium-tiiny-bot
 ```
 
+A start that worked ends with the link to open, what the app is for, and how to stop it:
+
+```
+Titanium Tiiny Bot is running.
+Open http://localhost:7788
+A local assistant with chat, files, memories and voice.
+Stop it with: farm stop titanium-tiiny-bot
+Log: /Users/you/tiinyapps/titanium-tiiny-bot/farm.log
+```
+
+The link is the app's root unless its catalog entry names a first page, and a health path is a
+probe rather than a page, so it is never used as the link. `farm status` shows the same link for
+every running app beside its process ID, port and uptime.
+
 `farm start` runs the app's entry directly, without a shell, from its own version directory. It
 waits up to ten seconds for the app to be ready, checking that the process is still alive the whole
 time. If the manifest declares a health path, readiness on the first port means an HTTP GET of that
@@ -117,7 +146,9 @@ the port is free. If it is taken and the app can be moved (its manifest says how
 port), the farm steps up to the next free port on its own and tells you:
 
 ```
-Started titanium-tiiny-bot on port 7789 (port 7788 was busy, so it took 7789): pid 512; log ...
+Titanium Tiiny Bot is running.
+Port 7788 was busy, so it started on 7789.
+Open http://localhost:7789
 ```
 
 An app with a fixed port is refused instead, because nothing can move it. To choose the port

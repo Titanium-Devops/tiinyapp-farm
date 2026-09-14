@@ -187,17 +187,17 @@ def read_json(path):
 def validate_manifest(manifest, ident):
     """Check all fields the installer consumes; catalog CI uses the full schema."""
     if not isinstance(manifest, dict) or manifest.get("id") != app_id(ident):
-        raise FarmError("Catalog manifest id does not match the requested app.")
+        raise FarmError("That catalog entry is for a different app; its id does not match the one you asked for.")
     version = manifest.get("version")
     if not isinstance(version, str) or not VERSION.fullmatch(version):
-        raise FarmError("Manifest version must be three nonnegative numbers.")
+        raise FarmError("This app's catalog entry needs a version of three nonnegative numbers.")
     for field in ("name", "pitch", "description"):
         if not isinstance(manifest.get(field), str) or not manifest[field].strip():
-            raise FarmError(f"Manifest needs {field}.")
+            raise FarmError(f"This app's catalog entry is missing its {field}.")
     if "release" in manifest:
         release = manifest.get("release")
         if not isinstance(release, dict) or not isinstance(release.get("url"), str) or not release["url"]:
-            raise FarmError("Manifest needs a release URL.")
+            raise FarmError("This app's catalog entry is missing its release URL.")
         sha = release.get("sha256")
         if not isinstance(sha, str) or not re.fullmatch(r"[a-f0-9]{64}|pending", sha):
             raise FarmError("Invalid release checksum.")
@@ -208,7 +208,7 @@ def validate_manifest(manifest, ident):
         raise FarmError("Invalid permissions.")
     requires = manifest.get("requires")
     if not isinstance(requires, dict) or not isinstance(requires.get("ports"), list):
-        raise FarmError("Manifest needs its requirements and ports.")
+        raise FarmError("This app's catalog entry is missing what it needs and the ports it uses.")
     if any(type(p) is not int or not 1 <= p <= 65535 for p in requires["ports"]):  # noqa: E721 - JSON integers exclude booleans.
         raise FarmError("Invalid port.")
     health = manifest.get("health")
@@ -216,6 +216,11 @@ def validate_manifest(manifest, ident):
                                or not re.fullmatch(r"/[A-Za-z0-9_./-]+", health)
                                or health.startswith("//") or not requires["ports"]):
         raise FarmError("Health must be a local HTTP path with a declared port.")
+    page = manifest.get("open")
+    if "open" in manifest and (not isinstance(page, str)
+                               or not re.fullmatch(r"/[A-Za-z0-9_./-]*", page)
+                               or page.startswith("//") or not requires["ports"]):
+        raise FarmError("The open page must be a local path with a declared port.")
     py = requires.get("python")
     if py is not None and (not isinstance(py, str) or not re.fullmatch(r"[0-9]+\.[0-9]+", py)):
         raise FarmError("Invalid Python requirement.")
@@ -281,6 +286,55 @@ class CatalogLinks(HTMLParser):
             name = Path(unquote(urlsplit(dict(attrs).get("href", "")).path)).name
             if name.endswith(".json") and ID.fullmatch(name[:-5]) and name != "index.json":
                 self.ids.add(app_id(name[:-5]))
+
+
+PERMISSION_WORDS = {"microphone": "your microphone", "files": "your files",
+                    "network": "the network", "device": "your Tiiny"}
+
+
+def join_words(parts):
+    """A list the way a person says one: alone, two and three, or one, two and three."""
+    parts = list(parts)
+    if len(parts) < 2:
+        return "".join(parts)
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
+def describe_permissions(permissions):
+    """The access an app declares, as a sentence rather than a row of field names."""
+    words = [PERMISSION_WORDS[name] for name in permissions if name in PERMISSION_WORDS]
+    if not words:
+        return "It declares no access to anything on this computer."
+    return "It can reach " + join_words(words) + "."
+
+
+def describe_maker(manifest):
+    """Who wrote it and whether the farm has looked at it, in one line."""
+    author = manifest.get("author")
+    name = author.get("name") if isinstance(author, dict) else None
+    made = f"Made by {name}." if isinstance(name, str) and name.strip() else "Its maker is not named in the catalog."
+    return made + (" The farm has reviewed it." if manifest.get("verified") is True
+                   else " The farm has not reviewed it yet.")
+
+
+def describe_size(size):
+    """A download size a person can picture."""
+    if size >= 1000000:
+        return f"{size / 1000000:.1f} MB"
+    if size >= 1000:
+        return f"{round(size / 1000)} KB"
+    return f"{size} bytes"
+
+
+def landing_page(manifest):
+    """The page farm start points at: the open field when the app names one, otherwise the root."""
+    page = manifest.get("open", "/")
+    return page if isinstance(page, str) and page.startswith("/") else "/"
+
+
+def app_link(port, manifest):
+    page = landing_page(manifest)
+    return f"http://localhost:{port}" + ("" if page == "/" else page)
 
 
 def describe_requirements(requires):
@@ -624,7 +678,7 @@ class Farm:
             with open_url(self.catalog.rstrip("/") + "/" + ident + ".json") as response:
                 data = response.read(1024 * 1024 + 1)
             if len(data) > 1024 * 1024:
-                raise FarmError("Manifest exceeds 1 MiB.")
+                raise FarmError("This app's catalog entry is larger than 1 MiB.")
             result = json.loads(data)
         return validate_manifest(result, ident)
 
@@ -661,14 +715,17 @@ class Farm:
     def list(self):
         print("Installed:")
         for current in sorted(self.home.glob("*/current")):
-            _, manifest = self.installed(current.parent.name)
-            print(f"  {manifest['id']} {manifest['version']} - {manifest['name']}")
+            ident = current.parent.name
+            with self.guard(ident):
+                _, manifest = self.installed(ident)
+                state = "running" if self.active(ident) else "stopped"
+            print(f"  {manifest['id']} {manifest['version']} {manifest['name']} [{state}] - {manifest['pitch']}")
         print("Catalog:")
         for ident in self.catalog_ids():
             manifest = self.manifest(ident)
             draft = (" [No release yet]" if "release" not in manifest else
                      " [release pending]" if manifest["release"]["sha256"] == "pending" else "")
-            print(f"  {ident} {manifest['version']} - {manifest['pitch']}{draft}")
+            print(f"  {ident} {manifest['version']} {manifest['name']} - {manifest['pitch']}{draft}")
 
     def download(self, release, destination):
         location = release["url"]
@@ -738,6 +795,7 @@ class Farm:
 
     def install(self, ident, yes=False, update=False):
         with self.guard(ident):
+            print(f"Looking up {app_id(ident)} in the catalog.")
             manifest = self.manifest(ident)
             if "release" not in manifest:
                 raise FarmError("This app has no release to install yet.")
@@ -756,8 +814,9 @@ class Farm:
             if tuple(map(int, py.split("."))) > sys.version_info[:2]:
                 raise FarmError(f"This app needs Python {py} or newer.")
             print(f"{manifest['name']} {manifest['version']}\n{manifest['pitch']}")
-            print("Permissions: " + ", ".join(manifest["permissions"]))
+            print(describe_maker(manifest))
             print("Needs: " + describe_requirements(manifest["requires"]))
+            print(describe_permissions(manifest["permissions"]))
             if not yes and input("Install this release? [y/N] ").strip().lower() not in ("y", "yes"):
                 print("Cancelled.")
                 return
@@ -765,9 +824,15 @@ class Farm:
             with tempfile.TemporaryDirectory(prefix=".install-", dir=self.home) as temporary:
                 stage = Path(temporary)
                 archive = stage / "release.tar"
+                where = urlsplit(release["url"]).hostname
+                # A catalog entry may carry size 0, meaning nobody has measured it yet.
+                measured = describe_size(release["size"]) if release["size"] else "it"
+                print(f"Downloading {measured}" + (f" from {where}." if where else "."))
                 self.download(release, archive)
+                print("The download matches the checksum the catalog lists.")
                 content = stage / "content"
                 content.mkdir()
+                print(f"Unpacking it into {app / manifest['version']}.")
                 root = self.unpack(archive, content, manifest["entry"])
                 atomic_write(root / ".farm-manifest.json", json.dumps(manifest, indent=2) + "\n")
                 app.mkdir(exist_ok=True, mode=0o700)
@@ -782,9 +847,15 @@ class Farm:
                 os.replace(root, destination)
                 atomic_write(app / "launcher.json", json.dumps({"id": ident, "entry": manifest["entry"]}) + "\n")
                 atomic_write(app / "current", manifest["version"] + "\n")
-            print(f"Installed {ident} {manifest['version']}. " +
-                  ("Library only; copy onelane.py into your app." if manifest["entry"] is None
-                   else f"Run: farm start {ident}"))
+            if manifest["entry"] is not None:
+                print(f"Ready. Run: farm start {ident}")
+                return
+            module = destination / (ident.replace("-", "_") + ".py")
+            module = module if module.is_file() else destination / (ident + ".py")
+            print(f"Ready. {manifest['name']} is a library, so there is nothing to start.")
+            print(f"Copy {module.name} out of {destination} into your own app, or import it from there."
+                  if module.is_file() else
+                  f"Its files are in {destination}; import what you need from there.")
 
     def device(self, base=None, key_stdin=False):
         scripted = base is not None or key_stdin or any(
@@ -810,6 +881,27 @@ class Farm:
         self.config_home.mkdir(parents=True, exist_ok=True, mode=0o700)
         atomic_write(self.config_home / "device.json", json.dumps({"base": base, "key": key}) + "\n")
         print("Device settings saved.")
+        self.device_users()
+
+    def device_users(self):
+        """Name the installed apps these settings reach, and one command that proves they work."""
+        wanting, runnable = [], []
+        for current in sorted(self.home.glob("*/current")):
+            ident = current.parent.name
+            try:
+                _, manifest = self.installed(ident)
+            except (FarmError, OSError, ValueError):
+                continue
+            if "device" in manifest["permissions"] or (manifest["requires"].get("device") or {}).get("models"):
+                wanting.append(ident)
+                if manifest["entry"] is not None:
+                    runnable.append(ident)
+        if not wanting:
+            print("No app you have installed uses your Tiiny yet. Run: farm list to see what the catalog has.")
+            return
+        print("These installed apps will use it: " + join_words(wanting) + ".")
+        if runnable:
+            print(f"Try it now: farm start {runnable[0]}")
 
     def environment(self, ident, manifest):
         app = self.app_dir(ident)
@@ -928,7 +1020,7 @@ class Farm:
         # A fixed port refuses --port before launch, so only a movable app reaches this.
         if port is not None and takes is not None and declared and declared[0] != port and self.tcp_ready(declared[0]):
             message += (f"\n{ident} never opened {port}, and something is listening on {declared[0]},"
-                        " the port its manifest declares.")
+                        " the port it normally uses.")
             if "argv" in takes:
                 message += (f" It was started with {takes['argv']} {port} and did not use it."
                             f" Ask its author about {takes['argv']}.")
@@ -955,7 +1047,14 @@ class Farm:
             root, manifest = self.installed(ident)
             app = self.app_dir(ident)
             if self.active(ident):
-                print(f"{ident} is already running.")
+                print(f"{manifest['name']} is already running.")
+                try:
+                    live = read_json(app / "process.json").get("ports") or []
+                except (OSError, ValueError):
+                    live = []
+                if live:
+                    print("Open " + app_link(live[0], manifest))
+                print(f"Stop it with: farm stop {ident}")
                 return
             entry = manifest["entry"]
             if entry is None:
@@ -1052,9 +1151,14 @@ class Farm:
                     (app / "process.json").unlink(missing_ok=True)
                     raise
             threading.Thread(target=process.wait, daemon=True).start()
-            where = f" on port {ports[0]}" if ports else ""
-            note = f" (port {moved[0]} was busy, so it took {moved[1]})" if moved else ""
-            print(f"Started {ident}{where}{note}: pid {process.pid}; log {app / 'farm.log'}")
+            print(f"{manifest['name']} is running.")
+            if moved:
+                print(f"Port {moved[0]} was busy, so it started on {moved[1]}.")
+            if ports:
+                print("Open " + app_link(ports[0], manifest))
+            print(manifest["pitch"])
+            print(f"Stop it with: farm stop {ident}")
+            print(f"Log: {app / 'farm.log'}")
 
     def _stop(self, ident):
         app = self.app_dir(ident)
@@ -1097,7 +1201,7 @@ class Farm:
             print(f"Stopped {ident}." if self._stop(ident) else f"{ident} is not running.")
 
     def status(self):
-        print("APP PID PORT UPTIME STATUS")
+        print("APP PID PORT LINK UPTIME STATUS")
         for path in sorted(self.home.glob("*/farm.pid")):
             ident = path.parent.name
             with self.guard(ident):
@@ -1120,7 +1224,8 @@ class Farm:
                     detail = f"running {version}"
                     if version != manifest["version"]:
                         detail += f", installed {manifest['version']}: restart to update"
-                    print(f"{ident} {pid} {ports} {max(0, int(time.time() - info['started']))}s {detail}{note}")
+                    link = app_link(info["ports"][0], manifest) if info["ports"] else "-"
+                    print(f"{ident} {pid} {ports} {link} {max(0, int(time.time() - info['started']))}s {detail}{note}")
 
     def remove(self, ident, purge=False):
         with self.guard(ident):

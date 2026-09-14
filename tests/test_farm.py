@@ -21,7 +21,7 @@ import unittest
 from unittest.mock import patch
 from urllib.parse import urlsplit
 
-from farm.farm import Farm, FarmError, main
+from farm.farm import Farm, FarmError, describe_size, main
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("check_manifest", ROOT / "scripts/check-manifest.py")
@@ -210,6 +210,16 @@ class ManifestTests(unittest.TestCase):
             change(manifest)
             with self.assertRaises(ValueError):
                 validator.check_manifest(manifest, allow_pending=True)
+
+    def test_an_open_page_needs_a_declared_port(self):
+        """The link farm start offers has to have a port to live on."""
+        self.manifest["release"]["sha256"] = "a" * 64
+        self.manifest["open"] = "/chat"
+        validator.check_manifest(self.manifest)
+        del self.manifest["health"]
+        self.manifest["requires"]["ports"] = []
+        with self.assertRaisesRegex(ValueError, r"\$\.open"):
+            validator.check_manifest(self.manifest)
 
     def test_pending_must_be_explained(self):
         self.manifest["description"] = "No release explanation."
@@ -406,7 +416,8 @@ class FarmTests(unittest.TestCase):
         with patch("builtins.input", return_value="yes") as prompt:
             self.farm.install("fake-app")
         prompt.assert_called_once()
-        self.assertIn("Permissions:", self.output.getvalue())
+        self.assertIn("It can reach your microphone, your files, the network and your Tiiny.",
+                      self.output.getvalue())
         self.assertIn("Needs:", self.output.getvalue())
 
     def test_bad_checksum_never_unpacks(self):
@@ -583,11 +594,20 @@ class FarmTests(unittest.TestCase):
         self.assertIsNotNone(self.farm.active("fake-app"))
 
     def test_catalog_list(self):
+        """Every row carries the name, the version, the one-line summary and, once installed, whether it runs."""
         self.install()
         self.farm.list()
-        self.assertIn("Installed:", self.output.getvalue())
-        self.assertIn("Catalog:", self.output.getvalue())
-        self.assertIn("fake-app 0.1.0", self.output.getvalue())
+        printed = self.output.getvalue()
+        self.assertIn("Installed:", printed)
+        self.assertIn("Catalog:", printed)
+        self.assertIn("  fake-app 0.1.0 Fake app [stopped] - " + self.manifest["pitch"], printed)
+        self.assertIn("  fake-app 0.1.0 Fake app - " + self.manifest["pitch"], printed)
+
+    def test_list_says_which_installed_app_is_running(self):
+        self.install()
+        self.farm.start("fake-app")
+        self.farm.list()
+        self.assertIn("  fake-app 0.1.0 Fake app [running] - ", self.output.getvalue())
 
     def test_device_config_hidden_and_private(self):
         with patch("getpass.getpass", side_effect=["http://example.test/v1", "secret-value"]) as prompt:
@@ -750,7 +770,7 @@ while True: time.sleep(0.1)
                 ConnectionRefusedError(), ConnectionRefusedError(), contextlib.nullcontext()]) as connect:
             self.farm.start('fake-app')
         self.assertEqual(connect.call_count, 3)
-        self.assertIn('Started fake-app', self.output.getvalue())
+        self.assertIn('Fake app is running.', self.output.getvalue())
 
     def test_busy_port_moves_a_movable_app_up_and_says_so(self):
         """Jason, 2026-09-14: the archiver held 8430 and farm start should have stepped off it."""
@@ -761,7 +781,8 @@ while True: time.sleep(0.1)
         with patch('farm.farm.socket.create_connection', side_effect=[
                 contextlib.nullcontext(), ConnectionRefusedError(), contextlib.nullcontext()]):
             self.farm.start('fake-app')
-        self.assertIn('Started fake-app on port 43211 (port 43210 was busy, so it took 43211)', self.output.getvalue())
+        self.assertIn('Port 43210 was busy, so it started on 43211.', self.output.getvalue())
+        self.assertIn('Open http://localhost:43211', self.output.getvalue())
         self.wait_for(lambda: 'port=43211' in (self.app / 'farm.log').read_text())
 
     def test_busy_port_never_launches_or_claims_started(self):
@@ -774,7 +795,7 @@ while True: time.sleep(0.1)
                 with self.assertRaisesRegex(FarmError, 'already in use'):
                     self.farm.start('fake-app')
         spawn.assert_not_called()
-        self.assertNotIn('Started', self.output.getvalue())
+        self.assertNotIn('is running', self.output.getvalue())
         self.assertFalse((self.app / 'farm.pid').exists())
 
     def test_a_mistyped_app_id_leaves_no_lock_behind(self):
@@ -851,7 +872,7 @@ while True: time.sleep(0.1)
         self.farm.start('fake-app')
         self.farm.status()
         printed = self.output.getvalue()
-        self.assertIn('APP PID PORT UPTIME STATUS', printed)
+        self.assertIn('APP PID PORT LINK UPTIME STATUS', printed)
         self.assertIn('running 0.1.0', printed)
 
     def test_install_prompt_describes_requirements_in_words(self):
@@ -878,7 +899,7 @@ while True: time.sleep(0.1)
         self.assertEqual(len(str(error.exception).splitlines()[1:]), 10)
         self.assertIsNone(self.farm.active('fake-app'))
         self.assertFalse((self.app / 'process.json').exists())
-        self.assertNotIn('Started', self.output.getvalue())
+        self.assertNotIn('is running', self.output.getvalue())
 
     def test_delayed_exit_is_not_success(self):
         self.manifest['requires']['ports'] = [43210]
@@ -887,7 +908,7 @@ while True: time.sleep(0.1)
         with patch('farm.farm.socket.create_connection', side_effect=ConnectionRefusedError()):
             with self.assertRaisesRegex(FarmError, 'bind failed'):
                 self.farm.start('fake-app')
-        self.assertNotIn('Started', self.output.getvalue())
+        self.assertNotIn('is running', self.output.getvalue())
         self.assertFalse((self.app / 'farm.pid').exists())
 
     def test_health_retries_and_status_uses_live_version_and_override(self):
@@ -936,7 +957,7 @@ while True: time.sleep(0.1)
                                 env=os.environ | {'HOME': str(self.root), 'USERPROFILE': str(self.root)}, capture_output=True, text=True)
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn('startup exploded', result.stderr)
-        self.assertNotIn('Started', result.stdout)
+        self.assertNotIn('is running', result.stdout)
         self.assertFalse((self.app / 'farm.pid').exists())
 
     def start_with_port_field(self, ident, takes, args, port=None, ports=(7788,), code=None):
@@ -1114,3 +1135,146 @@ while True: time.sleep(0.1)
                 self.farm.start('fake-app')
             self.assertLess(time.monotonic() - started, 1.0)
         self.assertFalse((self.app / 'farm.pid').exists())
+
+    def test_install_tells_a_person_what_it_is_installing(self):
+        """Jason, 2026-09-14: "It works, I guess, but it's very simplistic and not very telling.\""""
+        self.install()
+        printed = self.output.getvalue()
+        self.assertIn("Looking up fake-app in the catalog.", printed)
+        self.assertIn("Fake app 0.1.0", printed)
+        self.assertIn(self.manifest["pitch"], printed)
+        self.assertIn("Made by Titanium Computing. The farm has reviewed it.", printed)
+        self.assertIn("Downloading " + describe_size(self.manifest["release"]["size"]), printed)
+        self.assertNotIn("Downloading 0 bytes", printed)
+        self.assertIn("The download matches the checksum the catalog lists.", printed)
+        self.assertIn(f"Unpacking it into {self.app / '0.1.0'}.", printed)
+        self.assertIn("Ready. Run: farm start fake-app", printed)
+        self.assertLess(printed.index("Fake app 0.1.0"), printed.index("Downloading "))
+
+    def test_install_names_the_download_size_a_person_can_picture(self):
+        for size, said in ((480188, "480 KB"), (2349344, "2.3 MB"), (900, "900 bytes"), (0, "0 bytes")):
+            with self.subTest(size=size):
+                self.assertEqual(describe_size(size), said)
+
+    def test_install_says_when_nobody_is_named_and_nothing_was_reviewed(self):
+        del self.manifest["author"]
+        self.manifest["verified"] = False
+        self.save_manifest()
+        self.install()
+        self.assertIn("Its maker is not named in the catalog. The farm has not reviewed it yet.",
+                      self.output.getvalue())
+
+    def test_start_ends_with_the_link_the_pitch_and_how_to_stop_it(self):
+        """The line a person wants is the link, not a process ID."""
+        self.manifest["requires"]["ports"] = [43210]
+        self.save_manifest()
+        self.install()
+        with patch("farm.farm.socket.create_connection", side_effect=[
+                ConnectionRefusedError(), contextlib.nullcontext()]):
+            self.farm.start("fake-app")
+        said = self.output.getvalue().split("Fake app is running.")[1]
+        self.assertIn("Open http://localhost:43210\n", said)
+        self.assertIn(self.manifest["pitch"], said)
+        self.assertIn("Stop it with: farm stop fake-app", said)
+        self.assertIn(f"Log: {self.app / 'farm.log'}", said)
+        self.assertLess(said.index("Open http://localhost:43210"), said.index("Stop it with"))
+        self.assertLess(said.index("Stop it with"), said.index("Log: "))
+        self.assertNotIn((self.app / "farm.pid").read_text().strip(), said)
+
+    def test_an_app_already_running_is_told_where_to_open_it(self):
+        self.manifest["requires"]["ports"] = [43210]
+        self.save_manifest()
+        self.install()
+        with patch("farm.farm.socket.create_connection", side_effect=[
+                ConnectionRefusedError(), contextlib.nullcontext()]):
+            self.farm.start("fake-app")
+        self.farm.start("fake-app")
+        self.assertIn("Fake app is already running.", self.output.getvalue())
+        self.assertEqual(self.output.getvalue().count("Open http://localhost:43210"), 2)
+
+    def test_status_shows_a_link_for_every_running_app(self):
+        self.manifest["requires"]["ports"] = [43210]
+        self.save_manifest()
+        self.install()
+        with patch("farm.farm.socket.create_connection", side_effect=[
+                ConnectionRefusedError(), contextlib.nullcontext()]):
+            self.farm.start("fake-app")
+        self.farm.status()
+        self.assertIn("APP PID PORT LINK UPTIME STATUS", self.output.getvalue())
+        self.assertRegex(self.output.getvalue(),
+                         r"fake-app \d+ 43210 http://localhost:43210 \d+s running 0\.1\.0")
+
+    def test_the_open_field_names_the_first_page_and_a_health_probe_is_not_one(self):
+        self.manifest["requires"]["ports"] = [43210]
+        self.manifest["health"] = "/api/health"
+        self.manifest["open"] = "/chat"
+        self.save_manifest()
+        self.install()
+        with patch("farm.farm.socket.create_connection", side_effect=ConnectionRefusedError()), \
+                patch("farm.farm.urlopen", side_effect=lambda *a, **k: io.BytesIO(b'{"version":"0.1.0"}')):
+            self.farm.start("fake-app")
+        self.assertIn("Open http://localhost:43210/chat", self.output.getvalue())
+        self.assertNotIn("localhost:43210/api/health", self.output.getvalue())
+
+    def test_invalid_open_pages_are_refused(self):
+        from farm.farm import validate_manifest
+        self.manifest["requires"]["ports"] = [43210]
+        for page in ("https://example.com", "//example.com", "/bad?q=x", "/bad\npath", True, "chat", ""):
+            manifest = copy.deepcopy(self.manifest)
+            manifest["open"] = page
+            with self.subTest(open=page), self.assertRaises(FarmError):
+                validate_manifest(manifest, "fake-app")
+        for page in ("/", "/chat", "/ui/index.html"):
+            manifest = copy.deepcopy(self.manifest)
+            manifest["open"] = page
+            with self.subTest(open=page):
+                validate_manifest(manifest, "fake-app")
+        without_a_port = copy.deepcopy(self.manifest)
+        without_a_port["requires"]["ports"] = []
+        without_a_port["open"] = "/chat"
+        with self.assertRaises(FarmError):
+            validate_manifest(without_a_port, "fake-app")
+
+    def test_a_library_says_what_to_import_instead_of_a_command(self):
+        self.manifest.update(entry=None, tags=["library"])
+        self.make_release(members=[("fake-0.1.0/fake-app.py", b"# a library\n", None)])
+        self.install()
+        printed = self.output.getvalue()
+        self.assertIn("Ready. Fake app is a library, so there is nothing to start.", printed)
+        self.assertIn(f"Copy fake-app.py out of {self.app / '0.1.0'} into your own app", printed)
+        self.assertNotIn("farm start", printed)
+
+    def test_a_library_with_no_file_of_its_own_name_points_at_its_directory(self):
+        self.manifest.update(entry=None, tags=["library"])
+        self.make_release(members=[("fake-0.1.0/inner/thing.py", b"# a library\n", None)])
+        self.install()
+        self.assertIn(f"Its files are in {self.app / '0.1.0'}; import what you need from there.",
+                      self.output.getvalue())
+
+    def test_device_names_the_apps_that_will_use_it_and_how_to_try_one(self):
+        self.install()
+        with patch("getpass.getpass", side_effect=["http://example.test/v1", "secret-value"]):
+            self.farm.device()
+        printed = self.output.getvalue()
+        self.assertIn("These installed apps will use it: fake-app.", printed)
+        self.assertIn("Try it now: farm start fake-app", printed)
+        self.assertNotIn("secret-value", printed)
+
+    def test_device_with_nothing_installed_points_at_the_catalog(self):
+        with patch("getpass.getpass", side_effect=["http://example.test/v1", "secret-value"]):
+            self.farm.device()
+        self.assertIn("No app you have installed uses your Tiiny yet.", self.output.getvalue())
+
+    def test_no_consumer_line_carries_a_word_only_a_maker_needs(self):
+        """Jason, 2026-09-14: no pids in the headline, no argv, no manifest on a consumer line."""
+        self.manifest["requires"]["ports"] = [43210]
+        self.save_manifest()
+        self.install()
+        with patch("farm.farm.socket.create_connection", side_effect=[
+                ConnectionRefusedError(), contextlib.nullcontext()]):
+            self.farm.start("fake-app")
+        self.farm.status()
+        self.farm.list()
+        for word in ("argv", "manifest", "Manifest", "pid "):
+            with self.subTest(word=word):
+                self.assertNotIn(word, self.output.getvalue())

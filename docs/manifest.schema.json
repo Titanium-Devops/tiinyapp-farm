@@ -286,6 +286,11 @@
       "pattern": "^/(?!/)[A-Za-z0-9_./-]+(?![\\s\\S])",
       "description": "Optional HTTP health path on the first declared port; GET returns a JSON object with version and optional ok."
     },
+    "open": {
+      "type": "string",
+      "pattern": "^/(?!/)[A-Za-z0-9_./-]*(?![\\s\\S])",
+      "description": "Optional first page on the first declared port, which farm start offers as a link. Defaults to the root. A health path is a probe, not a page."
+    },
     "selfcheck": {
       "type": "boolean",
       "description": "If true, CI runs the entry with --selfcheck appended, offline, with a 120 second limit. Requires a runnable entry."

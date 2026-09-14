@@ -61,6 +61,7 @@ FIELDS = {
     "updatedAt": "The most recent manifest update, YYYY-MM-DD.",
     "selfcheck": "Optional boolean. When true, CI appends --selfcheck to the entry and requires exit 0 offline within 120 seconds.",
     "health": "Optional HTTP health path on the first declared port, returning a JSON object with version and optional ok.",
+    "open": "Optional first page on the first declared port, offered as a link when the app starts. It defaults to the root, and a health path is a probe rather than a page.",
 }
 
 
@@ -182,7 +183,8 @@ def steps():
 <div class="stp"><div class="n">3</div><div><h2>Install and run an app</h2><p>Pick an app in the catalog. Its page shows what it needs and what it asks for before you install it.</p><pre>farm install titanium-tiiny-bot
 farm start titanium-tiiny-bot</pre>
 <p class="small">The install prints what the app asks for and waits for a yes. In a script, <code>farm install &lt;id&gt; -y</code> answers it.</p>
-<p class="small">If something already holds the app's port, the start stops and tells you: <code>Port 7788 is already in use; use farm start &lt;id&gt; --port N.</code> Run it again on a free port with <code>farm start &lt;id&gt; --port 7799</code>.</p>
+<p class="small">A start that worked ends with the link to open, what the app is for, and <code>Stop it with: farm stop &lt;id&gt;</code>.</p>
+<p class="small">If something already holds the app's port, the farm steps up to the next free port and says so, unless that app's port is fixed. To pick the port yourself: <code>farm start &lt;id&gt; --port 7799</code>.</p>
 <dl><dt><code>farm list</code></dt><dd>installed apps and whether they are running</dd><dt><code>farm stop &lt;id&gt;</code></dt><dd>stop one</dd><dt><code>farm update &lt;id&gt;</code></dt><dd>update to the newest release, then start it again</dd><dt><code>farm remove &lt;id&gt;</code></dt><dd>uninstall</dd></dl></div></div>
 </div>
 <p class="note" style="margin-top:18px">Apps declare the access they use (microphone, files, network, your Tiiny). The CLI shows that before installing; it does not sandbox them. Read the source if that matters to you: every app in the catalog ships it.</p></section>'''
