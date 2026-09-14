@@ -8,12 +8,12 @@
   "verified": true,
   "featured": true,
   "addedAt": "2026-09-12",
-  "updatedAt": "2026-09-12",
+  "updatedAt": "2026-09-13",
   "id": "onelane",
   "name": "OneLane",
   "pitch": "Let cooperating apps take turns using one Tiiny.",
   "description": "Two apps, one Tiiny, no collisions. OneLane is a single Python file you copy beside your own code: it holds a kernel-level lock so a second inference waits its turn instead of failing with device error 150004, rides out busy retries, and can track a model budget. There is no app to start; it is a library the other apps on the farm use.",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "license": "MIT",
   "homepage": "https://github.com/webdevtodayjason/onelane",
   "repo": "https://github.com/webdevtodayjason/onelane",
@@ -37,9 +37,9 @@
     "developer-tools"
   ],
   "release": {
-    "url": "https://github.com/webdevtodayjason/onelane/archive/refs/tags/v0.1.0.tar.gz",
-    "sha256": "32d62db80bd789206753a418f341604304d69a0bfc8c1823f5f3e4ace9af2ab9",
-    "size": 168709
+    "url": "https://github.com/webdevtodayjason/onelane/archive/refs/tags/v0.1.2.tar.gz",
+    "sha256": "f1e0973edff2a6b1c4516b4a16c7b96038020af1cecdcd7dcedc06e70abea07a",
+    "size": 174423
   },
   "media": {
     "icon": "/assets/art/onelane-icon.png",
