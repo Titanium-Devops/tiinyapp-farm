@@ -2139,3 +2139,135 @@ while True: time.sleep(0.1)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(json.loads(done.stdout.strip().splitlines()[-1])["state"], "unreachable")
         self.assertNotIn("device-key", done.stdout + done.stderr)
+
+    def catalog_answer(self, cli="0.9.9", apps=()):
+        return io.BytesIO(json.dumps({"cli": cli, "apps": list(apps)}).encode())
+
+    def on_a_terminal(self):
+        return patch.object(self.output, "isatty", return_value=True)
+
+    def test_a_newer_farm_is_one_line_after_the_work(self):
+        """Jason, 2026-09-14: "you're running at X and version XYZ is out.\""""
+        with self.on_a_terminal(), patch("farm.farm._version", return_value="0.1.7"), \
+                patch("farm.farm.urlopen", return_value=self.catalog_answer("0.1.9")) as asked:
+            self.farm.update_notice()
+        self.assertEqual(self.output.getvalue(),
+                         "farm 0.1.9 is out and you are on 0.1.7. Run: farm self-update\n")
+        self.assertEqual(asked.call_args.args[0].full_url, "https://tiinyapp.farm/catalog.json")
+
+    def test_the_farm_you_are_running_says_nothing(self):
+        for offered in ("0.1.7", "0.1.6", "", None, "later", ["0.2.0"]):
+            with self.subTest(offered=offered), self.on_a_terminal(), \
+                    patch("farm.farm._version", return_value="0.1.7"), \
+                    patch("farm.farm.urlopen",
+                          return_value=io.BytesIO(json.dumps({"cli": offered}).encode())):
+                self.farm.update_notice()
+                (self.home / "update-check.json").unlink()  # so the next one is looked up again
+        self.assertEqual(self.output.getvalue(), "")
+
+    def test_an_older_catalog_that_is_still_a_list_says_nothing(self):
+        """A deploy in flight can still be serving the array this file used to be."""
+        with self.on_a_terminal(), patch("farm.farm._version", return_value="0.1.7"), \
+                patch("farm.farm.urlopen", return_value=io.BytesIO(b'[{"id": "fake-app"}]')):
+            self.farm.update_notice()
+        self.assertEqual(self.output.getvalue(), "")
+
+    def test_a_script_is_never_told_about_a_new_farm(self):
+        with patch("farm.farm._version", return_value="0.1.7"), \
+                patch("farm.farm.urlopen", side_effect=AssertionError("asked in a script")):
+            self.farm.update_notice()
+        self.assertEqual(self.output.getvalue(), "")
+
+    def test_the_check_can_be_turned_off_entirely(self):
+        with patch.dict(os.environ, {"FARM_NO_UPDATE_CHECK": "1"}), self.on_a_terminal(), \
+                patch("farm.farm._version", return_value="0.1.7"), \
+                patch("farm.farm.urlopen", side_effect=AssertionError("asked anyway")):
+            self.farm.update_notice()
+        self.assertEqual(self.output.getvalue(), "")
+
+    def test_the_cli_flag_turns_the_check_off_for_one_run(self):
+        with patch("farm.farm.Farm", return_value=self.farm), \
+                patch.object(self.farm, "list") as listing, \
+                patch.object(self.farm, "update_notice") as notice:
+            self.assertEqual(main(["--no-update-check", "list"]), 0)
+            listing.assert_called_once_with()
+            notice.assert_not_called()
+            self.assertEqual(main(["list"]), 0)
+            notice.assert_called_once_with()
+
+    def test_a_command_that_failed_is_not_given_a_version_notice(self):
+        errors = io.StringIO()
+        with patch("farm.farm.Farm", return_value=self.farm), \
+                patch.object(self.farm, "list", side_effect=FarmError("no catalog")), \
+                patch.object(self.farm, "update_notice") as notice, \
+                contextlib.redirect_stderr(errors):
+            self.assertEqual(main(["list"]), 1)
+        notice.assert_not_called()
+        self.assertIn("no catalog", errors.getvalue())
+
+    def test_the_catalog_is_asked_once_a_day_and_remembered_in_between(self):
+        with self.on_a_terminal(), patch("farm.farm._version", return_value="0.1.7"), \
+                patch("farm.farm.urlopen", return_value=self.catalog_answer("0.1.9")) as asked:
+            self.farm.update_notice()
+            self.farm.update_notice()
+        self.assertEqual(asked.call_count, 1)
+        self.assertEqual(self.output.getvalue().count("farm 0.1.9 is out"), 2)
+        stamp = json.loads((self.home / "update-check.json").read_text())
+        self.assertEqual(stamp["cli"], "0.1.9")
+        with self.on_a_terminal(), patch("farm.farm._version", return_value="0.1.7"), \
+                patch("farm.farm.urlopen", return_value=self.catalog_answer("0.2.0")) as asked:
+            self.farm.offered_cli(now=stamp["checked"] + 24 * 60 * 60 + 1)
+        asked.assert_called_once()
+
+    def test_a_farm_that_cannot_reach_the_catalog_says_nothing_and_stops_asking(self):
+        with self.on_a_terminal(), patch("farm.farm._version", return_value="0.1.7"), \
+                patch("farm.farm.urlopen", side_effect=URLError("offline")) as asked:
+            self.farm.update_notice()
+            self.farm.update_notice()
+        self.assertEqual(self.output.getvalue(), "")
+        self.assertEqual(asked.call_count, 1)
+        self.assertEqual(json.loads((self.home / "update-check.json").read_text())["cli"], "")
+
+    def test_self_update_moves_the_farm_and_leaves_the_apps_alone(self):
+        done = subprocess.CompletedProcess([], 0, "Successfully installed tiinyapp-farm-0.1.10\n", "")
+        with patch("farm.farm.subprocess.run", return_value=done) as pip, \
+                patch.object(self.farm, "installed_cli", return_value="0.1.10"), \
+                patch("farm.farm._version", return_value="0.1.9"):
+            self.farm.self_update()
+        self.assertEqual(pip.call_args.args[0],
+                         [sys.executable, "-m", "pip", "install", "--upgrade", "tiinyapp-farm"])
+        printed = self.output.getvalue()
+        self.assertIn("Successfully installed tiinyapp-farm-0.1.10", printed)
+        self.assertIn("farm is now 0.1.10.", printed)
+        self.assertIn("The next farm command you run is the new one.", printed)
+        self.assertFalse((self.app / "current").exists())
+
+    def test_self_update_uses_pipx_when_the_farm_lives_in_a_pipx_venv(self):
+        done = subprocess.CompletedProcess([], 0, "upgraded package tiinyapp-farm from 0.1.9 to 0.1.10\n", "")
+        with patch("farm.farm.sys.prefix", "/Users/someone/.local/pipx/venvs/tiinyapp-farm"), \
+                patch("farm.farm.shutil.which", return_value="/opt/homebrew/bin/pipx"), \
+                patch("farm.farm.subprocess.run", return_value=done) as upgrade, \
+                patch.object(self.farm, "installed_cli", return_value="0.1.10"):
+            self.farm.self_update()
+        self.assertEqual(upgrade.call_args.args[0],
+                         ["/opt/homebrew/bin/pipx", "upgrade", "tiinyapp-farm"])
+        self.assertIn("farm is now 0.1.10.", self.output.getvalue())
+
+    def test_an_upgrade_that_did_not_go_through_says_so_and_keeps_the_version(self):
+        done = subprocess.CompletedProcess([], 1, "", "ERROR: Could not find a version\n")
+        with patch("farm.farm.subprocess.run", return_value=done), \
+                patch("farm.farm._version", return_value="0.1.9"):
+            with self.assertRaisesRegex(FarmError, "still 0.1.9"):
+                self.farm.self_update()
+        self.assertIn("ERROR: Could not find a version", self.output.getvalue())
+
+    def test_doctor_says_when_the_farm_itself_has_fallen_behind(self):
+        self.configure_device()
+        with patch("farm.farm._version", return_value="0.1.7"), \
+                patch.object(self.farm, "offered_cli", return_value="0.1.9"), \
+                patch.object(self.farm, "probe_device", return_value=(0, "172.17.7.177", (3, 14))), \
+                patch("farm.farm.python_candidates", return_value=[]), \
+                patch.object(self.farm, "device_models", return_value=("ok", ["qwen3-8b"])):
+            self.assertTrue(self.farm.doctor())
+        self.assertIn("farm 0.1.9 is out and you are on 0.1.7. Run: farm self-update",
+                      self.output.getvalue())

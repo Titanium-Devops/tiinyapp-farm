@@ -34,6 +34,10 @@ cd tiinyapp-farm
 python3 -m pip install .
 ```
 
+Commands end by saying so, in one line, when a newer farm is out. `farm self-update` takes it, and
+nothing you have installed is touched by that. To never be told, pass `--no-update-check` or set
+`FARM_NO_UPDATE_CHECK=1`.
+
 ## Find your Tiiny
 
 The command needs two things once: the base URL of the device's API and its API key.

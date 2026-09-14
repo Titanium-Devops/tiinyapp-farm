@@ -238,7 +238,7 @@ need no credential still work and anything further answers 503.
 | `/makers/<handle>/card.png` | That maker's share card |
 | `/account/` | Your apps. Redirects to `/submit/` when you are not signed in |
 | `/manifests/<id>.json` | One app manifest, the file the installer reads |
-| `/catalog.json` | Every manifest in one array |
+| `/catalog.json` | `{"cli": "0.1.9", "apps": [...]}`: the newest `farm` version, and every manifest |
 | `/categories.json` | The tag to category map and the category order |
 | `/llms.txt` | The publishing guide as plain text, for assistants |
 

@@ -57,7 +57,7 @@ function fixture({ appKeys = true } = {}) {
       async delete(key) { objects.delete(key); } },
     ASSETS: { fetch: async request => {
       const path = new URL(request.url).pathname;
-      if (path === '/catalog.json') return Response.json([...published.values()]);
+      if (path === '/catalog.json') return Response.json({ cli: '0.1.9', apps: [...published.values()] });
       const seed = published.get(path.match(/^\/manifests\/(.+)\.json$/)?.[1]);
       return seed ? Response.json(seed) : new Response('static farm');
     } } };

@@ -560,7 +560,9 @@ assert.equal(anonymous.children[0].children[0].tag, 'span');
         inputs = {attrs['id']: attrs for tag, attrs in doc.tags if tag in ('input', 'textarea')}
         self.assertEqual(inputs['bio']['maxlength'], '600')
         self.assertEqual(inputs['avatar']['accept'], 'image/png,image/jpeg,image/webp')
-        self.assertEqual(json.loads((self.output / 'catalog.json').read_text()), self.apps)
+        published = json.loads((self.output / 'catalog.json').read_text())
+        self.assertEqual(published['apps'], self.apps)
+        self.assertEqual(published['cli'], tomllib.loads((ROOT / 'pyproject.toml').read_text())['project']['version'])
         self.assertIn('id="account-farm" href="/account/" hidden', (self.output / 'submit/index.html').read_text())
 
     def test_agent_guide_and_account_token_controls(self):

@@ -172,6 +172,18 @@ Pythons on this machine, runs the app with the first one that reaches your Tiiny
 line, and saves that choice for later starts. `--python PATH` makes the choice yourself and is never
 second guessed. None of this ever fails a start.
 
+## farm self-update
+
+```
+farm self-update
+```
+
+Moves the farm itself forward and touches nothing else. No app is stopped, started, updated or
+removed by it. In a normal installation it runs `pip install --upgrade tiinyapp-farm` with the
+interpreter the farm is installed in; when the farm lives in a pipx virtual environment it runs
+`pipx upgrade tiinyapp-farm` instead, because pip inside one of those is not how pipx expects to be
+moved. It prints the last line of what pip or pipx said, then the version you are on now.
+
 ## farm doctor
 
 ```
@@ -312,6 +324,23 @@ This command uses your own GitHub login through the `gh` command, not a farm tok
 pull request from your fork if you cannot push to the catalog. There is one pull request per app:
 an open one is refreshed rather than another opened beside it.
 
+## When the farm itself is out of date
+
+Every command ends by telling you, in one line, when the catalog is publishing a newer farm than the
+one you are running:
+
+```
+farm 0.1.10 is out and you are on 0.1.9. Run: farm self-update
+```
+
+The version comes from `/catalog.json` on the site, which the build writes from the package version,
+so nothing here asks PyPI anything at runtime. It is looked up at most once a day, remembered in
+`~/.tiinyapps/update-check.json`, given two seconds before it gives up, and skipped without a word
+when you are offline. It never runs before the work you asked for, never after a command that
+failed, and never when output is not a terminal, so scripts never see it. `--no-update-check` on any
+command, or `FARM_NO_UPDATE_CHECK=1` in the environment, turns it off, and `farm doctor` reports the
+same thing among its checks.
+
 ## The environment it reads
 
 | Variable | Effect |
@@ -321,6 +350,7 @@ an open one is refreshed rather than another opened beside it.
 | `FARM_TOKEN` | An API token, used when `--token` is not given |
 | `TIINY_BASE` | Device base URL for `farm device` in its scripted form |
 | `TIINY_KEY` | Device API key for `farm device` in its scripted form |
+| `FARM_NO_UPDATE_CHECK` | Set to anything and the farm never looks for a newer farm |
 
 A local catalog may point at local tar archives by path or `file://` URL. A remote catalog must use
 HTTP or HTTPS release URLs, and for `farm list` it must serve either a JSON array of app ids, or

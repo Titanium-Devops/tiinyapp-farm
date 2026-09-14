@@ -40,7 +40,10 @@ export function imageType(bytes) {
 export async function catalog(env) {
   const response = await env.ASSETS.fetch(new Request(ORIGIN + '/catalog.json'));
   if (!response.ok) fail(503, 'The catalog is temporarily unavailable.');
-  return response.json();
+  const published = await response.json();
+  // catalog.json carries the CLI version beside the apps. An array is the older file, which a
+  // deploy in flight can still be serving.
+  return Array.isArray(published) ? published : (published?.apps ?? []);
 }
 export async function makerRoutes(ctx) {
   const { path, request, env, requireUser, get, put, bodyJSON, random } = ctx;

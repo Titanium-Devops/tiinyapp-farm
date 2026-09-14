@@ -145,7 +145,9 @@ async function setupCatalog() {
   if (!grid) return;
   const [appsResponse, categoriesResponse] = await Promise.all([fetch('/catalog.json'), fetch('/categories.json')]);
   if (!appsResponse.ok || !categoriesResponse.ok) throw new Error('Catalog data could not be loaded.');
-  const apps = await appsResponse.json();
+  const published = await appsResponse.json();
+  // The file carries the CLI version beside the apps; an array is the older shape.
+  const apps = Array.isArray(published) ? published : (published?.apps ?? []);
   const config = await categoriesResponse.json();
   for (const app of apps) app.categories = categoryNames(app, config);
   const params = new URLSearchParams(location.search);
