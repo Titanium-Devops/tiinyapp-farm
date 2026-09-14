@@ -142,11 +142,7 @@ Image URLs are either an HTTPS URL or a site-relative path beginning `/assets/` 
 from a one-sentence scene. Both land in the same field and both reach the catalog through the same
 pull request. See [Art in the farm's hand](/docs/art/).
 
-## Fields the release path adds
-
-> Arrives with the release path. Both fields are on the open pull request
-> [#5](https://github.com/Titanium-Devops/tiinyapp-farm/pull/5) and the schema does not accept them
-> until it merges.
+## Fields that control release tracking
 
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
