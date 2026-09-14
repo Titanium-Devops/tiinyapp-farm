@@ -343,7 +343,8 @@ code is 1.
 
 `unreachable` names the apps whose catalog entry could not be read, so a network problem is never
 silently reported as "nothing new". Add `--all` to take every one of them, and the ids you took
-come back in `updated`.
+come back in `updated`. `farm update --json` with no id is the same command and answers the same
+object, with `"command": "check"` in it.
 
 `farm update <id> --json` takes one, and says what moved:
 
