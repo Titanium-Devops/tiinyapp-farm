@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 import errno
 import getpass
 import hashlib
@@ -594,6 +594,9 @@ def name_one(verb, idents):
 
 class Farm:
     def __init__(self, home=None, catalog=None, api_origin=None):
+        # What the last doctor run said, one entry per line it printed, so --json can hand an
+        # agent the same sentences a person reads instead of a second set written beside them.
+        self.findings = []
         self.home = Path(home) if home is not None else Path.home() / "tiinyapps"
         self.config_home = Path(home) if home is not None else Path.home() / ".tiinyapps"
         self.catalog = str(catalog or os.environ.get("FARM_CATALOG", CATALOG))
@@ -864,7 +867,8 @@ class Farm:
                 print("Opened from your fork at " + where + ".")
         return outcome
 
-    def submission_status(self, ident, token=None):
+    def submission(self, ident, token=None):
+        """What the farm says about your own submission of one app."""
         ident = app_id(ident)
         result = self.api("/api/seeds/mine", self.token(token))
         seeds = result.get("seeds") if isinstance(result, dict) else None
@@ -873,7 +877,11 @@ class Farm:
         matches = [seed for seed in seeds if isinstance(seed, dict) and seed.get("id") == ident]
         if not matches:
             raise FarmError(f"No submission found for {ident}.")
-        seed = matches[-1]
+        return matches[-1]
+
+    def submission_status(self, ident, token=None):
+        ident = app_id(ident)
+        seed = self.submission(ident, token)
         print(f"{ident}: {seed.get('state', 'unknown')}")
         for check in seed.get("checks", []):
             if isinstance(check, dict):
@@ -951,28 +959,52 @@ class Farm:
             raise FarmError("Catalog must serve a JSON array of ids or links to manifest JSON files.")
         return sorted(parser.ids)
 
-    def list(self):
-        print("Installed:")
-        known = {}
+    def installed_rows(self, known):
+        """Every installed app and its state, one at a time so a slow catalog answers as it goes."""
         for current in sorted(self.home.glob("*/current")):
             ident = current.parent.name
             with self.guard(ident):
                 _, manifest = self.installed(ident)
-                state = "running" if self.active(ident) else "stopped"
+                running = bool(self.active(ident))
             try:
                 known[ident] = self.manifest(ident, timeout=ADVISORY_TIMEOUT)
             except (FarmError, OSError, ValueError, HTTPException):
                 known[ident] = None
-            available = update_available(manifest, known[ident])
-            if available:
-                state += f", update available: {available}"
-            print(f"  {manifest['id']} {manifest['version']} {manifest['name']} [{state}] - {manifest['pitch']}")
-        print("Catalog:")
+            yield {"id": manifest["id"], "name": manifest["name"], "version": manifest["version"],
+                   "pitch": manifest["pitch"], "running": running,
+                   "updateAvailable": update_available(manifest, known[ident]) or None}
+
+    def catalog_rows(self, known, here):
+        """Every app in the catalog, using the entries the installed rows already fetched."""
         for ident in self.catalog_ids():
             manifest = known.get(ident) or self.manifest(ident)
-            draft = (" [No release yet]" if "release" not in manifest else
-                     " [release pending]" if manifest["release"]["sha256"] == "pending" else "")
-            print(f"  {ident} {manifest['version']} {manifest['name']} - {manifest['pitch']}{draft}")
+            yield {"id": ident, "name": manifest["name"], "version": manifest["version"],
+                   "pitch": manifest["pitch"],
+                   "release": ("none" if "release" not in manifest else
+                               "pending" if manifest["release"]["sha256"] == "pending" else "ready"),
+                   "installed": here.get(ident)}
+
+    def listing(self):
+        """The rows farm list prints: what is installed here, then the whole catalog."""
+        known, here, installed = {}, {}, []
+        for row in self.installed_rows(known):
+            here[row["id"]] = row["version"]
+            installed.append(row)
+        return installed, list(self.catalog_rows(known, here))
+
+    def list(self):
+        known, here = {}, {}
+        print("Installed:")
+        for row in self.installed_rows(known):
+            here[row["id"]] = row["version"]
+            state = "running" if row["running"] else "stopped"
+            if row["updateAvailable"]:
+                state += f", update available: {row['updateAvailable']}"
+            print(f"  {row['id']} {row['version']} {row['name']} [{state}] - {row['pitch']}")
+        print("Catalog:")
+        for row in self.catalog_rows(known, here):
+            draft = {"none": " [No release yet]", "pending": " [release pending]", "ready": ""}[row["release"]]
+            print(f"  {row['id']} {row['version']} {row['name']} - {row['pitch']}{draft}")
 
     def download(self, release, destination):
         location = release["url"]
@@ -1867,35 +1899,48 @@ class Farm:
         with self.guard(ident):
             print(f"Stopped {ident}." if self._stop(ident) else f"{ident} is not running.")
 
-    def status(self):
-        print("APP PID PORT LINK UPTIME STATUS")
+    def status_rows(self):
+        """One row per running app: its process, the port it took, and what it reports."""
         for path in sorted(self.home.glob("*/farm.pid")):
             ident = path.parent.name
             with self.guard(ident):
                 pid = self.active(ident)
-                if pid:
-                    info = read_json(path.parent / "process.json")
-                    ports = ",".join(map(str, info["ports"])) or "-"
-                    _, manifest = self.installed(ident)
-                    version = info.get("version", "unknown")
-                    note = ""
-                    health_path = info.get("health", manifest.get("health"))
-                    if health_path and info["ports"]:
-                        health = self.health(info["ports"][0], health_path)
-                        if health is None:
-                            note = " (health unavailable)"
-                        elif isinstance(health.get("version"), str) and VERSION.fullmatch(health["version"]):
-                            version = health["version"]
-                        else:
-                            note = " (health version unavailable)"
-                    detail = f"running {version}"
-                    if version != manifest["version"]:
-                        detail += f", installed {manifest['version']}: restart to update"
-                    available = self.newer_version(ident, manifest)
-                    if available:
-                        detail += f", update available: {available}"
-                    link = app_link(info["ports"][0], manifest) if info["ports"] else "-"
-                    print(f"{ident} {pid} {ports} {link} {max(0, int(time.time() - info['started']))}s {detail}{note}")
+                if not pid:
+                    continue
+                info = read_json(path.parent / "process.json")
+                ports = list(info["ports"])
+                _, manifest = self.installed(ident)
+                version = info.get("version", "unknown")
+                state = None
+                health_path = info.get("health", manifest.get("health"))
+                if health_path and ports:
+                    health = self.health(ports[0], health_path)
+                    if health is None:
+                        state = "unavailable"
+                    elif isinstance(health.get("version"), str) and VERSION.fullmatch(health["version"]):
+                        version = health["version"]
+                        state = "ok"
+                    else:
+                        state = "unversioned"
+                yield {"id": ident, "pid": pid, "ports": ports, "port": ports[0] if ports else None,
+                       "url": app_link(ports[0], manifest) if ports else None,
+                       "uptime": max(0, int(time.time() - info["started"])),
+                       "version": version, "installed": manifest["version"],
+                       "restartToUpdate": version != manifest["version"], "health": state,
+                       "updateAvailable": self.newer_version(ident, manifest) or None}
+
+    def status(self):
+        print("APP PID PORT LINK UPTIME STATUS")
+        for row in self.status_rows():
+            detail = f"running {row['version']}"
+            if row["restartToUpdate"]:
+                detail += f", installed {row['installed']}: restart to update"
+            if row["updateAvailable"]:
+                detail += f", update available: {row['updateAvailable']}"
+            note = {"unavailable": " (health unavailable)",
+                    "unversioned": " (health version unavailable)"}.get(row["health"], "")
+            print(f"{row['id']} {row['pid']} {','.join(map(str, row['ports'])) or '-'}"
+                  f" {row['url'] or '-'} {row['uptime']}s {detail}{note}")
 
     def device_models(self, settings, interpreter=None, timeout=5.0):
         """What the Tiiny lists on /v1/models, using the saved key, asked by the interpreter that
@@ -1930,6 +1975,19 @@ class Farm:
         return "ok", [model["id"] for model in listed
                       if isinstance(model, dict) and isinstance(model.get("id"), str)]
 
+    def note(self, check, ok, message, fix="", **detail):
+        """One line a person reads, kept where an agent can act on the same sentence.
+
+        A finding with no message of its own is a Fix line under the one before it, and carries
+        that line as its message, so the JSON and the printing say the same words either way."""
+        if message:
+            print(message)
+        if fix:
+            print("Fix: " + fix)
+        self.findings.append({"check": check, "ok": ok, "message": message or "Fix: " + fix,
+                              "fix": fix or None, **detail})
+        return ok
+
     def doctor_device(self, settings, interpreter):
         """The address on file, whether this Python reaches it, and whether the key is taken."""
         host = urlsplit(settings["base"]).hostname
@@ -1938,52 +1996,57 @@ class Farm:
         took = max(1, int((time.monotonic() - started) * 1000))
         where = address or host
         if code == 0:
-            print(f"Your Tiiny at {where} answered this Python in {took} ms.")
+            self.note("device", True, f"Your Tiiny at {where} answered this Python in {took} ms.",
+                      address=where, milliseconds=took)
         elif code in NO_ROUTE and private_address(address):
-            print(f"This Python cannot reach your Tiiny at {where},"
-                  " because macOS is blocking it from your local network.")
+            self.note("device", False, f"This Python cannot reach your Tiiny at {where},"
+                      " because macOS is blocking it from your local network.", address=where)
             return False, [], True
         else:
-            print(f"Nothing answered at {where}, port {DEVICE_PORT}.")
-            print("Fix: switch the Tiiny on and put it on this network, or run farm device"
-                  " if its address has changed.")
+            self.note("device", False, f"Nothing answered at {where}, port {DEVICE_PORT}.",
+                      "switch the Tiiny on and put it on this network, or run farm device"
+                      " if its address has changed.", address=where)
             return False, [], False
         state, models = self.device_models(settings, interpreter)
         if state == "ok":
-            print("The key on file is accepted by your Tiiny.")
+            self.note("key", True, "The key on file is accepted by your Tiiny.")
             return True, models, False
-        print("Your Tiiny refused the key on file." if state == "refused" else
-              f"Your Tiiny would not answer for the key on file ({state}).")
-        print("Fix: copy the key again from TiinyOS, Settings, API Key, then run farm device.")
+        self.note("key", False,
+                  "Your Tiiny refused the key on file." if state == "refused" else
+                  f"Your Tiiny would not answer for the key on file ({state}).",
+                  "copy the key again from TiinyOS, Settings, API Key, then run farm device.",
+                  state=state)
         return False, models, False
 
     def doctor_pythons(self, host, interpreter):
         """Which other Pythons on this machine can reach the Tiiny, and the first that can."""
-        said, working = [], None
+        said, working, tried = [], None, []
         for candidate in python_candidates(skip=[interpreter])[:MOST_PYTHONS_TRIED]:
             code, _, version = self.probe_device(host, candidate)
             reaches = code == 0 and version >= (3, 9)
             working = working or (candidate if reaches else None)
             said.append(f"{candidate} {'reaches it' if reaches else 'does not'}")
-        print("Other Pythons here: " + join_words(said) + "." if said else
-              "There is no other Python on this machine to fall back to.")
+            tried.append({"path": candidate, "reaches": reaches})
+        self.note("pythons", True,
+                  "Other Pythons here: " + join_words(said) + "." if said else
+                  "There is no other Python on this machine to fall back to.", pythons=tried)
         return working
 
     def doctor_apps(self):
         """Every installed app, the port it declares, and who is holding it."""
         idents = sorted(path.parent.name for path in self.home.glob("*/current"))
         if not idents:
-            print("No apps are installed yet. Run: farm list to see what the catalog has.")
-            return True
+            return self.note("apps", True, "No apps are installed yet."
+                             " Run: farm list to see what the catalog has.")
         ok = True
         for ident in idents:
             with self.guard(ident):
                 try:
                     _, manifest = self.installed(ident)
                 except (FarmError, OSError, ValueError):
-                    print(f"{ident} is installed but the farm cannot read it.")
-                    print(f"Fix: install it again with farm remove {ident} and farm install {ident}.")
-                    ok = False
+                    ok = self.note("app", False, f"{ident} is installed but the farm cannot read it.",
+                                   f"install it again with farm remove {ident} and farm install {ident}.",
+                                   id=ident) and ok
                     continue
                 running = self.active(ident)
                 live = []
@@ -1993,56 +2056,66 @@ class Farm:
                     except (OSError, ValueError):
                         live = []
             if manifest["entry"] is None:
-                print(f"{ident} is a library, so it has no port and nothing to start.")
+                self.note("app", True, f"{ident} is a library, so it has no port and nothing to start.",
+                          id=ident)
                 continue
             if not manifest["requires"]["ports"]:
-                print(f"{ident} declares no port.")
+                self.note("app", True, f"{ident} declares no port.", id=ident)
                 continue
             for port in manifest["requires"]["ports"]:
                 if not self.tcp_ready(port):
-                    print(f"{ident} declares port {port}, and it is free.")
+                    self.note("port", True, f"{ident} declares port {port}, and it is free.",
+                              id=ident, port=port)
                 elif port in live:
-                    print(f"{ident} declares port {port}, and {ident} itself is holding it.")
+                    self.note("port", True,
+                              f"{ident} declares port {port}, and {ident} itself is holding it.",
+                              id=ident, port=port)
                 else:
-                    print(f"{ident} declares port {port}, and something else is holding it.")
-                    print(f"Fix: stop whatever has it, or put the app somewhere else:"
-                          f" farm start {ident} --port N.")
-                    ok = False
+                    ok = self.note("port", False,
+                                   f"{ident} declares port {port}, and something else is holding it.",
+                                   f"stop whatever has it, or put the app somewhere else:"
+                                   f" farm start {ident} --port N.", id=ident, port=port) and ok
         return ok
 
     def doctor(self):
         """Everything a person would otherwise have to ask somebody else to check for them."""
+        self.findings = []
         interpreter = self.app_python() or sys.executable
         version = ".".join(map(str, sys.version_info[:3]))
-        print(f"farm {_version()}, running apps with {interpreter}"
-              + (f" (Python {version})." if Path(interpreter) == Path(sys.executable) else "."))
+        self.note("farm", True, f"farm {_version()}, running apps with {interpreter}"
+                  + (f" (Python {version})." if Path(interpreter) == Path(sys.executable) else "."),
+                  farm=_version(), python=interpreter)
         offered = self.offered_cli()
         if newer_version(offered, _version()):
-            print(f"farm {offered} is out and you are on {_version()}. Run: farm self-update")
+            self.note("cli", False, f"farm {offered} is out and you are on {_version()}."
+                      " Run: farm self-update", offered=offered)
         settings = self.device_settings()
         models, working = [], None
         if not settings:
-            print("No Tiiny is on file, so no app can reach one.")
-            print("Fix: run farm device with the device address and its API key.")
-            ok = False
+            ok = self.note("device", False, "No Tiiny is on file, so no app can reach one.",
+                           "run farm device with the device address and its API key.")
         else:
-            print(f"The Tiiny on file is at {settings['base']}.")
+            self.note("settings", True, f"The Tiiny on file is at {settings['base']}.",
+                      base=settings["base"])
             ok, models, blocked = self.doctor_device(settings, interpreter)
             working = self.doctor_pythons(urlsplit(settings["base"]).hostname, interpreter)
             if blocked and working:
-                print(f"Fix: the farm can run apps with {working}, which does reach it."
-                      f" Take it with: farm start <id> --python {working}")
+                self.note("python", False, "",
+                          f"the farm can run apps with {working}, which does reach it."
+                          f" Take it with: farm start <id> --python {working}", python=working)
             elif blocked:
-                print("Fix: System Settings, Privacy and Security, Local Network, turn on Python,"
-                      " then run farm doctor again.")
+                self.note("python", False, "",
+                          "System Settings, Privacy and Security, Local Network, turn on Python,"
+                          " then run farm doctor again.")
         listed = ok
         ok = self.doctor_apps() and ok
         if listed and models:
             counted = "1 model" if len(models) == 1 else f"{len(models)} models"
-            print(f"Your Tiiny lists {counted}: " + join_words(models) + ".")
+            self.note("models", True, f"Your Tiiny lists {counted}: " + join_words(models) + ".",
+                      models=models)
         elif listed:
-            print("Your Tiiny has no models on it right now.")
-            print("Fix: load one from TiinyOS, or from an app that manages them.")
+            self.note("models", False, "Your Tiiny has no models on it right now.",
+                      "load one from TiinyOS, or from an app that manages them.", models=[])
         print("Everything the farm checks is working." if ok else
               "Something above needs attention, and each Fix line says what to do.")
         return ok
@@ -2063,6 +2136,140 @@ class Farm:
             if purge or not any(app.iterdir()):
                 app.rmdir()
             print(f"Removed {ident}; " + ("data purged." if purge else "data kept."))
+
+
+# Every command that answers a machine as well as a person. The shapes are documented in the
+# agent guide at https://tiinyapp.farm/docs/agents/ and pinned by tests/test_farm.py.
+JSON_COMMANDS = ("list", "status", "check", "doctor", "install", "update", "start", "stop")
+
+
+def live_process(farm, ident):
+    """The process record of a running app, or empty when there is none to read."""
+    try:
+        return read_json(farm.app_dir(ident) / "process.json")
+    except (FarmError, OSError, ValueError):
+        return {}
+
+
+def installed_json(farm, ident):
+    """Where an installed app sits now and what its catalog entry declares."""
+    with farm.guard(ident):
+        root, manifest = farm.installed(ident)
+    return {"id": ident, "name": manifest["name"], "version": manifest["version"],
+            "path": str(root), "library": manifest["entry"] is None,
+            "ports": list(manifest["requires"]["ports"]),
+            "permissions": list(manifest["permissions"])}
+
+
+def running_json(farm, ident):
+    """The version on disk, the pid, the port it really took, and the link to open."""
+    with farm.guard(ident):
+        pid = farm.active(ident)
+        _, manifest = farm.installed(ident)
+    ports = list(live_process(farm, ident).get("ports") or []) if pid else []
+    return {"version": manifest["version"], "running": pid is not None, "pid": pid, "ports": ports,
+            "port": ports[0] if ports else None,
+            "url": app_link(ports[0], manifest) if ports else None}
+
+
+def name_the_app(farm, verb):
+    """The sentence a person gets when nobody is there to answer the chooser's question."""
+    rows = farm.startable_apps() if verb == "start" else farm.running_apps()
+    if rows:
+        return name_one(verb, [row[0] for row in rows])
+    if verb == "stop":
+        return "Nothing is running."
+    if not any(farm.home.glob("*/current")):
+        return "Nothing is installed yet. Run: farm list to see what the catalog has."
+    if farm.running_apps():
+        return "Everything you have installed is already running."
+    return "Nothing you have installed is a runnable app; a library has nothing to start."
+
+
+def check_json(farm, args):
+    """What the catalog has that this machine does not, and anything --yes or --all then took."""
+    found, unreachable = ([], []) if not any(farm.home.glob("*/current")) else farm.updates()
+    updates = []
+    for ident, installed, latest in found:
+        day = latest.get("updatedAt")
+        updates.append({"id": ident, "name": latest["name"], "installed": installed["version"],
+                        "available": latest["version"], "notes": release_note(latest) or None,
+                        "updatedAt": day if isinstance(day, str)
+                        and re.fullmatch(r"\d{4}-\d{2}-\d{2}", day) else None})
+    taken = []
+    if getattr(args, "every", False) or getattr(args, "yes", False):
+        for ident, _, _ in found:
+            farm.update(ident, yes=True)
+            taken.append(ident)
+    return {"command": "check", "updates": updates, "unreachable": unreachable, "updated": taken}
+
+
+def json_command(farm, args, ident):
+    """One JSON object for one command, built from the same work the printed command does."""
+    if args.command == "list":
+        installed, catalog = farm.listing()
+        return {"command": "list", "installed": installed, "catalog": catalog}
+    if args.command == "status":
+        if ident:
+            seed = farm.submission(ident, token=args.token)
+            return {"command": "status", "id": app_id(ident), "state": seed.get("state", "unknown"),
+                    "checks": [check for check in seed.get("checks", []) if isinstance(check, dict)],
+                    "reviews": [str(review) for review in seed.get("reviews", [])],
+                    "prUrl": seed.get("prUrl"), "unavailable": bool(seed.get("unavailable"))}
+        return {"command": "status", "running": list(farm.status_rows())}
+    if args.command == "check":
+        return check_json(farm, args)
+    if args.command == "doctor":
+        ok = farm.doctor()
+        return {"command": "doctor", "ok": ok, "farm": _version(), "findings": farm.findings}
+    if args.command == "install":
+        if not args.yes:
+            raise FarmError("Add --yes: with --json the farm never asks you to confirm an install.")
+        farm.install(ident, yes=True)
+        return {"command": "install", "installed": True, **installed_json(farm, ident)}
+    if args.command == "update":
+        if ident is None:
+            return check_json(farm, args)
+        with farm.guard(ident):
+            _, before = farm.installed(ident)
+        available = update_available(before, farm.manifest(ident))
+        farm.update(ident, yes=True)
+        live = running_json(farm, ident)
+        return {"command": "update", "id": app_id(ident),
+                "updated": live["version"] != before["version"], "previous": before["version"],
+                "available": available or None, **live}
+    if args.command == "start":
+        if ident is None:
+            raise FarmError(name_the_app(farm, "start"))
+        with farm.guard(ident):
+            already = bool(farm.active(ident))
+        farm.start(ident, port=args.port, python=args.python)
+        return {"command": "start", "id": app_id(ident), "already": already,
+                **running_json(farm, ident), "log": str(farm.app_dir(ident) / "farm.log")}
+    if ident is None:
+        raise FarmError(name_the_app(farm, "stop"))
+    with farm.guard(ident):
+        running = bool(farm.active(ident))
+    farm.stop(ident)
+    return {"command": "stop", "id": app_id(ident), "stopped": running}
+
+
+def run_json(farm, args):
+    """One JSON object on stdout and nothing else; the prose a person would read goes to stderr."""
+    ident = getattr(args, "id", None)
+    try:
+        # Everything the command prints is the running commentary, not the answer.
+        with redirect_stdout(sys.stderr):
+            payload = json_command(farm, args, ident)
+    except (FarmError, OSError, ValueError, KeyError, TypeError, tarfile.TarError, getpass.GetPassWarning) as error:
+        payload = {"error": {"command": args.command, "message": str(error) if isinstance(error, FarmError)
+                             else f"{type(error).__name__}; check the catalog, app files or device settings.",
+                             **({"id": ident} if ident else {})}}
+    except (EOFError, KeyboardInterrupt):
+        payload = {"error": {"command": args.command, "message": "Cancelled.",
+                             **({"id": ident} if ident else {})}}
+    print(json.dumps(payload))
+    return 0 if payload.get("ok", "error" not in payload) else 1
 
 
 def _version():
@@ -2129,8 +2336,16 @@ def main(argv=None):
         # subparser default would overwrite the top-level one, hence SUPPRESS.
         command.add_argument("--no-update-check", action="store_true", default=argparse.SUPPRESS,
                              help=argparse.SUPPRESS)
+    for name in JSON_COMMANDS:
+        commands.choices[name].add_argument(
+            "--json", action="store_true",
+            help="Answer with one JSON object on stdout; the prose goes to standard error")
     args = parser.parse_args(argv)
     farm = Farm()
+    # An answer meant for a machine carries no notice about the farm itself; farm doctor --json
+    # keeps that among its findings, where something can act on it.
+    if getattr(args, "json", False):
+        return run_json(farm, args)
     code = 0
     try:
         if args.command == "install":
