@@ -752,8 +752,21 @@ while True: time.sleep(0.1)
         self.assertEqual(connect.call_count, 3)
         self.assertIn('Started fake-app', self.output.getvalue())
 
+    def test_busy_port_moves_a_movable_app_up_and_says_so(self):
+        """Jason, 2026-09-14: the archiver held 8430 and farm start should have stepped off it."""
+        self.manifest['requires']['ports'] = [43210]
+        self.save_manifest()
+        self.make_release(code='import os\nprint("port=" + os.environ["TIINYAPP_PORT"], flush=True)\n' + FAKE_APP)
+        self.install()
+        with patch('farm.farm.socket.create_connection', side_effect=[
+                contextlib.nullcontext(), ConnectionRefusedError(), contextlib.nullcontext()]):
+            self.farm.start('fake-app')
+        self.assertIn('Started fake-app on port 43211 (port 43210 was busy, so it took 43211)', self.output.getvalue())
+        self.wait_for(lambda: 'port=43211' in (self.app / 'farm.log').read_text())
+
     def test_busy_port_never_launches_or_claims_started(self):
         self.manifest['requires']['ports'] = [43210]
+        self.manifest['port'] = None
         self.save_manifest()
         self.install()
         with patch('farm.farm.socket.create_connection', return_value=contextlib.nullcontext()):
@@ -782,6 +795,7 @@ while True: time.sleep(0.1)
     def test_busy_port_refusal_does_not_quote_an_older_run(self):
         """A refused port launches nothing, so farm.log still holds the run before it."""
         self.manifest['requires']['ports'] = [43210]
+        self.manifest['port'] = None
         self.save_manifest()
         self.install()
         self.app.mkdir(parents=True, exist_ok=True)
@@ -1010,7 +1024,7 @@ while True: time.sleep(0.1)
             with self.assertRaises(FarmError) as error:
                 self.farm.start('fake-app')
         self.assertEqual(str(error.exception),
-                         'Port 8420 is already in use; use farm start fake-app --port N.')
+                         'Port 8420 is already in use and nothing above it up to 8470 is free; use farm start fake-app --port N.')
 
     def test_invalid_port_fields_are_refused(self):
         from farm.farm import validate_manifest

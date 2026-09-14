@@ -940,6 +940,14 @@ class Farm:
                         f" run farm device and start it again.")
         return self.startup_error(app, message)
 
+    def free_port_above(self, ident, busy, span=50):
+        """The first free port above a busy one, so a movable app can start without being asked."""
+        for candidate in range(busy + 1, min(busy + 1 + span, 65536)):
+            if not self.tcp_ready(candidate):
+                return candidate
+        raise FarmError(f"Port {busy} is already in use and nothing above it up to {busy + span} is free;"
+                        f" use farm start {ident} --port N.")
+
     def start(self, ident, port=None):
         if port is not None and (type(port) is not int or not 1 <= port <= 65535):  # noqa: E721
             raise FarmError("Port must be an integer between 1 and 65535.")
@@ -963,8 +971,17 @@ class Farm:
                                 if ports else f"{ident} has no port to move, so start it without --port.")
             if port is not None:
                 ports = [port, *ports[1:]]
-            for candidate in ports:
+            moved = None
+            for index, candidate in enumerate(ports):
                 if self.tcp_ready(candidate):
+                    if index == 0 and port is None and takes is not None:
+                        # Jason, 2026-09-14: "It should have checked to see if a port was in use and
+                        # then put it on a different one." A movable app steps up to the next free
+                        # port on its own; an explicit --port is the person's choice and is never moved.
+                        chosen = self.free_port_above(ident, candidate)
+                        moved = (candidate, chosen)
+                        ports[0] = chosen
+                        continue
                     # Nothing launched this time, so quoting farm.log would show a stale run.
                     raise FarmError(f"Port {candidate} is already in use; use farm start {ident} --port N."
                                     if takes is not None else
@@ -1035,7 +1052,9 @@ class Farm:
                     (app / "process.json").unlink(missing_ok=True)
                     raise
             threading.Thread(target=process.wait, daemon=True).start()
-            print(f"Started {ident}: pid {process.pid}; log {app / 'farm.log'}")
+            where = f" on port {ports[0]}" if ports else ""
+            note = f" (port {moved[0]} was busy, so it took {moved[1]})" if moved else ""
+            print(f"Started {ident}{where}{note}: pid {process.pid}; log {app / 'farm.log'}")
 
     def _stop(self, ident):
         app = self.app_dir(ident)

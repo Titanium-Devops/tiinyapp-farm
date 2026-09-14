@@ -112,14 +112,16 @@ mistake.
 
 ## The port rule
 
-Every app declares the ports it listens on. Before starting anything, `farm start` checks that
-those ports are free, and refuses if one is taken rather than letting the app fail in its own way:
+Every app declares the port it listens on. Before starting anything, `farm start` checks that
+the port is free. If it is taken and the app can be moved (its manifest says how it takes a
+port), the farm steps up to the next free port on its own and tells you:
 
 ```
-Port 7788 is already in use; use farm start <id> --port N.
+Started titanium-tiiny-bot on port 7789 (port 7788 was busy, so it took 7789): pid 512; log ...
 ```
 
-Run it again on a free port:
+An app with a fixed port is refused instead, because nothing can move it. To choose the port
+yourself, name it, and the farm never moves a port you chose:
 
 ```
 farm start titanium-tiiny-bot --port 7799
