@@ -16,10 +16,11 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import textwrap
 import threading
 import time
 import unittest
-from unittest.mock import call, patch
+from unittest.mock import MagicMock, call, patch
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 
@@ -27,11 +28,45 @@ import farm.farm as farm_module
 from farm.farm import (DEVICE_PORT, DEVICE_PROBE, Farm, FarmError, MODELS_PROBE,
                        describe_size, main, python_candidates)
 
+# The three ways the finder reaches the network, held before any test patches them, so a test about
+# the finder itself can put the real one back and fake only the socket under it.
+REAL_CABLE = farm_module.host_addresses
+REAL_RESPONDER = farm_module.udp_devices
+REAL_CLIENT = farm_module.tiinyos_serving
+
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("check_manifest", ROOT / "scripts/check-manifest.py")
 assert spec is not None and spec.loader is not None
 validator = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(validator)
+
+# Recorded from Jason's Tiiny on 2026-09-14: what the box really answers on its discovery page,
+# and what it sends back to the responder token. The serial number is what makes one answer a box
+# rather than an open port, and the address list is what lets one box register once with both of
+# its planes.
+TIINY_JSON = {"schema_version": "1", "device_name": "jason's Tiiny",
+              "device_id": "8804fa89557e415f8055cf77d98c8ac8",
+              "serial_number": "TNYM26072400300011Q", "hostname": "tiinyhost",
+              "discovery_token": "GADGET_DISCOVER_V1", "transport": ["lan", "usb"],
+              "service": {"instance_name": "jason's Tiiny", "dns_sd": "_gadget._tcp",
+                          "http_port": 39218, "http_path": "/device.json",
+                          "udp_discovery_port": 39217},
+              "backend": {"scheme": "http", "port": 0, "path": "/"},
+              "usb": {"interface": "usb0", "active": 1, "network": "172.17.7.176/30",
+                      "device_ip": "172.17.7.177", "host_ip": "172.17.7.178"},
+              "ipv4_addresses": [{"interface": "usb0", "address": "172.17.7.177"},
+                                 {"interface": "wlan0", "address": "192.168.100.94"}]}
+ON_THE_CABLE = {"serial": "TNYM26072400300011Q", "name": "jason's Tiiny",
+                "address": "172.17.7.177", "via": "cable", "base": "http://172.17.7.177/v1",
+                "interfaces": [{"interface": "usb0", "address": "172.17.7.177"}],
+                "addresses": ["172.17.7.177"]}
+
+
+def seen(records, blocked=False, moved=None, python=None):
+    """What Farm.find_tiinys hands back: what answered, and under which interpreter."""
+    return {"found": [dict(record) for record in records], "blocked": blocked,
+            "python": python or sys.executable, "moved": moved}
+
 
 FAKE_APP = '''import json, os, signal, time
 from pathlib import Path
@@ -342,6 +377,14 @@ class FarmTests(unittest.TestCase):
         self.output = io.StringIO()
         self.redirect = contextlib.redirect_stdout(self.output)
         self.redirect.__enter__()
+        # farm device and farm doctor now look for a Tiiny, and a unit test must not reach the
+        # network. Every test runs on a machine with no cable, nothing answering the broadcast and
+        # no TiinyOS client; the tests about finding one put back whichever part they are about.
+        self.no_tiinys = [patch("farm.farm.host_addresses", return_value=[]),
+                          patch("farm.farm.udp_devices", return_value=([], 0)),
+                          patch("farm.farm.tiinyos_serving", return_value=False)]
+        for guard in self.no_tiinys:
+            guard.start()
         self.make_release()
 
     def tearDown(self):
@@ -349,6 +392,8 @@ class FarmTests(unittest.TestCase):
             for current in sorted(self.home.glob("*/current")):
                 self.farm.stop(current.parent.name)
         finally:
+            for guard in self.no_tiinys:
+                guard.stop()
             self.redirect.__exit__(None, None, None)
             self.temp.cleanup()
 
@@ -650,6 +695,380 @@ class FarmTests(unittest.TestCase):
             self.farm.device()
         if os.name != "nt":
             self.assertEqual(config.stat().st_mode & 0o777, 0o600)
+
+    def test_find_reads_every_cable_in_this_machine(self):
+        with patch("farm.farm.host_addresses", return_value=["172.17.7.178"]), \
+                patch("farm.farm.urlopen",
+                      return_value=io.BytesIO(json.dumps(TIINY_JSON).encode())) as asked:
+            found = self.farm.find_device()["found"]
+        self.assertEqual(asked.call_args.args[0], "http://172.17.7.177:39218/device.json")
+        self.assertEqual(asked.call_args.kwargs["timeout"], farm_module.FIND_TIMEOUT)
+        self.assertEqual([record["serial"] for record in found], ["TNYM26072400300011Q"])
+        printed = self.output.getvalue()
+        self.assertIn("jason's Tiiny (TNYM26072400300011Q) at 172.17.7.177, over the cable,"
+                      " base http://172.17.7.177/v1", printed)
+        self.assertIn("Run farm device to save it.", printed)
+
+    def test_find_asks_the_responder_and_so_finds_a_box_on_the_network(self):
+        with patch("farm.farm.udp_devices", return_value=([("192.168.100.94", TIINY_JSON)], 0)) as asked:
+            found = self.farm.find_device()["found"]
+        self.assertEqual(asked.call_args.args[0], ["255.255.255.255"])
+        self.assertEqual(found[0]["via"], "network")
+        self.assertEqual(found[0]["base"], "http://192.168.100.94/v1")
+        self.assertIn("jason's Tiiny (TNYM26072400300011Q) at 192.168.100.94, on this network,"
+                      " base http://192.168.100.94/v1", self.output.getvalue())
+
+    def test_find_folds_one_box_that_answers_on_both_planes_into_one_line(self):
+        """Serial number, not address, is what says how many Tiinys are really there."""
+        with patch("farm.farm.host_addresses", return_value=["172.17.7.178"]), \
+                patch("farm.farm.urlopen",
+                      return_value=io.BytesIO(json.dumps(TIINY_JSON).encode())), \
+                patch("farm.farm.udp_devices",
+                      return_value=([("172.17.7.177", TIINY_JSON),
+                                     ("192.168.100.94", TIINY_JSON)], 0)):
+            found = self.farm.find_device()["found"]
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["via"], "cable")
+        self.assertEqual(found[0]["address"], "172.17.7.177")
+        self.assertEqual(found[0]["addresses"], ["172.17.7.177", "192.168.100.94"])
+        self.assertEqual(self.output.getvalue().count("TNYM26072400300011Q"), 1)
+
+    def test_find_asks_the_tiinyos_client_only_when_nothing_else_answered(self):
+        with patch("farm.farm.tiinyos_serving", return_value=True):
+            found = self.farm.find_device()["found"]
+        self.assertIsNone(found[0]["serial"])
+        self.assertEqual(found[0]["via"], "TiinyOS client")
+        self.assertEqual(found[0]["base"], "http://openai.api.tiiny/v1")
+        self.assertIn("A Tiiny at openai.api.tiiny, through the TiinyOS client,"
+                      " base http://openai.api.tiiny/v1", self.output.getvalue())
+        with patch("farm.farm.udp_devices", return_value=([("192.168.100.94", TIINY_JSON)], 0)), \
+                patch("farm.farm.tiinyos_serving", return_value=True) as skipped:
+            self.farm.find_device()
+        skipped.assert_not_called()
+
+    def test_find_says_what_it_tried_and_how_to_type_it_in(self):
+        self.assertEqual(self.farm.find_device()["found"], [])
+        printed = self.output.getvalue()
+        self.assertIn("No Tiiny answered. The farm looked on every USB cable in this machine,"
+                      " on this network, and at the TiinyOS client on"
+                      " http://openai.api.tiiny/v1.", printed)
+        self.assertIn("then run: farm device --find", printed)
+        self.assertIn("farm device --base http://<address>/v1 --key-stdin < key-file", printed)
+
+    def test_a_machine_with_no_cable_finds_nothing_and_never_unplugs_one(self):
+        """The cable is taken away at the bind step, which is the only thing that knows we have
+        one. Everything else in the finder is the real code, over a socket that answers nothing."""
+        empty = MagicMock()
+        empty.bind.side_effect = OSError(errno.EADDRNOTAVAIL, "Can't assign requested address")
+        empty.recvfrom.side_effect = farm_module.socket.timeout()
+        with patch("farm.farm.host_addresses", REAL_CABLE), \
+                patch("farm.farm.udp_devices", REAL_RESPONDER), \
+                patch("farm.farm.tiinyos_serving", REAL_CLIENT), \
+                patch("farm.farm.socket.socket", return_value=empty), \
+                patch("farm.farm.urlopen", side_effect=OSError("nothing there")):
+            answer = self.farm.find_device()
+        self.assertEqual(answer, {"found": [], "blocked": False, "python": sys.executable,
+                                  "moved": None})
+        self.assertIn("No Tiiny answered.", self.output.getvalue())
+        self.assertIn("--key-stdin < key-file", self.output.getvalue())
+
+    def test_a_refused_python_is_never_reported_as_no_tiiny(self):
+        """Jason, 2026-09-14: macOS grants the local network per binary. Last night miniconda got
+        EHOSTUNREACH to the same Tiiny that Homebrew Python answered in milliseconds. Saying "no
+        Tiiny" to that sends somebody to check a cable that was never the problem."""
+        with patch("farm.farm.host_addresses", return_value=["172.17.7.178"]), \
+                patch("farm.farm.python_candidates", return_value=[]), \
+                patch("farm.farm.urlopen",
+                      side_effect=URLError(OSError(errno.EHOSTUNREACH, "No route to host"))):
+            answer = self.farm.find_device()
+        self.assertEqual(answer["found"], [])
+        self.assertTrue(answer["blocked"])
+        self.assertIsNone(answer["moved"])
+        printed = self.output.getvalue()
+        self.assertIn(f"The farm cannot tell whether a Tiiny is there, because {sys.executable}"
+                      " was refused your local network.", printed)
+        self.assertIn("macOS is blocking this Python from your local network.", printed)
+        self.assertNotIn("No Tiiny answered", printed)
+
+    def test_a_refused_python_hands_the_search_to_one_that_is_not(self):
+        """The same walk a failed start does, and the interpreter it lands on is saved."""
+        other = "/opt/homebrew/bin/python3"
+        reached = {"found": [dict(ON_THE_CABLE)], "errno": 0, "python": [3, 14]}
+        blocked = {"found": [], "errno": errno.EHOSTUNREACH, "python": list(sys.version_info[:2])}
+        with patch("farm.farm.host_addresses", return_value=["172.17.7.178"]), \
+                patch("farm.farm.python_candidates", return_value=[other]), \
+                patch.object(self.farm, "probed",
+                             side_effect=lambda who, peers, budget=None:
+                             reached if who == other else blocked) as asked:
+            answer = self.farm.find_device()
+        self.assertEqual([record["serial"] for record in answer["found"]],
+                         ["TNYM26072400300011Q"])
+        self.assertTrue(answer["blocked"])
+        self.assertEqual(answer["moved"], other)
+        self.assertEqual([held.args[0] for held in asked.call_args_list], [sys.executable, other])
+        self.assertEqual(self.farm.settings()["python"], other)
+        printed = self.output.getvalue()
+        self.assertIn(f"{other} found it. The Python the farm was using cannot reach your local"
+                      " network, so the farm will run apps with that one from now on, and has"
+                      " saved it.", printed)
+        self.assertIn("jason's Tiiny (TNYM26072400300011Q) at 172.17.7.177", printed)
+        self.assertNotIn("No Tiiny answered", printed)
+
+    def test_a_python_too_old_to_run_apps_does_not_win_the_walk(self):
+        old = "/usr/bin/python3.8"
+        found = {"found": [dict(ON_THE_CABLE)], "errno": 0, "python": [3, 8]}
+        blocked = {"found": [], "errno": errno.EHOSTUNREACH, "python": list(sys.version_info[:2])}
+        with patch("farm.farm.host_addresses", return_value=["172.17.7.178"]), \
+                patch("farm.farm.python_candidates", return_value=[old]), \
+                patch.object(self.farm, "probed",
+                             side_effect=lambda who, peers, budget=None:
+                             found if who == old else blocked):
+            answer = self.farm.find_device()
+        self.assertIsNone(answer["moved"])
+        self.assertTrue(answer["blocked"])
+        self.assertNotIn("python", self.farm.settings())
+
+    def test_the_search_runs_under_the_python_the_farm_runs_apps_with(self):
+        """The CLI and an app can be two binaries, and macOS grants them separately, so the answer
+        that counts is the one from the binary that will be doing the reaching."""
+        other = "/opt/homebrew/bin/python3"
+        answer = json.dumps({"found": [dict(ON_THE_CABLE)], "errno": 0, "python": [3, 14]})
+        done = subprocess.CompletedProcess([], 0, answer, "")
+        with patch.object(self.farm, "app_python", return_value=other), \
+                patch("farm.farm.host_addresses", return_value=["172.17.7.178"]), \
+                patch("farm.farm.subprocess.run", return_value=done) as child:
+            found = self.farm.find_device()["found"]
+        self.assertEqual(child.call_args.args[0][0], other)
+        self.assertEqual(child.call_args.args[0][1], "-c")
+        self.assertEqual(child.call_args.args[0][2], farm_module.FIND_PROBE)
+        self.assertEqual(json.loads(child.call_args.args[0][4]), ["172.17.7.177"])
+        self.assertIsNotNone(child.call_args.kwargs["timeout"])
+        self.assertEqual([record["serial"] for record in found], ["TNYM26072400300011Q"])
+
+    def test_the_child_probe_source_runs_and_answers_in_json(self):
+        """Nothing is plugged into a peer list of nothing, so the answer is empty, not a crash."""
+        done = subprocess.run([sys.executable, "-c", farm_module.FIND_PROBE,
+                               str(Path(farm_module.__file__).resolve().parents[1]), "[]", "0.5"],
+                              capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        answer = json.loads(done.stdout.strip().splitlines()[-1])
+        self.assertEqual(answer["errno"], 0)
+        self.assertIsInstance(answer["found"], list)
+        self.assertEqual(tuple(answer["python"]), sys.version_info[:2])
+
+    def test_a_child_that_will_not_run_is_an_empty_answer_not_a_crash(self):
+        with patch.object(self.farm, "app_python", return_value="/no/such/python"), \
+                patch("farm.farm.host_addresses", return_value=["172.17.7.178"]), \
+                patch("farm.farm.python_candidates", return_value=[]):
+            answer = self.farm.find_device()
+        self.assertEqual(answer["found"], [])
+        self.assertFalse(answer["blocked"])
+        self.assertIn("No Tiiny answered.", self.output.getvalue())
+
+    def test_the_discovery_page_says_why_it_heard_nothing(self):
+        """A refused Python is told no; a box that is off says nothing at all. Only the errno
+        tells them apart, so it comes back with the payload."""
+        with patch("farm.farm.urlopen",
+                   side_effect=URLError(OSError(errno.EHOSTUNREACH, "No route to host"))):
+            self.assertEqual(farm_module.device_json("172.17.7.177"),
+                             (None, errno.EHOSTUNREACH))
+        with patch("farm.farm.urlopen", side_effect=farm_module.socket.timeout()):
+            self.assertEqual(farm_module.device_json("172.17.7.177"), (None, 0))
+        refused = MagicMock()
+        refused.sendto.side_effect = OSError(errno.EHOSTUNREACH, "No route to host")
+        with patch("farm.farm.socket.socket", return_value=refused):
+            self.assertEqual(REAL_RESPONDER(["255.255.255.255"], timeout=0.25),
+                             ([], errno.EHOSTUNREACH))
+
+    def test_a_blocked_find_answers_a_machine_with_why(self):
+        out = io.StringIO()
+        with patch("farm.farm.Farm", return_value=self.farm), \
+                patch("farm.farm.host_addresses", return_value=["172.17.7.178"]), \
+                patch("farm.farm.python_candidates", return_value=[]), \
+                patch("farm.farm.urlopen",
+                      side_effect=URLError(OSError(errno.EHOSTUNREACH, "No route to host"))), \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(main(["device", "--find", "--json", "--no-update-check"]), 1)
+        payload = json.loads(out.getvalue())
+        self.assertEqual(payload["found"], [])
+        self.assertFalse(payload["ok"])
+        self.assertTrue(payload["blocked"])
+        self.assertEqual(payload["python"], sys.executable)
+        self.assertIsNone(payload["moved"])
+
+    def test_no_probe_forks_this_process(self):
+        """Measured on macOS 25.6 on 2026-09-14: once urllib has been through the macOS name and
+        proxy path for a host it could not fetch, a forked child dies of SIGSEGV before it reaches
+        exec, and subprocess forks whenever close_fds is on. Every probe asks for the spawn."""
+        answer = subprocess.CompletedProcess([], 0, json.dumps({"errno": 0, "address": "",
+                                                                "python": [3, 14]}), "")
+        with patch("farm.farm.subprocess.run", return_value=answer) as child:
+            self.farm.probe_device("172.17.7.177", "/opt/homebrew/bin/python3")
+            self.farm.device_models({"base": "http://172.17.7.177/v1", "key": "not-a-real-key"},
+                                    "/opt/homebrew/bin/python3")
+            self.farm.probed("/opt/homebrew/bin/python3", ["172.17.7.177"], 1.0)
+        self.assertEqual(len(child.call_args_list), 3)
+        for held in child.call_args_list:
+            self.assertFalse(held.kwargs["close_fds"])
+            self.assertIsNotNone(held.kwargs["timeout"])
+
+    def test_a_probe_still_answers_after_urllib_met_a_name_it_could_not_fetch(self):
+        """The regression itself, with no hardware in it. Fetch a name that resolves nowhere the
+        way the farm fetches, then ask another interpreter something and see whether it lived long
+        enough to answer. Run in a child of its own, because the state it is about is the whole
+        process's and would follow this one into every test after it."""
+        source = textwrap.dedent("""
+            import contextlib, subprocess, sys
+            sys.path.insert(0, sys.argv[1])
+            from farm.farm import run_probe, urlopen
+            with contextlib.suppress(Exception):
+                urlopen("http://farm-test.invalid/nothing", timeout=2).close()
+            print(run_probe([sys.executable, "-c", "print(7)"], 30).returncode)
+        """)
+        done = subprocess.run([sys.executable, "-c", source, str(ROOT)],
+                              capture_output=True, text=True, timeout=120)
+        self.assertEqual(done.stdout.strip().splitlines()[-1], "0",
+                         "a probe was killed before it could answer: " + done.stderr[-400:])
+
+    def test_usb_peers_take_the_other_end_of_each_point_to_point_link(self):
+        with patch("farm.farm.host_addresses",
+                   return_value=["172.17.7.178", "172.17.9.1", "172.17.7.178"]):
+            self.assertEqual(farm_module.usb_peers(), ["172.17.7.177", "172.17.9.2"])
+
+    def test_the_base_url_takes_a_backend_port_at_its_word(self):
+        """Firmware 1.0 serves the model API on port 80 behind a virtual host and says port 0 here,
+        so the saved base carries no port unless a device.json names one."""
+        self.assertEqual(farm_module.device_base(TIINY_JSON, "172.17.7.177"),
+                         "http://172.17.7.177/v1")
+        self.assertEqual(farm_module.device_base({}, "172.17.7.177"), "http://172.17.7.177/v1")
+        self.assertEqual(farm_module.device_base({"backend": {"port": 80}}, "172.17.7.177"),
+                         "http://172.17.7.177/v1")
+        self.assertEqual(farm_module.device_base({"backend": {"port": 8800}}, "172.17.7.177"),
+                         "http://172.17.7.177:8800/v1")
+
+    def test_every_probe_in_the_finder_carries_a_timeout(self):
+        """A filtered port does not refuse, it hangs, so a ceiling is the only thing that ends it."""
+        with patch("farm.farm.urlopen", return_value=io.BytesIO(b"{}")) as page:
+            self.assertEqual(farm_module.device_json("172.17.7.177", timeout=0.25), (None, 0))
+        self.assertEqual(page.call_args.kwargs["timeout"], 0.25)
+        with patch("farm.farm.urlopen", side_effect=OSError("nothing there")) as client:
+            self.assertFalse(REAL_CLIENT(timeout=0.25))
+        self.assertEqual(client.call_args.kwargs["timeout"], 0.25)
+        quiet = MagicMock()
+        quiet.recvfrom.side_effect = farm_module.socket.timeout()
+        with patch("farm.farm.socket.socket", return_value=quiet):
+            self.assertEqual(REAL_RESPONDER(["255.255.255.255"], timeout=0.25), ([], 0))
+        self.assertTrue(quiet.settimeout.called)
+        self.assertLessEqual(max(held.args[0] for held in quiet.settimeout.call_args_list), 0.25)
+        quiet.close.assert_called_once_with()
+
+    def test_the_search_shrinks_each_probe_to_what_is_left_of_the_budget(self):
+        now = time.monotonic()
+        self.assertEqual(farm_module._remaining(now + 10, 1.2), 1.2)
+        self.assertEqual(farm_module._remaining(now - 5, 1.2), 0.05)
+
+    def test_device_offers_the_one_thing_the_finder_saw(self):
+        with patch.object(self.farm, "find_tiinys", return_value=seen([ON_THE_CABLE])), \
+                patch.object(self.farm, "probe_device", return_value=(0, "172.17.7.177", (3, 14))), \
+                patch("getpass.getpass", side_effect=["", "secret-value"]) as prompt:
+            self.farm.device()
+        self.assertEqual(prompt.call_args_list[0].args[0],
+                         "Device base URL [http://172.17.7.177/v1] (hidden): ")
+        saved = json.loads((self.home / "device.json").read_text())
+        self.assertEqual(saved["base"], "http://172.17.7.177/v1")
+        self.assertIn("Found jason's Tiiny (TNYM26072400300011Q) at 172.17.7.177, over the cable,"
+                      " base http://172.17.7.177/v1", self.output.getvalue())
+        self.assertNotIn("secret-value", self.output.getvalue())
+
+    def test_device_takes_what_is_typed_over_what_was_found(self):
+        with patch.object(self.farm, "find_tiinys", return_value=seen([ON_THE_CABLE])), \
+                patch.object(self.farm, "probe_device", return_value=(0, "10.0.0.5", (3, 14))), \
+                patch("getpass.getpass", side_effect=["http://10.0.0.5/v1", "secret-value"]):
+            self.farm.device()
+        self.assertEqual(json.loads((self.home / "device.json").read_text())["base"],
+                         "http://10.0.0.5/v1")
+
+    def test_device_numbers_them_when_more_than_one_answered(self):
+        second = dict(ON_THE_CABLE, serial="TNYM26072400300012Q", name="the spare",
+                      address="192.168.100.94", via="network", base="http://192.168.100.94/v1")
+        with patch.object(self.farm, "find_tiinys", return_value=seen([ON_THE_CABLE, second])), \
+                patch("farm.farm.ask_which", return_value=([1], "2")) as question, \
+                patch.object(self.farm, "probe_device", return_value=(0, "192.168.100.94", (3, 14))), \
+                patch("getpass.getpass", side_effect=["", "secret-value"]) as prompt:
+            self.farm.device()
+        self.assertEqual(question.call_args.args[1], 2)
+        printed = self.output.getvalue()
+        self.assertIn("1. jason's Tiiny (TNYM26072400300011Q) at 172.17.7.177, over the cable,",
+                      printed)
+        self.assertIn("2. the spare (TNYM26072400300012Q) at 192.168.100.94, on this network,",
+                      printed)
+        self.assertEqual(prompt.call_args_list[0].args[0],
+                         "Device base URL [http://192.168.100.94/v1] (hidden): ")
+        self.assertEqual(json.loads((self.home / "device.json").read_text())["base"],
+                         "http://192.168.100.94/v1")
+
+    def test_device_prompts_as_it_always_did_when_the_finder_falls_over(self):
+        """Finding a Tiiny is a convenience on a command that has always worked by hand."""
+        with patch.object(self.farm, "find_tiinys", side_effect=RuntimeError("finder exploded")), \
+                patch("getpass.getpass",
+                      side_effect=["http://example.test/v1", "secret-value"]) as prompt:
+            self.farm.device()
+        self.assertEqual(prompt.call_args_list[0].args[0], "Device base URL (hidden): ")
+        self.assertNotIn("finder exploded", self.output.getvalue())
+        self.assertEqual(json.loads((self.home / "device.json").read_text())["base"],
+                         "http://example.test/v1")
+
+    def test_a_scripted_device_never_goes_looking(self):
+        with patch.object(self.farm, "find_tiinys") as never, patch.dict(os.environ):
+            os.environ.pop("TIINY_BASE", None)
+            os.environ.pop("TIINY_KEY", None)
+            with patch("sys.stdin", io.StringIO("secret-value\n")):
+                self.farm.device(base="http://example.test/v1", key_stdin=True)
+        never.assert_not_called()
+
+    def test_find_refuses_to_also_save(self):
+        """Looking and saving are different jobs, and one command cannot quietly do one of them."""
+        with patch.object(self.farm, "find_tiinys") as never:
+            with self.assertRaises(FarmError) as refused:
+                self.farm.device(base="http://example.test/v1", find=True)
+        self.assertIn("looks and saves nothing", str(refused.exception))
+        never.assert_not_called()
+        with patch("farm.farm.Farm", return_value=self.farm):
+            self.assertEqual(main(["device", "--find", "--key-stdin", "--no-update-check"]), 1)
+
+    def test_the_cli_exits_one_when_the_find_answers_nothing(self):
+        with patch("farm.farm.Farm", return_value=self.farm):
+            self.assertEqual(main(["device", "--find", "--no-update-check"]), 1)
+            with patch("farm.farm.udp_devices", return_value=([("192.168.100.94", TIINY_JSON)], 0)):
+                self.assertEqual(main(["device", "--find", "--no-update-check"]), 0)
+
+    def test_find_answers_a_machine_with_one_object(self):
+        answer = io.StringIO()
+        with patch("farm.farm.Farm", return_value=self.farm), \
+                patch("farm.farm.udp_devices", return_value=([("192.168.100.94", TIINY_JSON)], 0)), \
+                contextlib.redirect_stdout(answer):
+            self.assertEqual(main(["device", "--find", "--json", "--no-update-check"]), 0)
+        payload = json.loads(answer.getvalue())
+        self.assertEqual(payload["command"], "device")
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["found"], [{
+            "serial": "TNYM26072400300011Q", "name": "jason's Tiiny",
+            "address": "192.168.100.94", "via": "network", "base": "http://192.168.100.94/v1",
+            "interfaces": [{"interface": "usb0", "address": "172.17.7.177"},
+                           {"interface": "wlan0", "address": "192.168.100.94"}]}])
+        empty = io.StringIO()
+        with patch("farm.farm.Farm", return_value=self.farm), contextlib.redirect_stdout(empty):
+            self.assertEqual(main(["device", "--find", "--json", "--no-update-check"]), 1)
+        self.assertEqual(json.loads(empty.getvalue())["found"], [])
+
+    def test_the_machine_answer_for_device_is_the_find_and_nothing_else(self):
+        """Saving a key needs a prompt or standard input, and no --json command reads either."""
+        answer = io.StringIO()
+        with patch("farm.farm.Farm", return_value=self.farm), \
+                patch("getpass.getpass", side_effect=AssertionError("asked for a key")), \
+                contextlib.redirect_stdout(answer):
+            self.assertEqual(main(["device", "--json", "--no-update-check"]), 1)
+        self.assertIn("answers --find only", json.loads(answer.getvalue())["error"]["message"])
 
     def test_device_refuses_echo_fallback(self):
         def unsafe(prompt):
@@ -2093,13 +2512,105 @@ while True: time.sleep(0.1)
         self.assertIn("fake-app declares port 43210, and fake-app itself is holding it.",
                       self.output.getvalue())
 
-    def test_doctor_with_no_tiiny_on_file_says_what_to_run(self):
+    def test_doctor_with_no_tiiny_on_file_and_none_in_sight_says_what_to_run(self):
         with patch.dict(os.environ), patch("farm.farm.python_candidates", return_value=[]):
             os.environ.pop("TIINY_BASE", None)
             self.assertFalse(self.farm.doctor())
         printed = self.output.getvalue()
-        self.assertIn("No Tiiny is on file, so no app can reach one.", printed)
-        self.assertIn("Fix: run farm device with the device address and its API key.", printed)
+        self.assertIn("No Tiiny is on file, and nothing answered on the cable, on this network,"
+                      " or at the TiinyOS client.", printed)
+        self.assertIn("Fix: switch the Tiiny on and plug the cable in, then run farm device"
+                      " --find; or run farm device with the address and its API key.", printed)
+        found = [note for note in self.farm.findings if note["check"] == "device"]
+        self.assertEqual(found[0]["found"], [])
+
+    def test_doctor_with_no_tiiny_on_file_names_the_one_it_can_see(self):
+        """The person who has not run farm device yet is the least able to work out what to type,
+        so doctor does the looking rather than telling them to go and look."""
+        with patch.dict(os.environ), patch("farm.farm.python_candidates", return_value=[]), \
+                patch.object(self.farm, "find_tiinys", return_value=seen([ON_THE_CABLE])):
+            os.environ.pop("TIINY_BASE", None)
+            self.assertFalse(self.farm.doctor())
+        printed = self.output.getvalue()
+        self.assertIn("No Tiiny is on file, so no app can reach one. The farm can see jason's"
+                      " Tiiny (TNYM26072400300011Q) at 172.17.7.177, over the cable,"
+                      " base http://172.17.7.177/v1.", printed)
+        self.assertIn("Fix: run farm device, take http://172.17.7.177/v1 when it offers it,"
+                      " and paste the key from TiinyOS, Settings, API Key.", printed)
+        note = [row for row in self.farm.findings if row["check"] == "device"][0]
+        self.assertEqual(note["found"], [{"serial": "TNYM26072400300011Q", "name": "jason's Tiiny",
+                                          "address": "172.17.7.177", "via": "cable",
+                                          "base": "http://172.17.7.177/v1"}])
+        self.assertFalse(note["blocked"])
+        self.assertIsNone(note["moved"])
+
+    def test_doctor_says_a_refused_python_rather_than_an_absent_tiiny(self):
+        with patch.dict(os.environ), patch("farm.farm.python_candidates", return_value=[]), \
+                patch.object(self.farm, "find_tiinys",
+                             return_value=seen([], blocked=True, python="/opt/conda/bin/python3")):
+            os.environ.pop("TIINY_BASE", None)
+            self.assertFalse(self.farm.doctor())
+        printed = self.output.getvalue()
+        self.assertIn("No Tiiny is on file, and the farm cannot tell whether one is there: macOS"
+                      " refused /opt/conda/bin/python3 your local network.", printed)
+        self.assertIn("Fix: System Settings, Privacy and Security, Local Network, turn on Python,"
+                      " then run farm doctor again.", printed)
+        self.assertNotIn("nothing answered on the cable", printed)
+        note = [row for row in self.farm.findings if row["check"] == "device"][0]
+        self.assertTrue(note["blocked"])
+        self.assertEqual(note["python"], "/opt/conda/bin/python3")
+
+    def test_doctor_says_which_python_had_to_do_the_looking(self):
+        with patch.dict(os.environ), patch("farm.farm.python_candidates", return_value=[]), \
+                patch.object(self.farm, "find_tiinys",
+                             return_value=seen([ON_THE_CABLE], blocked=True,
+                                               moved="/opt/homebrew/bin/python3",
+                                               python="/opt/homebrew/bin/python3")):
+            os.environ.pop("TIINY_BASE", None)
+            self.assertFalse(self.farm.doctor())
+        self.assertIn("It had to look with /opt/homebrew/bin/python3, because macOS refused the"
+                      " Python it was using, and will run apps with that one from now on.",
+                      self.output.getvalue())
+        note = [row for row in self.farm.findings if row["check"] == "device"][0]
+        self.assertEqual(note["moved"], "/opt/homebrew/bin/python3")
+
+    def test_doctor_warns_when_the_only_answer_came_past_the_local_network(self):
+        """The TiinyOS client is loopback, so it answers a Python macOS has refused. Saving that
+        address without a word would set somebody up to watch every app fail."""
+        client = {"serial": None, "name": None, "address": "openai.api.tiiny",
+                  "via": "TiinyOS client", "base": "http://openai.api.tiiny/v1",
+                  "interfaces": [], "addresses": []}
+        with patch.dict(os.environ), patch("farm.farm.python_candidates", return_value=[]), \
+                patch.object(self.farm, "find_tiinys",
+                             return_value=seen([client], blocked=True,
+                                               python="/opt/conda/bin/python3")):
+            os.environ.pop("TIINY_BASE", None)
+            self.assertFalse(self.farm.doctor())
+        printed = self.output.getvalue()
+        self.assertIn("The farm can see A Tiiny at openai.api.tiiny", printed)
+        self.assertIn("macOS refused /opt/conda/bin/python3 your local network, so an app the farm"
+                      " starts will not reach a Tiiny on the cable or on this network.", printed)
+        self.assertIn("Fix: System Settings, Privacy and Security, Local Network, turn on Python,"
+                      " then run farm doctor again.", printed)
+        self.assertEqual([row["check"] for row in self.farm.findings if not row["ok"]],
+                         ["device", "python"])
+
+    def test_doctor_counts_them_when_more_than_one_answered(self):
+        second = dict(ON_THE_CABLE, serial="TNYM26072400300012Q", name="the spare",
+                      address="192.168.100.94", via="network", base="http://192.168.100.94/v1")
+        with patch.dict(os.environ), patch("farm.farm.python_candidates", return_value=[]), \
+                patch.object(self.farm, "find_tiinys", return_value=seen([ON_THE_CABLE, second])):
+            os.environ.pop("TIINY_BASE", None)
+            self.assertFalse(self.farm.doctor())
+        self.assertIn("The farm can see 2 of them, the first jason's Tiiny", self.output.getvalue())
+
+    def test_doctor_never_falls_over_because_the_finder_did(self):
+        with patch.dict(os.environ), patch("farm.farm.python_candidates", return_value=[]), \
+                patch.object(self.farm, "find_tiinys", side_effect=RuntimeError("finder exploded")):
+            os.environ.pop("TIINY_BASE", None)
+            self.assertFalse(self.farm.doctor())
+        self.assertIn("No Tiiny is on file, and nothing answered", self.output.getvalue())
+        self.assertNotIn("finder exploded", self.output.getvalue())
 
     def test_the_cli_exits_one_when_doctor_finds_something(self):
         with patch("farm.farm.Farm", return_value=self.farm):
