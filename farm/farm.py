@@ -1028,14 +1028,22 @@ class Farm:
         if not found:
             print("Everything you have installed is the newest the catalog has.")
             return
+        unasked = ("Nothing was updated. Run: farm update <id> to take one,"
+                   " or farm update --all to take them all.")
         if everything or yes:
             answer = "all"
         elif not interactive():
-            print("Nothing was updated. Run: farm update <id> to take one,"
-                  " or farm update --all to take them all.")
+            print(unasked)
             return
         else:
-            answer = input('Update which? A number, "all", or Enter to leave them. ').strip().lower()
+            try:
+                answer = input('Update which? A number, "all", or Enter to leave them. ').strip().lower()
+            except EOFError:
+                # Windows calls NUL a terminal, so a script can reach the question anyway.
+                # End of input is nobody there, not a person cancelling.
+                print()
+                print(unasked)
+                return
         if not answer:
             print("Left as they are.")
             return

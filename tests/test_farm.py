@@ -1679,3 +1679,26 @@ while True: time.sleep(0.1)
             self.assertEqual(farm.newer_version("fake-app", self.manifest), "")
         self.assertEqual(opened.call_args.kwargs["timeout"], ADVISORY_TIMEOUT)
         self.assertLess(ADVISORY_TIMEOUT, 30)
+
+    def test_end_of_input_at_the_question_leaves_everything_alone(self):
+        """Windows calls NUL a terminal, so a script reaches the question even with no one there."""
+        self.install()
+        self.make_release("0.1.1")
+        with patch("farm.farm.interactive", return_value=True), \
+                patch("builtins.input", side_effect=EOFError()):
+            self.farm.update()
+        printed = self.output.getvalue()
+        self.assertIn("1. Fake app 0.1.0, 0.1.1 is out", printed)
+        self.assertIn("Nothing was updated. Run: farm update <id> to take one,"
+                      " or farm update --all to take them all.", printed)
+        self.assertEqual((self.app / "current").read_text().strip(), "0.1.0")
+
+    def test_the_cli_exits_zero_when_the_question_reaches_end_of_input(self):
+        """What CI caught on Windows: the run must not end as a cancellation."""
+        self.install()
+        self.make_release("0.1.1")
+        with patch("farm.farm.Farm", return_value=self.farm), \
+                patch("farm.farm.interactive", return_value=True), \
+                patch("builtins.input", side_effect=EOFError()):
+            self.assertEqual(main(["check"]), 0)
+        self.assertNotIn("Cancelled.", self.output.getvalue())

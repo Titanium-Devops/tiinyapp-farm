@@ -16,21 +16,26 @@ was really on. `farm list`, `farm status` and `farm start` say when something ne
 - `docs/manifest.schema.json` and `docs/site/05-manifest.md`: an optional one-line `release.notes`.
   The release object is `additionalProperties: false`, so without this the note the brief asks for
   could never reach a real catalog entry. It is optional and nothing breaks without it.
-- `tests/test_farm.py`: 28 new tests and one fixture helper for a second installed app.
+- `tests/test_farm.py`: 30 new tests and one fixture helper for a second installed app.
 - `docs/site/02-getting-started.md` and `docs/site/03-cli.md`.
 
-Two judgement calls worth naming. The advisory lookups that `farm start`, `farm status` and
+Rebased onto main after PR #18. `farm start` keeps both the line this work adds under the link and
+the macOS Local Network hint that #18 prints last, and `pyproject.toml` stays at the 0.1.7 main set.
+
+Three judgement calls worth naming. The advisory lookups that `farm start`, `farm status` and
 `farm list` now make use a five second timeout rather than the installer's thirty, so an unreachable
 catalog cannot stall a start; a lookup that fails prints nothing. And `farm update <id>` against a
 catalog entry that is ahead but carries no release says exactly that, rather than claiming the
-installed version is the newest there is.
+installed version is the newest there is. And the question treats end of input as nobody being
+there rather than as a cancellation, because Windows reports `NUL` as a terminal, so a scripted run
+reaches the question and must still leave with nothing changed and exit 0.
 
 ## Tests
 
 | Run | Tests | Result |
 | --- | --- | --- |
-| `python3 -m unittest` before | 203 | OK, 2 skipped |
-| `python3 -m unittest` after | 231 | OK, 2 skipped |
+| `python3 -m unittest` on this branch's base | 212 | OK, 2 skipped |
+| `python3 -m unittest` after | 242 | OK, 2 skipped |
 
 Measured on Jason's MacBook, Darwin 25.6.0 arm64, Python 3.14.6. The new tests cover the list with
 one newer, two newer and none; the number choice, `all`, Enter, an answer that is not on the list,
@@ -38,7 +43,9 @@ and the path a script takes; the single-app question with Enter, `y`, `n` and `-
 is already current; the running app stopped, updated and started again on its port; the `status`,
 `list` and `start` lines; a release note and the date that stands in for one; a catalog entry that
 cannot be read; a pending release and a release-less entry, neither of which is ever offered; the
-advisory timeout; and the CLI dispatch for `check` and every `update` form.
+advisory timeout; end of input at the question, which Windows CI caught, because Windows calls
+`NUL` a terminal and a scripted run reaches the question anyway; and the CLI dispatch for `check`
+and every `update` form.
 
 Two of the new assertions were checked by breaking the code they cover, to prove they are not
 vacuous: with the `status` and `start` lines disabled, exactly those two tests fail.
