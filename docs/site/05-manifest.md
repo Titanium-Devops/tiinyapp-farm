@@ -123,6 +123,10 @@ SHA-256, and the exact size in bytes as an integer.
 with `--allow-pending`, its description has to explain the pending release, and it can neither pass
 the submission checks nor be installed.
 
+`notes` is optional: one line of at most 200 characters saying what changed in this release. It is
+the reason `farm update` shows beside a row when it lists what is newer than the apps you have. With
+no note, that row carries `updatedAt` instead.
+
 ## Optional fields
 
 | Field | Type | Meaning |

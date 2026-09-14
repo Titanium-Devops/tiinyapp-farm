@@ -107,6 +107,13 @@
         "size": {
           "type": "integer",
           "minimum": 0
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "^[^\\r\\n]+(?![\\s\\S])",
+          "description": "One line about what changed in this release, shown by farm update's list."
         }
       }
     },

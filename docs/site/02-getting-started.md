@@ -144,6 +144,19 @@ nothing is left half running.
 it terminates the process through a held handle so that a recycled process ID cannot be hit by
 mistake.
 
+Neither command needs the app's name. Run `farm stop` on its own and it asks which of the running
+apps to stop, and `farm start` on its own asks which of the installed ones to start:
+
+```
+2 apps are running.
+1. AINode Pocket 0.1.0 on port 7863
+2. TiinyBench 0.1.1 on port 7864
+Stop which? A number, "all", or Enter to leave them.
+```
+
+When only one app fits it asks about that one instead, `Stop AINode Pocket? [Y/n]`, and yes is the
+default. Nothing running says so in one line.
+
 ## The port rule
 
 Every app declares the port it listens on. Before starting anything, `farm start` checks that
@@ -171,18 +184,44 @@ was actually started on.
 
 ## Keep it current
 
+To ask what is newer than everything you have, run the command with no app name. `farm check` is
+the same command under the word most people reach for:
+
+```
+farm update
+```
+
+```
+Looking up all 2 apps you have installed in the catalog.
+1. AINode Pocket 0.0.9, 0.1.0 is out, dated 2026-09-14.
+2. Tiiny Brain 0.1.0, 0.1.1 is out, dated 2026-09-14.
+Update which? A number, "all", or Enter to leave them.
+```
+
+Press a number to take that one, type `all` to take them in order, or press Enter to leave them
+where they are. When nothing is newer it says so in one line. In a script, where there is nobody to
+ask, it prints the list and changes nothing, and `farm update --all` takes every one of them.
+
+Name one app and it asks about that one, with yes as the default:
+
 ```
 farm update titanium-tiiny-bot
-farm start titanium-tiiny-bot
+```
+
+```
+Titanium Tiiny Bot 0.1.14 is installed and 0.1.15 is out. Update it? [Y/n]
 ```
 
 `farm update` installs only a strictly newer version. It never downgrades, and it stops the running
 old version only after the new archive has been downloaded, verified and unpacked. Your data
-directory is kept, the previous version's code is left on disk, and the app is not restarted for
-you.
+directory is kept and it says so, and the previous version's code is left on disk. An app that was
+running is stopped for the update and started again on the port it was really on, and it tells you
+both.
 
-`farm status` compares the version the running app reports through its health path with the version
-you have installed, and tells you to restart when they differ.
+`farm list` and `farm status` carry `update available` on any app the catalog has moved past, and
+`farm start` adds one line under the link when the app you just started has a newer version out.
+`farm status` also compares the version the running app reports through its health path with the
+version you have installed, and tells you to restart when they differ.
 
 ## Take it away
 

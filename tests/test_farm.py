@@ -19,7 +19,7 @@ import tempfile
 import threading
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 from urllib.error import URLError
 from urllib.parse import urlsplit
 
@@ -344,7 +344,8 @@ class FarmTests(unittest.TestCase):
 
     def tearDown(self):
         try:
-            self.farm.stop("fake-app")
+            for current in sorted(self.home.glob("*/current")):
+                self.farm.stop(current.parent.name)
         finally:
             self.redirect.__exit__(None, None, None)
             self.temp.cleanup()
@@ -374,6 +375,28 @@ class FarmTests(unittest.TestCase):
 
     def install(self):
         self.farm.install("fake-app", yes=True)
+
+    def other_app(self, ident="other-app", version="0.1.0", install=False, notes=None, ports=None):
+        """A second app in the same fake catalog, so the update list has more than one row."""
+        manifest = copy.deepcopy(self.manifest)
+        manifest.update(id=ident, name="Other app", version=version)
+        if ports is not None:
+            manifest["requires"]["ports"] = list(ports)
+        archive = self.catalog / f"{ident}-{version}.tar.gz"
+        payload = FAKE_APP.encode()
+        with tarfile.open(archive, "w:gz") as tar:
+            info = tarfile.TarInfo(f"{ident}-{version}/fake.py")
+            info.size = len(payload)
+            tar.addfile(info, io.BytesIO(payload))
+        manifest["release"] = {"url": archive.as_uri(),
+                               "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+                               "size": archive.stat().st_size}
+        if notes is not None:
+            manifest["release"]["notes"] = notes
+        (self.catalog / f"{ident}.json").write_text(json.dumps(manifest))
+        if install:
+            self.farm.install(ident, yes=True)
+        return manifest
 
     def wait_for(self, predicate, timeout=3):
         deadline = time.monotonic() + timeout
@@ -1371,3 +1394,468 @@ while True: time.sleep(0.1)
         answer = json.loads(done.stdout.strip().splitlines()[-1])
         self.assertEqual(answer["address"], "127.0.0.1")
         self.assertNotEqual(answer["errno"], errno.EHOSTUNREACH)
+
+    def test_update_with_no_id_lists_the_one_app_that_has_a_newer_version(self):
+        """Jason, 2026-09-14: "'Check updates' would come back with a list of all the apps that have been updated.\""""
+        self.install()
+        self.make_release("0.1.1")
+        with patch("farm.farm.interactive", return_value=False):
+            self.farm.update()
+        printed = self.output.getvalue()
+        self.assertIn("Looking up the app you have installed in the catalog.", printed)
+        self.assertIn("1. Fake app 0.1.0, 0.1.1 is out", printed)
+        self.assertNotIn("2. Other app", printed)
+
+    def test_update_with_no_id_numbers_every_app_that_has_one(self):
+        self.install()
+        self.other_app(install=True)
+        self.make_release("0.1.1")
+        self.other_app(version="0.1.2")
+        with patch("farm.farm.interactive", return_value=False):
+            self.farm.update()
+        printed = self.output.getvalue()
+        self.assertIn("Looking up all 2 apps you have installed in the catalog.", printed)
+        self.assertIn("1. Fake app 0.1.0, 0.1.1 is out", printed)
+        self.assertIn("2. Other app 0.1.0, 0.1.2 is out", printed)
+
+    def test_nothing_newer_says_so_in_one_line_and_asks_nothing(self):
+        self.install()
+        self.other_app(install=True)
+        with patch("builtins.input", side_effect=AssertionError("asked about nothing")):
+            self.farm.update()
+        printed = self.output.getvalue()
+        self.assertIn("Everything you have installed is the newest the catalog has.", printed)
+        self.assertNotIn("1. ", printed)
+
+    def test_a_number_updates_the_app_on_that_row_and_leaves_the_rest(self):
+        self.install()
+        self.other_app(install=True)
+        self.make_release("0.1.1")
+        self.other_app(version="0.1.2")
+        with patch("farm.farm.interactive", return_value=True), patch("builtins.input", return_value="2") as asked:
+            self.farm.update()
+        self.assertEqual(asked.call_args[0][0], 'Update which? A number, "all", or Enter to leave them. ')
+        self.assertEqual((self.home / "other-app/current").read_text().strip(), "0.1.2")
+        self.assertEqual((self.app / "current").read_text().strip(), "0.1.0")
+
+    def test_all_updates_each_one_in_order(self):
+        self.install()
+        self.other_app(install=True)
+        self.make_release("0.1.1")
+        self.other_app(version="0.1.2")
+        with patch("farm.farm.interactive", return_value=True), patch("builtins.input", return_value="all"):
+            self.farm.update()
+        self.assertEqual((self.app / "current").read_text().strip(), "0.1.1")
+        self.assertEqual((self.home / "other-app/current").read_text().strip(), "0.1.2")
+        printed = self.output.getvalue()
+        self.assertLess(printed.index("Looking up fake-app in the catalog."),
+                        printed.index("Looking up other-app in the catalog."))
+
+    def test_enter_leaves_them_all_alone(self):
+        self.install()
+        self.make_release("0.1.1")
+        with patch("farm.farm.interactive", return_value=True), patch("builtins.input", return_value=""):
+            self.farm.update()
+        self.assertIn("Left as they are.", self.output.getvalue())
+        self.assertEqual((self.app / "current").read_text().strip(), "0.1.0")
+
+    def test_an_answer_that_is_not_on_the_list_updates_nothing(self):
+        self.install()
+        self.make_release("0.1.1")
+        with patch("farm.farm.interactive", return_value=True), patch("builtins.input", return_value="9"):
+            self.farm.update()
+        self.assertIn("There is no 9 in that list, so nothing was updated.", self.output.getvalue())
+        self.assertEqual((self.app / "current").read_text().strip(), "0.1.0")
+
+    def test_a_script_is_given_the_list_and_is_never_asked_a_question(self):
+        self.install()
+        self.make_release("0.1.1")
+        with patch("farm.farm.interactive", return_value=False), \
+                patch("builtins.input", side_effect=AssertionError("asked a script a question")):
+            self.farm.update()
+        printed = self.output.getvalue()
+        self.assertIn("1. Fake app 0.1.0, 0.1.1 is out", printed)
+        self.assertIn("Nothing was updated. Run: farm update <id> to take one,"
+                      " or farm update --all to take them all.", printed)
+        self.assertEqual((self.app / "current").read_text().strip(), "0.1.0")
+
+    def test_all_and_yes_take_everything_newer_without_asking(self):
+        for flags in ({"everything": True}, {"yes": True}):
+            with self.subTest(**flags):
+                self.install()
+                self.make_release("0.1.1")
+                with patch("builtins.input", side_effect=AssertionError("asked with a flag set")):
+                    self.farm.update(**flags)
+                self.assertEqual((self.app / "current").read_text().strip(), "0.1.1")
+                self.farm.remove("fake-app", purge=True)
+                self.make_release("0.1.0")
+
+    def test_update_one_app_asks_before_it_takes_it(self):
+        self.install()
+        self.make_release("0.1.1")
+        with patch("builtins.input", return_value="y") as asked:
+            self.farm.update("fake-app")
+        self.assertEqual(asked.call_args[0][0],
+                         "Fake app 0.1.0 is installed and 0.1.1 is out. Update it? [Y/n] ")
+        self.assertEqual((self.app / "current").read_text().strip(), "0.1.1")
+
+    def test_the_question_defaults_to_yes_so_enter_takes_it(self):
+        self.install()
+        self.make_release("0.1.1")
+        with patch("builtins.input", return_value=""):
+            self.farm.update("fake-app")
+        self.assertEqual((self.app / "current").read_text().strip(), "0.1.1")
+
+    def test_no_leaves_the_installed_version_alone(self):
+        self.install()
+        self.make_release("0.1.1")
+        with patch("builtins.input", return_value="n"), \
+                patch.object(self.farm, "download", side_effect=AssertionError("downloaded after no")):
+            self.farm.update("fake-app")
+        self.assertIn("Left as it is.", self.output.getvalue())
+        self.assertEqual((self.app / "current").read_text().strip(), "0.1.0")
+
+    def test_yes_skips_the_question_and_says_the_data_is_kept(self):
+        self.install()
+        (self.app / "data/keep.txt").write_text("precious")
+        self.make_release("0.1.1")
+        with patch("builtins.input", side_effect=AssertionError("asked with --yes")):
+            self.farm.update("fake-app", yes=True)
+        printed = self.output.getvalue()
+        self.assertIn(f"Your data in {self.app / 'data'} is kept.", printed)
+        self.assertIn("Ready. Run: farm start fake-app", printed)
+        self.assertEqual((self.app / "data/keep.txt").read_text(), "precious")
+        self.assertEqual((self.app / "current").read_text().strip(), "0.1.1")
+
+    def test_an_app_already_current_says_so_in_one_line(self):
+        self.install()
+        with patch("builtins.input", side_effect=AssertionError("asked about nothing")), \
+                patch.object(self.farm, "download", side_effect=AssertionError("downloaded nothing new")):
+            self.farm.update("fake-app")
+        self.assertIn("Fake app 0.1.0 is installed, and that is the newest the catalog has.",
+                      self.output.getvalue())
+
+    def test_a_running_app_is_stopped_updated_and_started_again_on_its_port(self):
+        self.manifest["requires"]["ports"] = [7861]
+        self.save_manifest()
+        self.install()
+        ready = [ConnectionRefusedError(), contextlib.nullcontext(),
+                 ConnectionRefusedError(), contextlib.nullcontext()]
+        with patch("farm.farm.socket.create_connection", side_effect=ready):
+            self.farm.start("fake-app")
+            first = self.farm.active("fake-app")
+            self.make_release("0.1.1", code=FAKE_APP + "# version two\n")
+            self.farm.update("fake-app", yes=True)
+        printed = self.output.getvalue()
+        self.assertIn("Fake app is running on port 7861, so the farm stops it and starts it again on 7861.", printed)
+        self.assertEqual((self.app / "current").read_text().strip(), "0.1.1")
+        self.assertIsNotNone(self.farm.active("fake-app"))
+        self.assertNotEqual(self.farm.active("fake-app"), first)
+        self.assertEqual(json.loads((self.app / "process.json").read_text())["ports"], [7861])
+        after = printed.split("Your data in")[1]
+        self.assertIn("Open http://localhost:7861", after)
+        self.assertNotIn("Ready. Run: farm start fake-app", after)
+
+    def test_status_row_carries_an_available_update(self):
+        self.manifest["requires"]["ports"] = [7862]
+        self.save_manifest()
+        self.install()
+        with patch("farm.farm.socket.create_connection", side_effect=[
+                ConnectionRefusedError(), contextlib.nullcontext()]):
+            self.farm.start("fake-app")
+        self.make_release("0.1.1")
+        self.farm.status()
+        self.assertRegex(self.output.getvalue(), r"running 0\.1\.0, update available: 0\.1\.1")
+
+    def test_list_row_carries_an_available_update(self):
+        self.install()
+        self.make_release("0.1.1")
+        self.farm.list()
+        self.assertIn("  fake-app 0.1.0 Fake app [stopped, update available: 0.1.1] - ",
+                      self.output.getvalue())
+
+    def test_start_says_in_one_line_when_a_newer_version_is_out(self):
+        self.manifest["requires"]["ports"] = [7863]
+        self.save_manifest()
+        self.install()
+        self.make_release("0.1.1")
+        with patch("farm.farm.socket.create_connection", side_effect=[
+                ConnectionRefusedError(), contextlib.nullcontext()]):
+            self.farm.start("fake-app")
+        said = self.output.getvalue().split("Fake app is running.")[1]
+        self.assertIn("Open http://localhost:7863\nVersion 0.1.1 is out. Run: farm update fake-app\n", said)
+
+    def test_start_stays_quiet_when_nothing_newer_is_out(self):
+        self.manifest["requires"]["ports"] = [7864]
+        self.save_manifest()
+        self.install()
+        with patch("farm.farm.socket.create_connection", side_effect=[
+                ConnectionRefusedError(), contextlib.nullcontext()]):
+            self.farm.start("fake-app")
+        self.assertNotIn("is out. Run: farm update", self.output.getvalue())
+
+    def test_a_release_note_is_the_reason_on_the_row(self):
+        self.install()
+        self.make_release("0.1.1")
+        self.manifest["release"]["notes"] = "Faster startup and a fix for the chat page"
+        self.manifest["updatedAt"] = "2026-09-14"
+        self.save_manifest()
+        with patch("farm.farm.interactive", return_value=False):
+            self.farm.update()
+        self.assertIn("1. Fake app 0.1.0, 0.1.1 is out. Faster startup and a fix for the chat page.",
+                      self.output.getvalue())
+
+    def test_without_a_note_the_row_carries_the_day_the_catalog_changed(self):
+        self.install()
+        self.make_release("0.1.1")
+        self.manifest["updatedAt"] = "2026-09-14"
+        self.save_manifest()
+        with patch("farm.farm.interactive", return_value=False):
+            self.farm.update()
+        self.assertIn("1. Fake app 0.1.0, 0.1.1 is out, dated 2026-09-14.", self.output.getvalue())
+
+    def test_a_catalog_that_cannot_be_read_is_named_rather_than_hidden(self):
+        self.install()
+        self.other_app(install=True)
+        self.make_release("0.1.1")
+        (self.catalog / "other-app.json").unlink()
+        with patch("farm.farm.interactive", return_value=False):
+            self.farm.update()
+        printed = self.output.getvalue()
+        self.assertIn("1. Fake app 0.1.0, 0.1.1 is out", printed)
+        self.assertIn("The catalog had nothing to say about other-app.", printed)
+
+    def test_a_pending_release_is_never_offered_as_an_update(self):
+        self.install()
+        self.make_release("0.1.1")
+        self.manifest["release"]["sha256"] = "pending"
+        self.save_manifest()
+        self.farm.update()
+        self.assertIn("Everything you have installed is the newest the catalog has.", self.output.getvalue())
+
+    def test_nothing_installed_points_at_the_catalog(self):
+        self.farm.update()
+        self.assertIn("Nothing is installed yet. Run: farm list to see what the catalog has.",
+                      self.output.getvalue())
+
+    def test_check_and_update_are_the_same_command(self):
+        with patch("farm.farm.Farm", return_value=self.farm), patch.object(self.farm, "update") as update:
+            for argv in (["check"], ["update"], ["update", "fake-app", "--yes"], ["update", "--all"],
+                         ["check", "--all"]):
+                self.assertEqual(main(argv), 0, argv)
+        self.assertEqual(update.call_args_list,
+                         [call(None, yes=False, everything=False),
+                          call(None, yes=False, everything=False),
+                          call("fake-app", yes=True, everything=False),
+                          call(None, yes=False, everything=True),
+                          call(None, yes=False, everything=True)])
+
+    def test_cli_check_lists_what_is_newer_without_asking(self):
+        self.install()
+        self.make_release("0.1.1")
+        env = os.environ | {"HOME": str(self.root), "USERPROFILE": str(self.root),
+                            "FARM_CATALOG": str(self.catalog)}
+        result = subprocess.run([sys.executable, str(ROOT / "farm/farm.py"), "check"],
+                                env=env, text=True, capture_output=True,
+                                stdin=subprocess.DEVNULL, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("1. Fake app 0.1.0, 0.1.1 is out", result.stdout)
+        self.assertEqual((self.app / "current").read_text().strip(), "0.1.0")
+
+    def test_a_newer_catalog_entry_with_no_release_is_not_offered_as_one(self):
+        self.install()
+        self.make_release("0.1.1")
+        del self.manifest["release"]
+        self.save_manifest()
+        with patch("builtins.input", side_effect=AssertionError("asked about a seed")):
+            self.farm.update("fake-app")
+        self.assertIn("Fake app 0.1.1 is in the catalog with no release to install yet.",
+                      self.output.getvalue())
+        self.assertEqual((self.app / "current").read_text().strip(), "0.1.0")
+
+    def test_an_advisory_lookup_never_waits_as_long_as_an_install(self):
+        """An unreachable catalog must not stall farm start, farm status or farm list."""
+        from farm.farm import ADVISORY_TIMEOUT
+        self.install()
+        farm = Farm(self.home, "https://catalog.invalid/manifests/")
+        with patch("farm.farm.open_url", side_effect=URLError("unreachable")) as opened:
+            self.assertEqual(farm.newer_version("fake-app", self.manifest), "")
+        self.assertEqual(opened.call_args.kwargs["timeout"], ADVISORY_TIMEOUT)
+        self.assertLess(ADVISORY_TIMEOUT, 30)
+
+    def test_end_of_input_at_the_question_leaves_everything_alone(self):
+        """Windows calls NUL a terminal, so a script reaches the question even with no one there."""
+        self.install()
+        self.make_release("0.1.1")
+        with patch("farm.farm.interactive", return_value=True), \
+                patch("builtins.input", side_effect=EOFError()):
+            self.farm.update()
+        printed = self.output.getvalue()
+        self.assertIn("1. Fake app 0.1.0, 0.1.1 is out", printed)
+        self.assertIn("Nothing was updated. Run: farm update <id> to take one,"
+                      " or farm update --all to take them all.", printed)
+        self.assertEqual((self.app / "current").read_text().strip(), "0.1.0")
+
+    def test_the_cli_exits_zero_when_the_question_reaches_end_of_input(self):
+        """What CI caught on Windows: the run must not end as a cancellation."""
+        self.install()
+        self.make_release("0.1.1")
+        with patch("farm.farm.Farm", return_value=self.farm), \
+                patch("farm.farm.interactive", return_value=True), \
+                patch("builtins.input", side_effect=EOFError()):
+            self.assertEqual(main(["check"]), 0)
+        self.assertNotIn("Cancelled.", self.output.getvalue())
+
+    def running_pair(self):
+        """Two apps actually running, on ports nothing else here uses."""
+        self.manifest["requires"]["ports"] = [7865]
+        self.save_manifest()
+        self.install()
+        self.other_app(install=True, ports=[7866])
+        with patch("farm.farm.socket.create_connection", side_effect=[
+                ConnectionRefusedError(), contextlib.nullcontext(),
+                ConnectionRefusedError(), contextlib.nullcontext()]):
+            self.farm.start("fake-app")
+            self.farm.start("other-app")
+
+    def test_a_bare_stop_asks_which_of_the_running_apps_to_stop(self):
+        """Jason, 2026-09-14: "Does it ask me which app I want to stop?\""""
+        self.running_pair()
+        with patch("farm.farm.interactive", return_value=True), \
+                patch("builtins.input", return_value="2") as asked:
+            self.farm.stop()
+        printed = self.output.getvalue()
+        self.assertIn("2 apps are running.", printed)
+        self.assertIn("1. Fake app 0.1.0 on port 7865", printed)
+        self.assertIn("2. Other app 0.1.0 on port 7866", printed)
+        self.assertEqual(asked.call_args[0][0], 'Stop which? A number, "all", or Enter to leave them. ')
+        self.assertIsNone(self.farm.active("other-app"))
+        self.assertIsNotNone(self.farm.active("fake-app"))
+
+    def test_a_bare_stop_takes_all_and_takes_enter_for_an_answer(self):
+        self.running_pair()
+        with patch("farm.farm.interactive", return_value=True), patch("builtins.input", return_value=""):
+            self.farm.stop()
+        self.assertIn("Left as they are.", self.output.getvalue())
+        self.assertIsNotNone(self.farm.active("fake-app"))
+        with patch("farm.farm.interactive", return_value=True), patch("builtins.input", return_value="all"):
+            self.farm.stop()
+        self.assertIsNone(self.farm.active("fake-app"))
+        self.assertIsNone(self.farm.active("other-app"))
+
+    def test_one_running_app_is_a_plain_question_not_a_list_of_one(self):
+        self.manifest["requires"]["ports"] = [7867]
+        self.save_manifest()
+        self.install()
+        with patch("farm.farm.socket.create_connection", side_effect=[
+                ConnectionRefusedError(), contextlib.nullcontext()]):
+            self.farm.start("fake-app")
+        with patch("farm.farm.interactive", return_value=True), \
+                patch("builtins.input", return_value="") as asked:
+            self.farm.stop()
+        self.assertEqual(asked.call_args[0][0], "Stop Fake app? [Y/n] ")
+        self.assertNotIn("1. Fake app", self.output.getvalue())
+        self.assertIsNone(self.farm.active("fake-app"))
+
+    def test_one_running_app_answered_no_is_left_running(self):
+        self.manifest["requires"]["ports"] = [7868]
+        self.save_manifest()
+        self.install()
+        with patch("farm.farm.socket.create_connection", side_effect=[
+                ConnectionRefusedError(), contextlib.nullcontext()]):
+            self.farm.start("fake-app")
+        with patch("farm.farm.interactive", return_value=True), patch("builtins.input", return_value="n"):
+            self.farm.stop()
+        self.assertIn("Left as it is.", self.output.getvalue())
+        self.assertIsNotNone(self.farm.active("fake-app"))
+
+    def test_a_bare_stop_with_nothing_running_says_so_in_one_line(self):
+        self.install()
+        with patch("builtins.input", side_effect=AssertionError("asked about nothing")):
+            self.farm.stop()
+        self.assertIn("Nothing is running.", self.output.getvalue())
+
+    def test_a_bare_stop_in_a_script_prints_the_list_and_leaves(self):
+        self.running_pair()
+        with patch("farm.farm.interactive", return_value=False), \
+                patch("builtins.input", side_effect=AssertionError("asked a script a question")):
+            self.farm.stop()
+        printed = self.output.getvalue()
+        self.assertIn("1. Fake app 0.1.0 on port 7865", printed)
+        self.assertIn("Nothing was stopped. Run: farm stop <id>, naming one of fake-app and other-app.",
+                      printed)
+        self.assertIsNotNone(self.farm.active("fake-app"))
+
+    def test_a_bare_start_asks_which_installed_app_to_start(self):
+        self.install()
+        self.other_app(install=True)
+        with patch("farm.farm.interactive", return_value=True), \
+                patch("builtins.input", return_value="1") as asked:
+            self.farm.start()
+        printed = self.output.getvalue()
+        self.assertIn("2 installed apps are ready to start.", printed)
+        self.assertIn("1. Fake app 0.1.0", printed)
+        self.assertIn("2. Other app 0.1.0", printed)
+        self.assertEqual(asked.call_args[0][0], 'Start which? A number, "all", or Enter to leave them. ')
+        self.assertIsNotNone(self.farm.active("fake-app"))
+        self.assertIsNone(self.farm.active("other-app"))
+
+    def test_one_app_to_start_is_a_plain_question(self):
+        self.install()
+        with patch("farm.farm.interactive", return_value=True), \
+                patch("builtins.input", return_value="y") as asked:
+            self.farm.start()
+        self.assertEqual(asked.call_args[0][0], "Start Fake app? [Y/n] ")
+        self.assertNotIn("1. Fake app", self.output.getvalue())
+        self.assertIsNotNone(self.farm.active("fake-app"))
+
+    def test_a_bare_start_leaves_a_running_app_and_a_library_off_the_list(self):
+        self.install()
+        library = self.other_app(ident="library-app")
+        library.update(entry=None, tags=["library"])
+        (self.catalog / "library-app.json").write_text(json.dumps(library))
+        self.farm.install("library-app", yes=True)
+        self.farm.start("fake-app")
+        with patch("builtins.input", side_effect=AssertionError("asked about nothing")):
+            self.farm.start()
+        self.assertIn("Everything you have installed is already running.", self.output.getvalue())
+
+    def test_a_bare_start_in_a_script_prints_the_list_and_leaves(self):
+        self.install()
+        self.other_app(install=True)
+        with patch("farm.farm.interactive", return_value=False), \
+                patch("builtins.input", side_effect=AssertionError("asked a script a question")):
+            self.farm.start()
+        printed = self.output.getvalue()
+        self.assertIn("2. Other app 0.1.0", printed)
+        self.assertIn("Nothing was started. Run: farm start <id>, naming one of fake-app and other-app.",
+                      printed)
+        self.assertIsNone(self.farm.active("fake-app"))
+
+    def test_one_app_and_nobody_there_says_how_to_do_it_by_hand(self):
+        self.install()
+        with patch("farm.farm.interactive", return_value=False):
+            self.farm.start()
+        self.assertIn("Fake app is installed and not running. Run: farm start fake-app.",
+                      self.output.getvalue())
+
+    def test_an_answer_that_is_not_on_the_start_list_starts_nothing(self):
+        self.install()
+        self.other_app(install=True)
+        with patch("farm.farm.interactive", return_value=True), patch("builtins.input", return_value="9"):
+            self.farm.start()
+        self.assertIn("There is no 9 in that list, so nothing was started.", self.output.getvalue())
+        self.assertIsNone(self.farm.active("fake-app"))
+
+    def test_a_port_with_no_app_named_is_refused(self):
+        self.install()
+        with self.assertRaisesRegex(FarmError, "farm start <id> --port N"):
+            self.farm.start(port=7869)
+
+    def test_the_cli_passes_a_bare_start_and_stop_through_to_the_choosers(self):
+        with patch("farm.farm.Farm", return_value=self.farm), \
+                patch.object(self.farm, "start") as start, patch.object(self.farm, "stop") as stop:
+            self.assertEqual(main(["start"]), 0)
+            self.assertEqual(main(["stop"]), 0)
+        start.assert_called_once_with(None, port=None)
+        stop.assert_called_once_with(None)
