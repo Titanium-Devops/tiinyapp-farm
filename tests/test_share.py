@@ -15,7 +15,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync('site/assets/share.js', 'utf8');
-function setup({ navigator = {}, canonical = 'https://tiinyapp.farm/apps/seed/', dataset = { shareTitle: 'A seed', shareText: 'By Fern' } } = {}) {
+function setup({ navigator = {}, canonical = 'https://tiinyapp.farm/apps/seed/', dataset = { shareTitle: 'A seed', shareText: 'Grown by Fern' } } = {}) {
   const status = { textContent: '' }, timers = new Map();
   let click, nextTimer = 1;
   const button = {
@@ -69,7 +69,7 @@ const view = setup({ navigator: {
   clipboard: { writeText() { assert.fail('Native sharing must not copy the URL'); } },
 } });
 await view.click();
-assert.deepEqual(shared, { title: 'A seed', text: 'By Fern', url: 'https://tiinyapp.farm/apps/seed/' });
+assert.deepEqual(shared, { title: 'A seed', text: 'Grown by Fern', url: 'https://tiinyapp.farm/apps/seed/' });
 assert.equal(view.status.textContent, '');
 assert.equal(view.timers.size, 0);
 """)
