@@ -320,7 +320,7 @@ def app_page(app, today, makers=()):
         movable = ('<dt>Move it</dt><dd>' + (f'<code>farm start {e(app["id"])} --port N</code>'
                    if 'port' not in app or app['port'] is not None
                    else f'Fixed on {e(req["ports"][0])}') + '</dd>')
-    return f'''<section class="app wrap">{band}<div class="head">{app_icon}<div><h1>{e(app['name'])}</h1><div class="sub">v{e(app['version'])} · {e(app['license'])} · {review} · Grown by {link(maker_url, app['author']['name'])}</div></div></div>
+    return f'''<section class="app wrap">{band}<div class="head">{app_icon}<div><h1>{e(app['name'])}</h1><div class="sub">v{e(app['version'])} · {e(app['license'])} · {review} · By {link(maker_url, app['author']['name'])}</div></div></div>
 <p class="pitch">{e(app['pitch'])}</p>
 <a hidden data-seed-update="{e(app['id'])}" href="/submit/?update={e(app['id'])}">Update this app</a>
 <div class="two"><div>{install}<h2>What it does</h2><p class="desc">{e(app['description'])}</p>{'<p>' + link(homepage, 'Home page') + '</p>' if homepage else ''}{images}{social_strip(app)}</div><aside class="rail">

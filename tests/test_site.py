@@ -93,7 +93,7 @@ class SiteTests(unittest.TestCase):
                 for port in app['requires']['ports']:
                     self.assertIn(str(port), visible)
                 self.assertIn('Reviewed' if app['verified'] else 'Not reviewed yet', visible)
-                self.assertIn('Grown by', visible)
+                self.assertIn('By', visible)
                 self.assertIn('class="rail"', (self.output / 'apps' / app['id'] / 'index.html').read_text())
 
     def test_sprouting_seed_keeps_story_and_social_without_install_or_release(self):
