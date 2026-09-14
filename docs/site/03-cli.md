@@ -211,7 +211,14 @@ Load Qwen/Qwen3-8B for chat now? [Y/n]
 ```
 
 Each kind is met by any loaded model of that kind. A need with a slash in it is an exact model id
-and is met by that model only. The offer picks the cheapest downloaded model of that kind that fits
+and is met by that model only. A manifest may also declare `requires.device.prefers`, the kinds an
+app is better with and works without. Those never stop a start; they get one line as the app
+starts, and appear as a hint in `farm status` and `farm doctor`:
+
+```
+Daybreak works better with embedding, image and rerank models loaded, and is starting without them.
+```
+ The offer picks the cheapest downloaded model of that kind that fits
 what the NPU has free, numbers them when there are several, and says so rather than offering one
 when nothing of that kind is downloaded or nothing fits. Loading waits for your Tiiny to say the
 model is running before the app starts, for as long as the device's own estimate for that model
@@ -222,6 +229,7 @@ missing instead:
 
 ```json
 {"command": "start", "id": "titanium-tiiny-bot", "ok": false, "started": false,
+ "prefers": [{"kind": "embedding", "loaded": true}],
  "missing": [{"kind": "chat", "loaded": [], "available": ["Qwen/Qwen3-8B", "openai/gpt-oss-20b"]}]}
 ```
 
@@ -417,8 +425,10 @@ titanium-tiiny-bot 55663 7788 http://localhost:7788 10s running 0.1.15
 
 The farm writes down when it first saw the need go unmet, because your Tiiny cannot say when a
 model was unloaded and the thing worth knowing is whether it happened before or after the app
-stopped working. `--json` carries the same under `models`, as `needs`, `unmet`, `lost` and `since`.
-`farm doctor` reports the same thing for every installed app, running or not.
+stopped working. `--json` carries the same under `models`, as `needs`, `unmet`, `lost` and `since`,
+with `prefers` beside them for the kinds the app is merely better with. `farm doctor` reports the
+same thing for every installed app, running or not, and a preference there is a passing line rather
+than something to fix.
 
 With an app id it is a remote command instead: it asks the farm about your own submission of that
 app and prints its state, each check with its status, and each review. It needs an API token.

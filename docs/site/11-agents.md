@@ -263,11 +263,13 @@ While an app runs, `farm status --json` carries the same check per app under `mo
 
 ```json
 {"needs": ["chat", "tts"], "unmet": ["chat"], "lost": {"chat": "Qwen/Qwen3-8B"},
- "since": 1789421576.68}
+ "since": 1789421576.68, "prefers": [{"kind": "embedding", "loaded": false}]}
 ```
 
 `lost` names the model that was meeting a need when the app started and is not loaded any more, and
-`since` is when the farm first noticed. An `unmet` of `null` means the farm could not ask the Tiiny,
+`since` is when the farm first noticed. `prefers` is different in kind: those are models the app is
+better with and works without, so a `loaded` of false there is worth mentioning and is never a
+reason to stop or restart anything. `loaded` is null when the farm could not ask. An `unmet` of `null` means the farm could not ask the Tiiny,
 which is not the same as nothing being loaded.
 
 To watch rather than poll, `farm models --watch --json` writes one object per change to standard

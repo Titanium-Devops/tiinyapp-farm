@@ -1496,6 +1496,114 @@ while True: time.sleep(0.1)
         self.save_manifest()
         self.install()
 
+    def test_a_preferred_model_that_is_missing_is_a_line_and_not_a_refusal(self):
+        """Jason's decision: Daybreak declares chat, because that is what it cannot work without,
+        and says a sentence about the rest rather than refusing to run the plainer version."""
+        self.configure_device()
+        self.manifest["requires"]["device"] = {"models": ["chat"], "npuUnits": 28,
+                                               "prefers": ["embedding", "image", "rerank"]}
+        self.save_manifest()
+        self.install()
+        only_chat = a_tiiny([a_model("Qwen/Qwen3-8B", "chat", 28)], DOWNLOADED)
+        with patch.object(self.farm, "model_state", return_value=only_chat):
+            self.farm.start("fake-app")
+        self.assertIsNotNone(self.farm.active("fake-app"))
+        self.assertIn("Fake app works better with embedding, image and rerank models loaded, and"
+                      " is starting without them.", self.output.getvalue())
+        self.assertNotIn("was not started", self.output.getvalue())
+
+    def test_one_preferred_model_reads_as_one(self):
+        self.configure_device()
+        self.manifest["requires"]["device"] = {"models": [], "npuUnits": 0, "prefers": ["tts"]}
+        self.save_manifest()
+        self.install()
+        with patch.object(self.farm, "model_state",
+                          return_value=a_tiiny([a_model("Qwen/Qwen3-8B", "chat", 28)], [])):
+            self.farm.start("fake-app")
+        self.assertIn("Fake app works better with a tts model loaded, and is starting without one.",
+                      self.output.getvalue())
+        self.assertIsNotNone(self.farm.active("fake-app"))
+
+    def test_a_preferred_model_that_is_loaded_is_said_nothing_about(self):
+        self.configure_device()
+        self.manifest["requires"]["device"] = {"models": ["chat"], "npuUnits": 28,
+                                               "prefers": ["embedding"]}
+        self.save_manifest()
+        self.install()
+        with patch.object(self.farm, "model_state", return_value=a_tiiny(LOADED, DOWNLOADED)):
+            self.farm.start("fake-app")
+        self.assertNotIn("works better with", self.output.getvalue())
+
+    def test_the_machine_answer_carries_what_an_app_is_better_with(self):
+        self.configure_device()
+        self.manifest["requires"]["device"] = {"models": ["chat"], "npuUnits": 28,
+                                               "prefers": ["embedding", "image"]}
+        self.save_manifest()
+        self.install()
+        answer = io.StringIO()
+        state = a_tiiny([a_model("Tongyi-MAI/Z-Image-Turbo", "image", 32)], DOWNLOADED)
+        with patch("farm.farm.Farm", return_value=self.farm), \
+                patch.object(self.farm, "model_state", return_value=state), \
+                contextlib.redirect_stdout(answer):
+            self.assertEqual(main(["start", "fake-app", "--json", "--no-update-check"]), 1)
+        payload = json.loads(answer.getvalue())
+        self.assertFalse(payload["started"])
+        self.assertEqual(payload["prefers"], [{"kind": "embedding", "loaded": False},
+                                              {"kind": "image", "loaded": True}])
+        self.assertEqual([row["kind"] for row in payload["missing"]], ["chat"])
+        # And on a start that worked, under the running app's row.
+        self.farm.seen_models = None
+        with patch.object(self.farm, "model_state",
+                          return_value=a_tiiny(LOADED, DOWNLOADED)):
+            self.farm.start("fake-app")
+            self.farm.seen_models = None
+            row = next(iter(self.farm.status_rows()))
+        self.assertEqual(row["models"]["prefers"], [{"kind": "embedding", "loaded": True},
+                                                    {"kind": "image", "loaded": True}])
+
+    def test_status_and_doctor_treat_a_preference_as_a_hint(self):
+        self.configure_device()
+        self.manifest["requires"]["device"] = {"models": ["chat"], "npuUnits": 28,
+                                               "prefers": ["embedding"]}
+        self.save_manifest()
+        self.install()
+        only_chat = a_tiiny([a_model("Qwen/Qwen3-8B", "chat", 28)], DOWNLOADED)
+        with patch.object(self.farm, "model_state", return_value=only_chat):
+            self.farm.start("fake-app")
+            self.farm.seen_models = None
+            self.farm.status()
+        self.assertIn("fake-app works better with embedding loaded.", self.output.getvalue())
+        self.farm.seen_models = None
+        with patch.object(self.farm, "probe_device", return_value=(0, "172.17.7.177", (3, 14))), \
+                patch("farm.farm.python_candidates", return_value=[]), \
+                patch.object(self.farm, "device_models", return_value=("ok", ["qwen3-4b"])), \
+                patch.object(self.farm, "model_state", return_value=only_chat):
+            self.assertTrue(self.farm.doctor())
+        self.assertIn("fake-app works better with embedding loaded, and works without.",
+                      self.output.getvalue())
+        hint = [note for note in self.farm.findings if note.get("prefers")][0]
+        self.assertTrue(hint["ok"])
+
+    def test_a_prefers_list_has_to_be_kinds(self):
+        from farm.farm import validate_manifest
+        good = copy.deepcopy(self.manifest)
+        good["requires"]["device"]["prefers"] = ["embedding", "image"]
+        validate_manifest(good, "fake-app")
+        for bad in ("embedding", [""], [3], {}):
+            broken = copy.deepcopy(self.manifest)
+            broken["requires"]["device"]["prefers"] = bad
+            with self.assertRaises(FarmError) as error:
+                validate_manifest(broken, "fake-app")
+            self.assertIn("prefers list must be kinds of model", str(error.exception))
+
+    def test_an_install_says_what_an_app_is_better_with(self):
+        from farm.farm import describe_requirements
+        said = describe_requirements({"python": "3.9", "ports": [],
+                                      "device": {"models": ["chat"], "npuUnits": 28,
+                                                 "prefers": ["embedding", "image"]}})
+        self.assertEqual(said, "Python 3.9 or newer, your Tiiny, for chat, 28 NPU units."
+                               " Better with embedding and image")
+
     def test_start_refuses_when_the_kind_it_needs_is_not_loaded(self):
         self.configure_device()
         self.needs_a_model("chat")

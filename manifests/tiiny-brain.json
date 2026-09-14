@@ -32,7 +32,10 @@
         "embedding",
         "chat"
       ],
-      "npuUnits": 0
+      "npuUnits": 0,
+      "prefers": [
+        "tts"
+      ]
     }
   },
   "permissions": [

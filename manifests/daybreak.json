@@ -26,10 +26,14 @@
     ],
     "device": {
       "models": [
-        "chat",
-        "embedding"
+        "chat"
       ],
-      "npuUnits": 29
+      "npuUnits": 28,
+      "prefers": [
+        "embedding",
+        "image",
+        "rerank"
+      ]
     }
   },
   "permissions": [

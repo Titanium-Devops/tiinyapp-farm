@@ -324,6 +324,10 @@ def validate_manifest(manifest, ident):
             or any(not isinstance(m, str) or not m for m in device["models"])
             or type(device.get("npuUnits")) is not int or device["npuUnits"] < 0):  # noqa: E721 - JSON integers exclude booleans.
         raise FarmError("Invalid device requirements.")
+    prefers = device.get("prefers", [])
+    if not isinstance(prefers, list) or any(not isinstance(kind, str) or not kind
+                                            for kind in prefers):
+        raise FarmError("A device prefers list must be kinds of model, as strings.")
     entry = manifest.get("entry", False)
     if entry is None:
         if "library" not in manifest.get("tags", []):
@@ -579,16 +583,38 @@ def model_need(need):
     return ("model", need) if "/" in need else ("kind", need)
 
 
+def declared_models(manifest, field="models"):
+    """What a manifest says about models: what it cannot work without, or what it is better with."""
+    return [need for need in (manifest["requires"].get("device") or {}).get(field) or []
+            if isinstance(need, str) and need]
+
+
+def prefers_json(prefers, loaded):
+    """Each kind an app is better with, and whether the Tiiny has one of them loaded."""
+    return [{"kind": kind, "loaded": bool(met_by(kind, loaded))} for kind in prefers]
+
+
+def met_by(need, loaded):
+    """The loaded model that satisfies one need, or None."""
+    what, value = model_need(need)
+    for row in loaded:
+        if (row["id"] == value) if what == "model" else (row["kind"] == value):
+            return row
+    return None
+
+
+def describe_prefers(name, missing):
+    """The one line an app gets for the models it is better with and is starting without."""
+    kinds = join_words([f"{kind}" for kind in missing])
+    one = len(missing) == 1
+    return (f"{name} works better with {'an ' if kinds[0] in 'aeiou' else 'a '}{kinds} model"
+            " loaded, and is starting without one." if one else
+            f"{name} works better with {kinds} models loaded, and is starting without them.")
+
+
 def unmet_needs(needs, loaded):
     """Every need a manifest declares that nothing loaded right now satisfies."""
-    missing = []
-    for need in needs:
-        what, value = model_need(need)
-        met = (any(row["id"] == value for row in loaded) if what == "model"
-               else any(row["kind"] == value for row in loaded))
-        if not met:
-            missing.append(need)
-    return missing
+    return [need for need in needs if met_by(need, loaded) is None]
 
 
 def model_changes(before, now):
@@ -627,9 +653,10 @@ def describe_app_models(ident, models):
         return ""
     if models["unmet"] is None:
         return f"{ident} needs " + join_words(models["needs"]) + \
-            ", and the farm could not ask your Tiiny what is loaded."
+            ", and the farm could not ask your Tiiny what is loaded." if models["needs"] else ""
+    wanted = [row["kind"] for row in models.get("prefers") or [] if row["loaded"] is False]
     if not models["unmet"]:
-        return ""
+        return (f"{ident} works better with " + join_words(wanted) + " loaded." if wanted else "")
     lost = models.get("lost") or {}
     when = f", first noticed {since(time.time() - models['since'])}" if models.get("since") else ""
     gone = [f"{need} ({lost[need]})" for need in models["unmet"] if need in lost]
@@ -639,7 +666,8 @@ def describe_app_models(ident, models):
         parts.append(join_words(gone) + " was loaded when it started and is not now")
     if still:
         parts.append(join_words(still) + " has never been loaded since it started")
-    return f"{ident} is missing " + " and ".join(parts) + when + "."
+    said = f"{ident} is missing " + " and ".join(parts) + when + "."
+    return said + (" It works better with " + join_words(wanted) + " loaded." if wanted else "")
 
 
 def since(seconds):
@@ -999,7 +1027,9 @@ def describe_requirements(requires):
         parts.append("your Tiiny, for " + ", ".join(models))
     if device.get("npuUnits"):
         parts.append(f"{device['npuUnits']} NPU units")
-    return ", ".join(parts) if parts else "nothing beyond Python"
+    said = ", ".join(parts) if parts else "nothing beyond Python"
+    prefers = [kind for kind in device.get("prefers") or [] if isinstance(kind, str) and kind]
+    return said + (". Better with " + join_words(prefers) if prefers else "")
 
 
 def newer(installed, available):
@@ -2894,8 +2924,12 @@ class Farm:
                 _, manifest = self.installed(ident)
             except (FarmError, OSError, ValueError):
                 continue
-            needs = [need for need in (manifest["requires"].get("device") or {}).get("models") or []
-                     if isinstance(need, str) and need]
+            needs = declared_models(manifest)
+            wanted = unmet_needs(declared_models(manifest, "prefers"), state["loaded"])
+            if wanted:
+                # A hint, not a failing check: the app works, it just does the plainer version.
+                self.note("models", True, f"{ident} works better with " + join_words(wanted)
+                          + " loaded, and works without.", id=ident, prefers=wanted)
             missing = unmet_needs(needs, state["loaded"]) if needs else []
             if missing:
                 ok = self.note("models", False, f"{ident} needs " + join_words(missing)
@@ -3099,13 +3133,14 @@ class Farm:
         when a model was unloaded and "no longer loaded" on its own leaves out the thing a person
         wants to know, which is whether it happened before or after their app stopped working.
         """
-        needs = [need for need in (manifest["requires"].get("device") or {}).get("models") or []
-                 if isinstance(need, str) and need]
-        if not needs:
+        needs = declared_models(manifest)
+        prefers = declared_models(manifest, "prefers")
+        if not needs and not prefers:
             return None
         state = self.models_now()
         if state is None:
-            return {"needs": needs, "unmet": None, "lost": {}, "since": None}
+            return {"needs": needs, "unmet": None, "lost": {}, "since": None,
+                    "prefers": [{"kind": kind, "loaded": None} for kind in prefers]}
         unmet = unmet_needs(needs, state["loaded"])
         had = info.get("models") if isinstance(info.get("models"), dict) else {}
         lost = {need: had[need] for need in unmet if need in had}
@@ -3116,7 +3151,8 @@ class Farm:
         elif not unmet and noticed is not None:
             noticed = None
             self.remember_unmet(ident, None)
-        return {"needs": needs, "unmet": unmet, "lost": lost, "since": noticed}
+        return {"needs": needs, "unmet": unmet, "lost": lost, "since": noticed,
+                "prefers": prefers_json(prefers, state["loaded"])}
 
     def remember_unmet(self, ident, when):
         """Keep, or clear, the moment a running app's need was first seen to go unmet."""
@@ -3162,20 +3198,29 @@ class Farm:
 
         Returns the needs still unmet. Empty means the app is good to start.
         """
-        needs = [need for need in (manifest["requires"].get("device") or {}).get("models") or []
-                 if isinstance(need, str) and need]
-        if not needs:
+        needs = declared_models(manifest)
+        prefers = declared_models(manifest, "prefers")
+        if not needs and not prefers:
             return []
         settings = self.device_settings()
+        if not settings and not needs:
+            return []  # Nothing to check against, and a preference is never a reason to stop.
         if not settings:
             raise FarmError(f"{ident} needs " + join_words(needs) + " on your Tiiny, and no Tiiny"
                             " is on file. Run farm device --find, then farm device."
                             f" Or start it anyway with: farm start {ident} --no-model-check")
         state = self.models_now(settings, force=True)
         if state is None:
+            if not needs:
+                return []
             raise FarmError(f"{ident} needs " + join_words(needs) + " on your Tiiny, and the farm"
                             " could not ask your Tiiny what it has loaded. Run farm doctor."
                             f" Or start it anyway with: farm start {ident} --no-model-check")
+        # A preference never stops a start; it is the sentence that saves somebody wondering why
+        # the app is doing the plainer version of its job.
+        wanted = unmet_needs(prefers, state["loaded"])
+        if wanted and not as_json:
+            print(describe_prefers(manifest["name"], wanted))
         missing = unmet_needs(needs, state["loaded"])
         if not missing:
             return []
@@ -3396,8 +3441,11 @@ def json_command(farm, args, ident):
         if missing:
             # Nothing was launched, so there is no process to describe, only what is missing.
             state = farm.models_now() or {"loaded": [], "downloaded": []}
+            with farm.guard(ident):
+                _, manifest = farm.installed(ident)
             return {"command": "start", "id": app_id(ident), "ok": False, "started": False,
                     "already": already,
+                    "prefers": prefers_json(declared_models(manifest, "prefers"), state["loaded"]),
                     "missing": [{"kind": need,
                                  "loaded": [row["id"] for row in state["loaded"]
                                             if row["kind"] == need or row["id"] == need],
