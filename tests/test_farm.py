@@ -2,6 +2,7 @@ import contextlib
 import copy
 from email.parser import BytesParser
 from email.policy import default as email_policy
+import errno
 import getpass
 import hashlib
 from http.client import BadStatusLine, IncompleteRead
@@ -19,9 +20,10 @@ import threading
 import time
 import unittest
 from unittest.mock import patch
+from urllib.error import URLError
 from urllib.parse import urlsplit
 
-from farm.farm import Farm, FarmError, describe_size, main
+from farm.farm import DEVICE_PORT, DEVICE_PROBE, Farm, FarmError, describe_size, main
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("check_manifest", ROOT / "scripts/check-manifest.py")
@@ -1278,3 +1280,94 @@ while True: time.sleep(0.1)
         for word in ("argv", "manifest", "Manifest", "pid "):
             with self.subTest(word=word):
                 self.assertNotIn(word, self.output.getvalue())
+
+    def configure_device(self, base="http://172.17.7.177/v1"):
+        self.home.mkdir(parents=True, exist_ok=True)
+        (self.home / "device.json").write_text(json.dumps({"base": base, "key": "device-key"}))
+
+    def test_a_blocked_local_network_is_named_after_a_start(self):
+        """Jason, 2026-09-14: under miniconda Python the app saw nothing on the LAN at all, while
+        the same code under Homebrew Python found his Tiiny in 5 ms."""
+        self.configure_device()
+        self.install()
+        with patch("farm.farm.urlopen",
+                   side_effect=URLError(OSError(errno.EHOSTUNREACH, "No route to host"))) as probe:
+            self.farm.start("fake-app")
+        printed = self.output.getvalue()
+        self.assertIn("Fake app is running.", printed)
+        self.assertIn("macOS is blocking this Python from your local network.", printed)
+        self.assertIn("System Settings, Privacy and Security, Local Network, turn on Python,"
+                      " then farm stop and farm start again.", printed)
+        self.assertEqual(probe.call_args.args[0], f"http://172.17.7.177:{DEVICE_PORT}/device.json")
+
+    def test_a_tiiny_that_answers_says_nothing_about_privacy(self):
+        self.configure_device()
+        self.install()
+        with patch("farm.farm.urlopen", return_value=io.BytesIO(b'{"name":"tiiny"}')):
+            self.farm.start("fake-app")
+        self.assertNotIn("macOS is blocking", self.output.getvalue())
+
+    def test_a_refused_connection_is_not_a_blocked_network(self):
+        """A Tiiny that is switched off refuses the connection; privacy never enters into it."""
+        self.configure_device()
+        self.install()
+        with patch("farm.farm.urlopen",
+                   side_effect=URLError(OSError(errno.ECONNREFUSED, "Connection refused"))):
+            self.farm.start("fake-app")
+        self.assertNotIn("macOS is blocking", self.output.getvalue())
+
+    def test_an_address_off_the_local_network_is_never_blamed_on_privacy(self):
+        self.configure_device("http://93.184.216.34/v1")
+        self.install()
+        with patch("farm.farm.urlopen",
+                   side_effect=URLError(OSError(errno.EHOSTUNREACH, "No route to host"))):
+            self.farm.start("fake-app")
+        self.assertNotIn("macOS is blocking", self.output.getvalue())
+
+    def test_no_device_configured_is_never_probed(self):
+        self.install()
+        with patch.dict(os.environ), patch("farm.farm.urlopen",
+                                           side_effect=AssertionError("probed with no device")) as probe:
+            os.environ.pop("TIINY_BASE", None)
+            self.farm.start("fake-app")
+        probe.assert_not_called()
+        self.assertIn("Fake app is running.", self.output.getvalue())
+
+    def test_a_probe_that_breaks_never_fails_the_start(self):
+        self.configure_device()
+        self.install()
+        with patch.object(self.farm, "probe_local_network", side_effect=RuntimeError("probe exploded")):
+            self.farm.start("fake-app")
+        self.assertIn("Fake app is running.", self.output.getvalue())
+        self.assertNotIn("probe exploded", self.output.getvalue())
+        self.assertIsNotNone(self.farm.active("fake-app"))
+
+    def test_device_says_when_macos_is_blocking_the_local_network(self):
+        with patch("getpass.getpass", side_effect=["http://172.17.7.177/v1", "secret-value"]), \
+                patch("farm.farm.urlopen",
+                      side_effect=URLError(OSError(errno.EHOSTUNREACH, "No route to host"))):
+            self.farm.device()
+        printed = self.output.getvalue()
+        self.assertIn("Device settings saved.", printed)
+        self.assertIn("macOS is blocking this Python from your local network.", printed)
+        self.assertNotIn("secret-value", printed)
+
+    def test_an_app_on_another_python_is_probed_with_that_python(self):
+        """The CLI and the app can be two binaries, and macOS grants the local network one at a time."""
+        answer = json.dumps({"errno": errno.EHOSTUNREACH, "address": "172.17.7.177"})
+        done = subprocess.CompletedProcess([], 0, answer, "")
+        with patch("farm.farm.subprocess.run", return_value=done) as child:
+            refused, address = self.farm.probe_local_network("172.17.7.177", "/opt/conda/bin/python3")
+        self.assertTrue(refused)
+        self.assertEqual(address, "172.17.7.177")
+        self.assertEqual(child.call_args.args[0][0], "/opt/conda/bin/python3")
+        self.assertEqual(child.call_args.args[0][3], "172.17.7.177")
+
+    def test_the_probe_source_runs_and_answers_in_json(self):
+        """Nothing listens on the device port here, so the answer is a refusal, not a block."""
+        done = subprocess.run([sys.executable, "-c", DEVICE_PROBE, "127.0.0.1", str(DEVICE_PORT), "2.0"],
+                              capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        answer = json.loads(done.stdout.strip().splitlines()[-1])
+        self.assertEqual(answer["address"], "127.0.0.1")
+        self.assertNotEqual(answer["errno"], errno.EHOSTUNREACH)

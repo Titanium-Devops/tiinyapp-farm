@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+import errno
 import getpass
 import hashlib
 from html.parser import HTMLParser
 from http.client import HTTPException
+import ipaddress
 import json
 import mimetypes
 import ntpath
@@ -39,6 +41,9 @@ PORT_DEFAULT = {"env": "TIINYAPP_PORT"}
 PORT_FLAG = re.compile(r"--?[A-Za-z0-9][A-Za-z0-9-]*\Z")
 PORT_ENV = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 MAX_DOWNLOAD = 512 * 1024 * 1024
+# Where a Tiiny answers /device.json on the local network.
+DEVICE_PORT = 39218
+LOCAL_NETWORK_TIMEOUT = 2.0
 WINDOWS = os.name == "nt"
 MAX_UNPACKED = 2 * 1024 * 1024 * 1024
 MAX_PUBLISH = 50 * 1024 * 1024
@@ -335,6 +340,39 @@ def landing_page(manifest):
 def app_link(port, manifest):
     page = landing_page(manifest)
     return f"http://localhost:{port}" + ("" if page == "/" else page)
+
+
+def url_host(address):
+    """An IPv6 literal needs its brackets before it can go in a URL."""
+    return f"[{address}]" if ":" in address else address
+
+
+def private_address(address):
+    """Only a local network address can be the one macOS is refusing."""
+    try:
+        return ipaddress.ip_address(address).is_private
+    except ValueError:
+        return False
+
+
+# Run by the interpreter an app runs under, when that is not the one running the CLI.
+DEVICE_PROBE = """import json, socket, sys, urllib.error, urllib.request
+host, port, timeout = sys.argv[1], int(sys.argv[2]), float(sys.argv[3])
+answer = {"errno": 0, "address": ""}
+try:
+    answer["address"] = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)[0][4][0]
+    where = answer["address"]
+    if ":" in where:
+        where = "[" + where + "]"
+    urllib.request.urlopen("http://" + where + ":" + str(port) + "/device.json", timeout=timeout).close()
+except urllib.error.HTTPError:
+    pass
+except urllib.error.URLError as error:
+    answer["errno"] = getattr(error.reason, "errno", 0) or 0
+except OSError as error:
+    answer["errno"] = error.errno or 0
+print(json.dumps(answer))
+"""
 
 
 def describe_requirements(requires):
@@ -882,6 +920,53 @@ class Farm:
         atomic_write(self.config_home / "device.json", json.dumps({"base": base, "key": key}) + "\n")
         print("Device settings saved.")
         self.device_users()
+        # Apps get launched with this interpreter, so this is the one macOS has to have granted.
+        self.local_network_hint(base, sys.executable)
+
+    def probe_local_network(self, host, interpreter):
+        """One request to the Tiiny from the interpreter an app runs under. Returns whether the
+        local network was refused, and the address that refused it."""
+        if interpreter and Path(interpreter) != Path(sys.executable):
+            try:
+                done = subprocess.run([interpreter, "-c", DEVICE_PROBE, host, str(DEVICE_PORT),
+                                       str(LOCAL_NETWORK_TIMEOUT)], capture_output=True, text=True,
+                                      timeout=LOCAL_NETWORK_TIMEOUT + 8)
+                answer = json.loads(done.stdout.strip().splitlines()[-1])
+            except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+                return False, ""
+            return answer.get("errno") == errno.EHOSTUNREACH, str(answer.get("address") or "")
+        try:
+            address = socket.getaddrinfo(host, DEVICE_PORT, type=socket.SOCK_STREAM)[0][4][0]
+        except OSError:
+            return False, ""
+        try:
+            urlopen(f"http://{url_host(address)}:{DEVICE_PORT}/device.json",
+                    timeout=LOCAL_NETWORK_TIMEOUT).close()
+        except HTTPError:
+            return False, address
+        except URLError as error:
+            return getattr(error.reason, "errno", None) == errno.EHOSTUNREACH, address
+        except OSError as error:
+            return error.errno == errno.EHOSTUNREACH, address
+        return False, address
+
+    def local_network_hint(self, base, interpreter=None):
+        """Jason, 2026-09-14: AINode Pocket under miniconda Python could not see his Tiiny at all,
+        while the same code under Homebrew Python found it in 5 ms. macOS Local Network privacy
+        refuses a binary it has never been granted, and a detached app is refused silently rather
+        than prompted, so the app's own log says only that nothing answered. This is a hint and
+        nothing more: it never fails a start, whatever it runs into."""
+        try:
+            host = urlsplit(base).hostname if base else None
+            if not host:
+                return
+            refused, address = self.probe_local_network(host, interpreter)
+            if refused and private_address(address):
+                print("macOS is blocking this Python from your local network.")
+                print("System Settings, Privacy and Security, Local Network, turn on Python,"
+                      " then farm stop and farm start again.")
+        except Exception:  # noqa: BLE001 - a hint must never be the reason a command fails.
+            return
 
     def device_users(self):
         """Name the installed apps these settings reach, and one command that proves they work."""
@@ -1063,6 +1148,9 @@ class Farm:
                        if "python" in entry else shlex.split(entry["command"]))
             if command[0] in ("python", "python3"):
                 command[0] = sys.executable
+            # The binary macOS has to have granted is the one the app itself runs under.
+            interpreter = (command[0] if "python" in entry
+                           or Path(command[0]).name.lower().startswith("python") else None)
             ports = list(manifest["requires"]["ports"])
             takes = port_mechanism(manifest)
             if port is not None and takes is None:
@@ -1159,6 +1247,8 @@ class Farm:
             print(manifest["pitch"])
             print(f"Stop it with: farm stop {ident}")
             print(f"Log: {app / 'farm.log'}")
+            if interpreter:
+                self.local_network_hint(env.get("TIINY_BASE"), interpreter)
 
     def _stop(self, ident):
         app = self.app_dir(ident)

@@ -95,6 +95,43 @@ scheme, host, port and path, such as `http://openai.api.tiiny/v1`.
 environment, which chooses the scripted path, and the base URL was missing. Scripted input never
 falls back to a prompt.
 
+## The app cannot see my Tiiny
+
+The app starts, the page opens, and nothing on it can reach the device. Its log says something like
+`nothing answered http://172.17.7.177:39218/device.json`, and `farm device` saved the right address.
+
+On macOS this is almost always Local Network privacy rather than your network. macOS gates the local
+network per binary, and a Python you installed yourself, from conda, pyenv or an installer, is its
+own application as far as macOS is concerned, separate from any Python that has already been allowed.
+An app the farm starts runs detached, so macOS refuses it silently instead of showing you the
+permission prompt. Measured on 2026-09-14: the same code found the same Tiiny in 5 ms under Homebrew
+Python and could not see it at all under miniconda Python.
+
+The fix:
+
+**System Settings, Privacy and Security, Local Network, turn on Python, then `farm stop` and
+`farm start` again.**
+
+More than one Python can be listed there. Turn on the one the farm runs, which is the interpreter on
+the first line of the `farm` command itself:
+
+```
+head -1 "$(command -v farm)"
+```
+
+To see the refusal for yourself, ask that interpreter to fetch the device page:
+
+```
+/path/to/python -c "import urllib.request; print(urllib.request.urlopen('http://172.17.7.177:39218/device.json', timeout=2).read()[:60])"
+```
+
+`URLError [Errno 65] No route to host` is the block. A line of JSON means the network is fine and the
+problem is elsewhere. `farm start` and `farm device` run this check for you and print the same advice
+when they hit it, and neither one fails because of it.
+
+On Linux the same errno is 113, and it means what it says: no route to the host. Check the address
+you saved with `farm device` and whether the Tiiny is on the same network.
+
 ## Publishing
 
 **`That is not a farm token: got N characters starting '...'`** The token is `farm_` and 40
