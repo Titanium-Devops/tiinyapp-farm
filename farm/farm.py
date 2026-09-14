@@ -27,7 +27,7 @@ import tempfile
 import time
 import threading
 from urllib.error import HTTPError, URLError
-from urllib.parse import unquote, urljoin, urlsplit
+from urllib.parse import quote, unquote, urljoin, urlsplit
 from urllib.request import (ProxyHandler, Request, build_opener, getproxies_environment,
                             url2pathname)
 import warnings
@@ -46,6 +46,25 @@ PORT_ENV = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 MAX_DOWNLOAD = 512 * 1024 * 1024
 # Where a Tiiny answers /device.json on the local network.
 DEVICE_PORT = 39218
+# The model lifecycle API. It lives on port 8800, and on firmware that closes 8800 to the network
+# it is still there on the management port behind a virtual host. Measured against live firmware on
+# 2026-09-14: 8800 was refused and the virtual host answered, so both are tried.
+GATEWAY_PORT = 8800
+GATEWAY_VHOST = "p8800.api.tiiny"
+# What the device calls each kind of model, and what a manifest calls it. The device's own
+# capability field is the authority, and these eight values are what live firmware sends. A
+# manifest says chat where the device says main, and tts and asr where the device says voice and
+# audio, because those are the words an app author reaches for.
+MODEL_KINDS = {"chat": "main", "embedding": "embedding", "rerank": "rerank", "image": "image",
+               "ocr": "ocr", "tts": "voice", "asr": "audio", "music": "music"}
+DEVICE_KINDS = {capability: kind for kind, capability in MODEL_KINDS.items()}
+MODEL_TIMEOUT = 20.0
+# How often --watch looks, and how long a load is given. The device carries its own estimate per
+# model in load_time, measured from 5 seconds for an embedding model to 30 for an image one, and
+# the wait is sized from that rather than from a number the farm made up.
+MODEL_POLL = 3.0
+MODEL_LOAD_LEAST = 60.0
+MODEL_LOAD_MOST = 300.0
 LOCAL_NETWORK_TIMEOUT = 2.0
 # A Tiiny on a cable sits on its own point to point /30 inside this /16, the box on the first
 # usable address of the /30 and this machine on the second, so four boxes plugged in at once are
@@ -305,6 +324,10 @@ def validate_manifest(manifest, ident):
             or any(not isinstance(m, str) or not m for m in device["models"])
             or type(device.get("npuUnits")) is not int or device["npuUnits"] < 0):  # noqa: E721 - JSON integers exclude booleans.
         raise FarmError("Invalid device requirements.")
+    prefers = device.get("prefers", [])
+    if not isinstance(prefers, list) or any(not isinstance(kind, str) or not kind
+                                            for kind in prefers):
+        raise FarmError("A device prefers list must be kinds of model, as strings.")
     entry = manifest.get("entry", False)
     if entry is None:
         if "library" not in manifest.get("tags", []):
@@ -499,6 +522,164 @@ def newer_version(offered, running):
     if not isinstance(offered, str) or not VERSION.fullmatch(offered) or not VERSION.fullmatch(running or ""):
         return False
     return tuple(map(int, offered.split("."))) > tuple(map(int, running.split(".")))
+
+
+def device_error(payload):
+    """The message in a device answer that is really a refusal, or None.
+
+    The gateway reports some failures in a 200 body rather than a status code, as {"code": N,
+    "msg": ...}, and a code of 0 is a success rather than a failure. An OpenAI-shaped answer can
+    carry a code of its own, so a body with choices in it is never read this way.
+    """
+    if not isinstance(payload, dict) or "choices" in payload:
+        return None
+    inner = payload.get("error")
+    if isinstance(inner, dict):
+        return str(inner.get("message") or inner.get("msg") or "the device refused it")
+    code = payload.get("code")
+    if isinstance(code, int) and not isinstance(code, bool) and code != 0:
+        return str(payload.get("message") or payload.get("msg") or f"device error {code}")
+    return None
+
+
+def model_row(ident, instance, listed):
+    """One model as the farm talks about it: what it is, what it costs, what it is doing.
+
+    An instance the device is running carries its own capability, cost and state, so a loaded model
+    describes itself and nothing here guesses a kind from a name. A model that is only on disk is
+    described by its row in the device's own list instead.
+    """
+    listed = listed or {}
+    capabilities = instance.get("capabilities") or listed.get("capabilities") or []
+    capability = next((name for name in capabilities if isinstance(name, str) and name), None)
+    units = instance.get("npu_usage")
+    if not isinstance(units, int) or isinstance(units, bool):
+        units = listed.get("npu_usage")
+    seconds = listed.get("load_time")
+    port = instance.get("port")
+    return {"id": ident,
+            "kind": DEVICE_KINDS.get(capability, capability),
+            "capability": capability,
+            "units": units if isinstance(units, int) and not isinstance(units, bool) else None,
+            "state": str(instance.get("status") or listed.get("status") or "unknown"),
+            "port": port if isinstance(port, int) and not isinstance(port, bool) else None,
+            "seconds": seconds if isinstance(seconds, int) and not isinstance(seconds, bool) else None}
+
+
+def describe_units(units):
+    """The NPU cost of a model, in the units the device counts in."""
+    return "units unknown" if units is None else "1 unit" if units == 1 else f"{units} units"
+
+
+def describe_model(row):
+    """One model on one line: what it is for, which model it is, and what it costs."""
+    return (f"{row['kind'] or row['capability'] or 'unknown'} {row['id']}"
+            f" {describe_units(row['units'])}")
+
+
+def model_need(need):
+    """What a manifest is asking for. A need with a slash in it is an exact model id, because that
+    is what a model id looks like and no kind has one; everything else is a kind."""
+    return ("model", need) if "/" in need else ("kind", need)
+
+
+def declared_models(manifest, field="models"):
+    """What a manifest says about models: what it cannot work without, or what it is better with."""
+    return [need for need in (manifest["requires"].get("device") or {}).get(field) or []
+            if isinstance(need, str) and need]
+
+
+def prefers_json(prefers, loaded):
+    """Each kind an app is better with, and whether the Tiiny has one of them loaded."""
+    return [{"kind": kind, "loaded": bool(met_by(kind, loaded))} for kind in prefers]
+
+
+def met_by(need, loaded):
+    """The loaded model that satisfies one need, or None."""
+    what, value = model_need(need)
+    for row in loaded:
+        if (row["id"] == value) if what == "model" else (row["kind"] == value):
+            return row
+    return None
+
+
+def describe_prefers(name, missing):
+    """The one line an app gets for the models it is better with and is starting without."""
+    kinds = join_words([f"{kind}" for kind in missing])
+    one = len(missing) == 1
+    return (f"{name} works better with {'an ' if kinds[0] in 'aeiou' else 'a '}{kinds} model"
+            " loaded, and is starting without one." if one else
+            f"{name} works better with {kinds} models loaded, and is starting without them.")
+
+
+def unmet_needs(needs, loaded):
+    """Every need a manifest declares that nothing loaded right now satisfies."""
+    return [need for need in needs if met_by(need, loaded) is None]
+
+
+def model_changes(before, now):
+    """What changed between two looks at the running set, one entry per model."""
+    changes = []
+    for ident, row in now.items():
+        was = before.get(ident)
+        if was is None:
+            changes.append({"event": "loaded", "row": row})
+        elif was["state"] != row["state"]:
+            changes.append({"event": "changed", "row": row})
+    for ident, row in before.items():
+        if ident not in now:
+            changes.append({"event": "unloaded", "row": row})
+    changes.sort(key=lambda change: (change["event"], change["row"]["id"]))
+    return changes
+
+
+def pick_model(rows, kind, free):
+    """The downloaded model the farm would load for a kind, and the ones it could have loaded.
+
+    The cheapest that fits what the NPU has left, because the person asked for a kind rather than
+    for a particular model, and the cheapest one is the one least likely to push something else
+    out. A model whose cost the device does not report is treated as fitting, since refusing to
+    offer it would be worse than trying.
+    """
+    of_kind = [row for row in rows if row["kind"] == kind or row["id"] == kind]
+    fits = [row for row in of_kind if row["units"] is None or free is None or row["units"] <= free]
+    fits.sort(key=lambda row: (row["units"] if row["units"] is not None else 0, row["id"]))
+    return (fits[0] if fits else None), of_kind
+
+
+def describe_app_models(ident, models):
+    """What to say under a running app about the models it needs, or nothing when all is well."""
+    if not models:
+        return ""
+    if models["unmet"] is None:
+        return f"{ident} needs " + join_words(models["needs"]) + \
+            ", and the farm could not ask your Tiiny what is loaded." if models["needs"] else ""
+    wanted = [row["kind"] for row in models.get("prefers") or [] if row["loaded"] is False]
+    if not models["unmet"]:
+        return (f"{ident} works better with " + join_words(wanted) + " loaded." if wanted else "")
+    lost = models.get("lost") or {}
+    when = f", first noticed {since(time.time() - models['since'])}" if models.get("since") else ""
+    gone = [f"{need} ({lost[need]})" for need in models["unmet"] if need in lost]
+    still = [need for need in models["unmet"] if need not in lost]
+    parts = []
+    if gone:
+        parts.append(join_words(gone) + " was loaded when it started and is not now")
+    if still:
+        parts.append(join_words(still) + " has never been loaded since it started")
+    said = f"{ident} is missing " + " and ".join(parts) + when + "."
+    return said + (" It works better with " + join_words(wanted) + " loaded." if wanted else "")
+
+
+def since(seconds):
+    """How long ago, in the words a person uses for it."""
+    seconds = max(0, int(seconds))
+    if seconds < 90:
+        return "just now" if seconds < 20 else f"{seconds} seconds ago"
+    minutes = seconds // 60
+    if minutes < 90:
+        return f"{minutes} minutes ago"
+    hours = minutes // 60
+    return f"{hours} hours ago" if hours < 48 else f"{hours // 24} days ago"
 
 
 def private_address(address):
@@ -846,7 +1027,9 @@ def describe_requirements(requires):
         parts.append("your Tiiny, for " + ", ".join(models))
     if device.get("npuUnits"):
         parts.append(f"{device['npuUnits']} NPU units")
-    return ", ".join(parts) if parts else "nothing beyond Python"
+    said = ", ".join(parts) if parts else "nothing beyond Python"
+    prefers = [kind for kind in device.get("prefers") or [] if isinstance(kind, str) and kind]
+    return said + (". Better with " + join_words(prefers) if prefers else "")
 
 
 def newer(installed, available):
@@ -937,6 +1120,10 @@ class Farm:
         # What the last doctor run said, one entry per line it printed, so --json can hand an
         # agent the same sentences a person reads instead of a second set written beside them.
         self.findings = []
+        # Which of the model API's two doors answered, kept for the rest of the command.
+        self.door = None
+        # One look at the device's models per command, however many apps ask about them.
+        self.seen_models = None
         self.home = Path(home) if home is not None else Path.home() / "tiinyapps"
         self.config_home = Path(home) if home is not None else Path.home() / ".tiinyapps"
         self.catalog = str(catalog or os.environ.get("FARM_CATALOG", CATALOG))
@@ -1920,6 +2107,14 @@ class Farm:
         print("System Settings, Privacy and Security, Local Network, turn on Python,"
               " then farm stop and farm start again.")
 
+    def require_device(self):
+        """The Tiiny on file, or the sentence that says how to put one there."""
+        settings = self.device_settings()
+        if not settings:
+            raise FarmError("No Tiiny is on file. Run farm device --find to look for one, then"
+                            " farm device to save it.")
+        return settings
+
     def device_users(self):
         """Name the installed apps these settings reach, and one command that proves they work."""
         wanting, runnable = [], []
@@ -2205,7 +2400,8 @@ class Farm:
         raise FarmError(f"Port {busy} is already in use and nothing above it up to {busy + span} is free;"
                         f" use farm start {ident} --port N.")
 
-    def start(self, ident=None, port=None, python=None):
+    def start(self, ident=None, port=None, python=None, load=False, model_check=True,
+              as_json=False):
         if ident is None:
             if port is not None:
                 raise FarmError("A port belongs to one app, so name it: farm start <id> --port N.")
@@ -2232,6 +2428,15 @@ class Farm:
             entry = manifest["entry"]
             if entry is None:
                 raise FarmError(f"{ident} is a library, not a runnable app.")
+            # Before anything is launched: an app that needs a model and does not get one starts
+            # perfectly well and then fails at every message, which reads as a broken app.
+            missing = ([] if not model_check or os.environ.get("FARM_NO_MODEL_CHECK")
+                       else self.check_models(ident, manifest, load=load, as_json=as_json))
+            if missing:
+                if as_json:
+                    return missing
+                raise FarmError(f"{manifest['name']} was not started, because your Tiiny has no "
+                                + join_words(missing) + " model loaded.")
             # The one this machine has settled on, unless the person names one on the spot.
             chosen = python or self.app_python() or sys.executable
             command = ([chosen, "-m", entry["python"], *entry["args"]]
@@ -2295,7 +2500,8 @@ class Farm:
                             raise
                     atomic_write(app / "farm.pid", str(process.pid) + "\n")
                     atomic_write(app / "process.json", json.dumps({"started": time.time(),
-                                 "ports": ports, "version": manifest["version"], "health": manifest.get("health"), "identity": identity}) + "\n")
+                                 "ports": ports, "version": manifest["version"], "health": manifest.get("health"), "identity": identity,
+                                 "models": self.models_at_start(manifest)}) + "\n")
                     deadline = time.monotonic() + START_TIMEOUT
                     while True:
                         time.sleep(min(0.1, max(0, deadline - time.monotonic())))
@@ -2419,7 +2625,8 @@ class Farm:
                        "uptime": max(0, int(time.time() - info["started"])),
                        "version": version, "installed": manifest["version"],
                        "restartToUpdate": version != manifest["version"], "health": state,
-                       "updateAvailable": self.newer_version(ident, manifest) or None}
+                       "updateAvailable": self.newer_version(ident, manifest) or None,
+                       "models": self.app_models(ident, manifest, info)}
 
     def status(self):
         print("APP PID PORT LINK UPTIME STATUS")
@@ -2433,6 +2640,138 @@ class Farm:
                     "unversioned": " (health version unavailable)"}.get(row["health"], "")
             print(f"{row['id']} {row['pid']} {','.join(map(str, row['ports'])) or '-'}"
                   f" {row['url'] or '-'} {row['uptime']}s {detail}{note}")
+            said = describe_app_models(row["id"], row["models"])
+            if said:
+                print("  " + said)
+
+    def gateway_doors(self, settings):
+        """The addresses the model lifecycle API might be behind, best first.
+
+        A base with a port in it is taken at its word. Otherwise the virtual host on the management
+        port is tried before 8800, because that is the one that answered live firmware, and without
+        the Host header port 80 serves the management page instead of the API.
+        """
+        parsed = urlsplit(settings["base"])
+        where = f"{parsed.scheme}://{url_host(parsed.hostname or '')}"
+        if parsed.port and parsed.port != 80:
+            return [(f"{where}:{parsed.port}", None)]
+        return [(where, GATEWAY_VHOST), (f"{where}:{GATEWAY_PORT}", None)]
+
+    def gateway(self, settings, method, path, timeout=MODEL_TIMEOUT):
+        """One call to the model lifecycle API, through whichever of its doors answers.
+
+        The key rides in a header, so it is never in a path, an argument or a log, and no error
+        text from the device is repeated back, because an error body can carry one. The door that
+        answered is kept for the rest of the command rather than rediscovered per call.
+        """
+        blocked = False
+        for door in ([self.door] if self.door else self.gateway_doors(settings)):
+            base, vhost = door
+            headers = {"Authorization": "Bearer " + settings["key"], "Accept": "application/json",
+                       "User-Agent": "tiinyapp-farm/" + _version()}
+            if vhost:
+                headers["Host"] = vhost
+            try:
+                with urlopen(Request(base + path, headers=headers, method=method),
+                             timeout=timeout) as response:
+                    payload = json.loads(response.read(8 * 1024 * 1024))
+            except HTTPError as error:
+                error.close()
+                # An answer, even a refusal, means this is the door that is open.
+                self.door = door
+                raise FarmError("Your Tiiny refused the key on file; run farm device to put in a"
+                                " new one." if error.code in (401, 403) else
+                                f"Your Tiiny answered HTTP {error.code} when the farm asked about"
+                                " its models.") from None
+            except URLError as error:
+                blocked = blocked or getattr(error.reason, "errno", None) in NO_ROUTE
+                continue
+            except (OSError, ValueError, HTTPException) as error:
+                blocked = blocked or getattr(error, "errno", None) in NO_ROUTE
+                continue
+            refusal = device_error(payload)
+            if refusal:
+                self.door = door
+                raise FarmError(f"Your Tiiny would not do that: {refusal}")
+            self.door = door
+            return payload
+        raise FarmError("This Python cannot reach your Tiiny, because macOS is blocking it from"
+                        " your local network. Run farm doctor." if blocked else
+                        f"Your Tiiny at {urlsplit(settings['base']).hostname} did not answer about"
+                        " its models. Run farm doctor.")
+
+    def model_state(self, settings):
+        """What the Tiiny has loaded, what it has on disk, and what is left of the NPU.
+
+        Three calls, because the device keeps the three answers apart: the instances it is running,
+        the models on its disk, and the unit budget. NPU units are memory residency rather than a
+        compute reservation, so several models are resident at once and the budget is what says
+        whether another one fits.
+        """
+        running = self.gateway(settings, "GET", "/api/v1/models/running")
+        listed = self.gateway(settings, "GET", "/api/v1/models/")
+        units = self.gateway(settings, "GET", "/api/v1/models/npu/status")
+        rows = listed if isinstance(listed, list) else (listed or {}).get("data") or []
+        catalogue = {}
+        for row in rows:
+            if isinstance(row, dict):
+                ident = row.get("id") or row.get("model_id") or row.get("fullname")
+                if isinstance(ident, str) and ident:
+                    catalogue.setdefault(ident, row)
+        running = running if isinstance(running, dict) else {}
+        instances = (running.get("instances") or {}).get("running") or []
+        loaded, seen = [], set()
+        for entry in instances:
+            if not isinstance(entry, dict):
+                continue
+            ident = entry.get("model_id") or entry.get("model_name") or entry.get("fullname")
+            if not isinstance(ident, str) or not ident or ident in seen:
+                continue
+            seen.add(ident)
+            loaded.append(model_row(ident, entry, catalogue.get(ident)))
+        # Firmware that answers with the id list and no instances still says what is loaded.
+        for ident in running.get("running") or []:
+            if isinstance(ident, str) and ident and ident not in seen:
+                seen.add(ident)
+                loaded.append(model_row(ident, {}, catalogue.get(ident)))
+        pending = [ident for ident in running.get("pending") or []
+                   if isinstance(ident, str) and ident]
+        downloaded = [model_row(ident, {}, row) for ident, row in sorted(catalogue.items())
+                      if ident not in seen]
+        units = units if isinstance(units, dict) else {}
+        total = units.get("npu_total")
+        used = units.get("npu_used")
+        total = total if isinstance(total, int) and not isinstance(total, bool) else None
+        used = used if isinstance(used, int) and not isinstance(used, bool) else None
+        available = units.get("npu_available")
+        if not isinstance(available, int) or isinstance(available, bool):
+            available = max(0, total - used) if total is not None and used is not None else None
+        loaded.sort(key=lambda row: (row["kind"] or "", row["id"]))
+        return {"loaded": loaded, "downloaded": downloaded, "pending": pending,
+                "npu": {"total": total, "used": used, "available": available}}
+
+    def load_model(self, settings, row):
+        """Ask the device to load one model, and wait for it to say it is running.
+
+        Loading is asynchronous: the device answers at once and the model turns up in its running
+        list later. The wait is sized from the device's own estimate for that model rather than
+        from a number the farm made up, and the person is told what it is before the wait starts.
+        """
+        wait = min(MODEL_LOAD_MOST, max(MODEL_LOAD_LEAST, (row["seconds"] or 30) * 4))
+        print(f"Loading {row['id']} for {row['kind'] or 'your app'}."
+              + (f" Your Tiiny says that one takes about {row['seconds']} seconds." if row["seconds"]
+                 else " That can take a minute."))
+        self.gateway(settings, "POST", "/api/v1/models/%s/start" % quote(row["id"], safe=""),
+                     timeout=MODEL_TIMEOUT)
+        deadline = time.monotonic() + wait
+        while time.monotonic() < deadline:
+            time.sleep(min(2.0, max(0.1, deadline - time.monotonic())))
+            if any(live["id"] == row["id"] for live in self.model_state(settings)["loaded"]):
+                print(f"{row['id']} is loaded.")
+                return True
+        print(f"{row['id']} was still loading after {int(wait)} seconds."
+              " Run farm models to see where it got to.")
+        return False
 
     def device_models(self, settings, interpreter=None, timeout=5.0):
         """What the Tiiny lists on /v1/models, using the saved key, asked by the interpreter that
@@ -2569,6 +2908,39 @@ class Farm:
                   "There is no other Python on this machine to fall back to.", pythons=tried)
         return working
 
+    def doctor_models(self):
+        """One finding per installed app whose Tiiny does not have what the app needs loaded."""
+        state = self.models_now()
+        if state is None:
+            return True
+        loaded = [describe_model(row) for row in state["loaded"]]
+        self.note("models", True, "Your Tiiny has " + join_words(loaded) + " loaded." if loaded
+                  else "Your Tiiny has no models loaded.",
+                  loaded=[row["id"] for row in state["loaded"]])
+        ok = True
+        for path in sorted(self.home.glob("*/current")):
+            ident = path.parent.name
+            try:
+                _, manifest = self.installed(ident)
+            except (FarmError, OSError, ValueError):
+                continue
+            needs = declared_models(manifest)
+            wanted = unmet_needs(declared_models(manifest, "prefers"), state["loaded"])
+            if wanted:
+                # A hint, not a failing check: the app works, it just does the plainer version.
+                self.note("models", True, f"{ident} works better with " + join_words(wanted)
+                          + " loaded, and works without.", id=ident, prefers=wanted)
+            missing = unmet_needs(needs, state["loaded"]) if needs else []
+            if missing:
+                ok = self.note("models", False, f"{ident} needs " + join_words(missing)
+                               + " and your Tiiny has none loaded."
+                               if not loaded else
+                               f"{ident} needs " + join_words(missing) + " and your Tiiny has not"
+                               " got that loaded.",
+                               f"load one with: farm start {ident} --load", id=ident,
+                               missing=missing) and ok
+        return ok
+
     def doctor_apps(self):
         """Every installed app, the port it declares, and who is holding it."""
         idents = sorted(path.parent.name for path in self.home.glob("*/current"))
@@ -2644,6 +3016,7 @@ class Farm:
                           "System Settings, Privacy and Security, Local Network, turn on Python,"
                           " then run farm doctor again.")
         listed = ok
+        ok = self.doctor_models() and ok
         ok = self.doctor_apps() and ok
         if listed and models:
             counted = "1 model" if len(models) == 1 else f"{len(models)} models"
@@ -2655,6 +3028,258 @@ class Farm:
         print("Everything the farm checks is working." if ok else
               "Something above needs attention, and each Fix line says what to do.")
         return ok
+
+    def models(self):
+        """farm models: what the Tiiny has loaded, what is on its disk, and what the NPU has left."""
+        state = self.model_state(self.require_device())
+        npu = state["npu"]
+        budget = ("" if npu["used"] is None or npu["total"] is None else
+                  f", using {npu['used']} of {npu['total']} NPU units")
+        if state["loaded"]:
+            counted = "1 model" if len(state["loaded"]) == 1 else f"{len(state['loaded'])} models"
+            print(f"Your Tiiny has {counted} loaded{budget}.")
+            for row in state["loaded"]:
+                print("  " + describe_model(row) + f" {row['state']}")
+        else:
+            print(f"Your Tiiny has no models loaded{budget}, so nothing that needs one will work.")
+        for ident in state["pending"]:
+            print(f"  {ident} is still loading.")
+        if state["downloaded"]:
+            counted = ("1 more model is" if len(state["downloaded"]) == 1
+                       else f"{len(state['downloaded'])} more models are")
+            print(f"{counted} downloaded and not loaded:")
+            for row in state["downloaded"]:
+                print("  " + describe_model(row))
+        if npu["available"] is not None:
+            print(f"{npu['available']} NPU units are free.")
+        return state
+
+    def watch_models(self, as_json=False, interval=MODEL_POLL, rounds=None):
+        """A line every time a model changes state, until Ctrl-C.
+
+        The device is polled rather than subscribed to, because the one thing it streams is the
+        download progress of a model that is arriving, not the membership of the running set.
+        """
+        if not as_json:
+            print(f"Watching your Tiiny's models, asking every {int(interval)} seconds."
+                  " Ctrl-C to stop.")
+        settings = self.require_device()
+        before, turn = None, 0
+        try:
+            while rounds is None or turn < rounds:
+                turn += 1
+                try:
+                    state = self.model_state(settings)
+                except FarmError as error:
+                    if not as_json:
+                        print(str(error))
+                    time.sleep(interval)
+                    continue
+                now = {row["id"]: row for row in state["loaded"]}
+                if before is not None:
+                    for change in model_changes(before, now):
+                        self.say_model_change(change, state, as_json)
+                before = now
+                if rounds is None or turn < rounds:
+                    time.sleep(interval)
+        except KeyboardInterrupt:
+            if not as_json:
+                print("\nStopped watching.")
+        return before or {}
+
+    def say_model_change(self, change, state, as_json):
+        """One model changing state, for a person or for whatever is reading the JSON."""
+        row, event = change["row"], change["event"]
+        npu = state["npu"]
+        if as_json:
+            print(json.dumps({"command": "models", "event": event, "id": row["id"],
+                              "kind": row["kind"], "capability": row["capability"],
+                              "units": row["units"], "state": row["state"], "npu": npu,
+                              "at": int(time.time())}))
+            return
+        moment = time.strftime("%H:%M:%S")
+        used = ("" if npu["used"] is None or npu["total"] is None else
+                f", {npu['used']} of {npu['total']} NPU units in use")
+        kind = row["kind"] or row["capability"] or "unknown"
+        said = {"loaded": f"{row['id']} is loaded for {kind}, {describe_units(row['units'])}",
+                "unloaded": f"{row['id']} for {kind} is not loaded any more",
+                "changed": f"{row['id']} for {kind} is {row['state']}"}[event]
+        print(f"{moment} {said}{used}.")
+
+    def models_at_start(self, manifest):
+        """Which model was meeting each of this app's needs the moment it started.
+
+        Kept so that an app whose model is unloaded underneath it can be told apart from one that
+        never had it, and so status can name the model that went away rather than only the kind.
+        """
+        needs = [need for need in (manifest["requires"].get("device") or {}).get("models") or []
+                 if isinstance(need, str) and need]
+        state = self.models_now() if needs else None
+        if not needs or state is None:
+            return {}
+        met = {}
+        for need in needs:
+            what, value = model_need(need)
+            for row in state["loaded"]:
+                if (row["id"] == value) if what == "model" else (row["kind"] == value):
+                    met[need] = row["id"]
+                    break
+        return met
+
+    def app_models(self, ident, manifest, info):
+        """What this running app needs, what of it is loaded now, and what went away.
+
+        The farm writes down when it first noticed a need go unmet, because the device cannot say
+        when a model was unloaded and "no longer loaded" on its own leaves out the thing a person
+        wants to know, which is whether it happened before or after their app stopped working.
+        """
+        needs = declared_models(manifest)
+        prefers = declared_models(manifest, "prefers")
+        if not needs and not prefers:
+            return None
+        state = self.models_now()
+        if state is None:
+            return {"needs": needs, "unmet": None, "lost": {}, "since": None,
+                    "prefers": [{"kind": kind, "loaded": None} for kind in prefers]}
+        unmet = unmet_needs(needs, state["loaded"])
+        had = info.get("models") if isinstance(info.get("models"), dict) else {}
+        lost = {need: had[need] for need in unmet if need in had}
+        noticed = info.get("unmetSince") if isinstance(info.get("unmetSince"), (int, float)) else None
+        if unmet and noticed is None:
+            noticed = time.time()
+            self.remember_unmet(ident, noticed)
+        elif not unmet and noticed is not None:
+            noticed = None
+            self.remember_unmet(ident, None)
+        return {"needs": needs, "unmet": unmet, "lost": lost, "since": noticed,
+                "prefers": prefers_json(prefers, state["loaded"])}
+
+    def remember_unmet(self, ident, when):
+        """Keep, or clear, the moment a running app's need was first seen to go unmet."""
+        record = self.app_dir(ident) / "process.json"
+        try:
+            info = read_json(record)
+        except (FarmError, OSError, ValueError):
+            return
+        if when is None:
+            info.pop("unmetSince", None)
+        else:
+            info["unmetSince"] = when
+        try:
+            atomic_write(record, json.dumps(info) + "\n")
+        except OSError:
+            pass
+
+    def models_now(self, settings=None, force=False):
+        """One look at the device's models per command, shared by every app that asks.
+
+        Best effort: status and doctor say what they can about an app whether or not the Tiiny is
+        reachable, so a device that will not answer leaves them without model news rather than
+        without an answer.
+        """
+        if self.seen_models is not None and not force:
+            return self.seen_models
+        settings = settings or self.device_settings()
+        if not settings:
+            return None
+        try:
+            self.seen_models = self.model_state(settings)
+        except (FarmError, OSError, ValueError):
+            self.seen_models = None
+        return self.seen_models
+
+    def check_models(self, ident, manifest, load=False, as_json=False):
+        """What this app needs that the Tiiny does not have loaded, and the offer to load it.
+
+        Jason, 2026-09-14: "we launched an app that requires a model but the model is not loaded so
+        the app won't work." An app that declares a kind of model and is started without one runs
+        and answers every message with an error, which looks like a broken app rather than an empty
+        NPU. So the check happens before anything is launched.
+
+        Returns the needs still unmet. Empty means the app is good to start.
+        """
+        needs = declared_models(manifest)
+        prefers = declared_models(manifest, "prefers")
+        if not needs and not prefers:
+            return []
+        settings = self.device_settings()
+        if not settings and not needs:
+            return []  # Nothing to check against, and a preference is never a reason to stop.
+        if not settings:
+            raise FarmError(f"{ident} needs " + join_words(needs) + " on your Tiiny, and no Tiiny"
+                            " is on file. Run farm device --find, then farm device."
+                            f" Or start it anyway with: farm start {ident} --no-model-check")
+        state = self.models_now(settings, force=True)
+        if state is None:
+            if not needs:
+                return []
+            raise FarmError(f"{ident} needs " + join_words(needs) + " on your Tiiny, and the farm"
+                            " could not ask your Tiiny what it has loaded. Run farm doctor."
+                            f" Or start it anyway with: farm start {ident} --no-model-check")
+        # A preference never stops a start; it is the sentence that saves somebody wondering why
+        # the app is doing the plainer version of its job.
+        wanted = unmet_needs(prefers, state["loaded"])
+        if wanted and not as_json:
+            print(describe_prefers(manifest["name"], wanted))
+        missing = unmet_needs(needs, state["loaded"])
+        if not missing:
+            return []
+        loaded = [describe_model(row) for row in state["loaded"]]
+        print(f"{manifest['name']} needs " + join_words(missing) + " on your Tiiny, and "
+              + ("nothing is loaded." if not loaded else
+                 "what is loaded is " + join_words(loaded) + "."))
+        if as_json:
+            return missing
+        for need in list(missing):
+            if self.offer_model(state, need, load=load):
+                missing.remove(need)
+        if missing:
+            print(f"Start it anyway with: farm start {ident} --no-model-check")
+        return missing
+
+    def offer_model(self, state, need, load=False):
+        """Offer to load one model for one unmet need, and load it if the answer is yes."""
+        free = state["npu"]["available"]
+        choice, of_kind = pick_model(state["downloaded"], need, free)
+        if not of_kind:
+            print(f"Your Tiiny has no {need} model downloaded, so there is nothing to load."
+                  " Download one from TiinyOS.")
+            return False
+        if choice is None:
+            costs = join_words([describe_model(row) for row in of_kind])
+            print(f"Your Tiiny has {costs} for {need}, and only"
+                  f" {describe_units(free)} free. Stop a model with TiinyOS and try again.")
+            return False
+        if len(of_kind) > 1 and not load and interactive():
+            for number, row in enumerate(of_kind, 1):
+                fits = "" if row["units"] is None or free is None or row["units"] <= free \
+                    else " (will not fit)"
+                print(f"{number}. {describe_model(row)}{fits}")
+            chosen, answer = ask_which(f'Load which for {need}? A number, or Enter to leave it. ',
+                                       len(of_kind))
+            if not chosen:
+                if answer:
+                    print(f"There is no {answer} in that list.")
+                return False
+            choice = of_kind[chosen[0]]
+            if choice["units"] is not None and free is not None and choice["units"] > free:
+                print(f"{choice['id']} needs {describe_units(choice['units'])} and only"
+                      f" {describe_units(free)} are free.")
+                return False
+        elif not load:
+            answer = ask_yes(f"Load {choice['id']} for {need} now? [Y/n] ")
+            if answer is None:
+                print(f"Nothing is there to answer, so nothing was loaded. Run: farm models"
+                      " to see what your Tiiny has.")
+                return False
+            if not answer:
+                return False
+        settings = self.require_device()
+        if not self.load_model(settings, choice):
+            return False
+        self.seen_models = None
+        fresh = self.models_now(settings, force=True)
+        return bool(fresh) and not unmet_needs([need], fresh["loaded"])
 
     def remove(self, ident, purge=False):
         with self.guard(ident):
@@ -2677,7 +3302,7 @@ class Farm:
 # Every command that answers a machine as well as a person. The shapes are documented in the
 # agent guide at https://tiinyapp.farm/docs/agents/ and pinned by tests/test_farm.py.
 JSON_COMMANDS = ("list", "status", "check", "doctor", "install", "update", "start", "stop",
-                 "device")
+                 "device", "models")
 
 
 def live_process(farm, ident):
@@ -2703,10 +3328,27 @@ def running_json(farm, ident):
     with farm.guard(ident):
         pid = farm.active(ident)
         _, manifest = farm.installed(ident)
-    ports = list(live_process(farm, ident).get("ports") or []) if pid else []
+    info = live_process(farm, ident) if pid else {}
+    ports = list(info.get("ports") or []) if pid else []
     return {"version": manifest["version"], "running": pid is not None, "pid": pid, "ports": ports,
             "port": ports[0] if ports else None,
-            "url": app_link(ports[0], manifest) if ports else None}
+            "url": app_link(ports[0], manifest) if ports else None,
+            "models": farm.app_models(ident, manifest, info) if pid else None}
+
+
+def models_json(farm):
+    """Everything farm models prints, in the shape the launcher reads."""
+    state = farm.models()
+    return {"command": "models", "npu": state["npu"], "pending": state["pending"],
+            "loaded": [model_json(row) for row in state["loaded"]],
+            "downloaded": [model_json(row) for row in state["downloaded"]]}
+
+
+def model_json(row):
+    """One model, with the farm's word for its kind beside the device's own."""
+    return {"id": row["id"], "kind": row["kind"], "capability": row["capability"],
+            "units": row["units"], "state": row["state"], "port": row["port"],
+            "seconds": row["seconds"]}
 
 
 def name_the_app(farm, verb):
@@ -2787,13 +3429,30 @@ def json_command(farm, args, ident):
         return {"command": "update", "id": app_id(ident),
                 "updated": live["version"] != before["version"], "previous": before["version"],
                 "available": available or None, **live}
+    if args.command == "models":
+        return models_json(farm)
     if args.command == "start":
         if ident is None:
             raise FarmError(name_the_app(farm, "start"))
         with farm.guard(ident):
             already = bool(farm.active(ident))
-        farm.start(ident, port=args.port, python=args.python)
-        return {"command": "start", "id": app_id(ident), "already": already,
+        missing = farm.start(ident, port=args.port, python=args.python, load=args.load,
+                             model_check=not args.no_model_check, as_json=True)
+        if missing:
+            # Nothing was launched, so there is no process to describe, only what is missing.
+            state = farm.models_now() or {"loaded": [], "downloaded": []}
+            with farm.guard(ident):
+                _, manifest = farm.installed(ident)
+            return {"command": "start", "id": app_id(ident), "ok": False, "started": False,
+                    "already": already,
+                    "prefers": prefers_json(declared_models(manifest, "prefers"), state["loaded"]),
+                    "missing": [{"kind": need,
+                                 "loaded": [row["id"] for row in state["loaded"]
+                                            if row["kind"] == need or row["id"] == need],
+                                 "available": [row["id"] for row in state["downloaded"]
+                                               if row["kind"] == need or row["id"] == need]}
+                                for need in missing]}
+        return {"command": "start", "id": app_id(ident), "already": already, "started": True,
                 **running_json(farm, ident), "log": str(farm.app_dir(ident) / "farm.log")}
     if ident is None:
         raise FarmError(name_the_app(farm, "stop"))
@@ -2805,6 +3464,18 @@ def json_command(farm, args, ident):
 
 def run_json(farm, args):
     """One JSON object on stdout and nothing else; the prose a person would read goes to stderr."""
+    if args.command == "models" and args.watch:
+        # A watch is a stream of objects rather than one answer, so each change goes to stdout as
+        # it happens. Wrapping it the usual way would send every one of them to standard error and
+        # leave the launcher reading nothing until the watch ended.
+        try:
+            farm.watch_models(as_json=True, interval=args.interval)
+        except (FarmError, OSError, ValueError) as error:
+            print(json.dumps({"error": {"command": "models", "message": str(error)
+                                        if isinstance(error, FarmError) else
+                                        f"{type(error).__name__}; check the device settings."}}))
+            return 1
+        return 0
     ident = getattr(args, "id", None)
     try:
         # Everything the command prints is the running commentary, not the answer.
@@ -2858,6 +3529,11 @@ def main(argv=None):
         if name == "start":
             command.add_argument("--port", type=int, help="Override the app's primary listening port")
             command.add_argument("--python", help="Run this app with this Python, and keep it for later starts")
+            command.add_argument("--load", action="store_true",
+                                 help="Load any model the app needs without asking first")
+            command.add_argument("--no-model-check", action="store_true",
+                                 help="Start even if the models the app needs are not loaded"
+                                      " (or set FARM_NO_MODEL_CHECK=1)")
         if name == "remove":
             command.add_argument("--purge", action="store_true", help="Also delete saved data")
     device = commands.add_parser("device")
@@ -2877,6 +3553,11 @@ def main(argv=None):
     status.add_argument("id", nargs="?", help="Show submission checks for this app")
     status.add_argument("--token", help="API token (otherwise FARM_TOKEN or ~/.tiinyapps/token)")
     commands.add_parser("list")
+    models = commands.add_parser("models")
+    models.add_argument("--watch", action="store_true",
+                        help="Keep looking, and say so whenever a model changes state")
+    models.add_argument("--interval", type=float, default=MODEL_POLL,
+                        help=f"Seconds between looks with --watch (default {MODEL_POLL:g})")
     commands.add_parser("doctor")
     commands.add_parser("self-update")
     check = commands.add_parser("check")
@@ -2922,8 +3603,11 @@ def main(argv=None):
             code = 0 if farm.doctor() else 1
         elif args.command == "self-update":
             farm.self_update()
+        elif args.command == "models":
+            farm.watch_models(interval=args.interval) if args.watch else farm.models()
         elif args.command == "start":
-            farm.start(args.id, port=args.port, python=args.python)
+            farm.start(args.id, port=args.port, python=args.python, load=args.load,
+                       model_check=not args.no_model_check)
         elif args.command == "stop":
             farm.stop(args.id)
         else:

@@ -116,8 +116,50 @@ missing. This is the whole shape of that file; unknown fields are refused.
 | `category` | Required. One of `assistant`, `family`, `audio`, `developer-tools`, `library` |
 | `entry` | Required. `null` for a library, a command string, `{"command": "..."}`, or `{"python": "package.module", "args": []}` |
 | `permissions` | Required. Any of `microphone`, `files`, `network`, `device`. Use `[]` for none |
+| `requires.device.models` | Required. The kinds of model your app cannot work without, or exact model ids. Use `[]` for none |
+| `requires.device.prefers` | Optional. The kinds your app is better with and works without. Never stops a start |
+| `requires.device.npuUnits` | Required. Roughly what those models cost on the NPU, as a whole number. `0` when the app needs none |
 | `links` | Optional. `repo`, `homepage` and `video` only, all HTTPS |
 | `media` | Optional. `icon`, `header` and `screenshots`, as paths inside the project |
+
+### models is what you cannot work without, prefers is the rest
+
+There are two lists and the difference is what the farm does about them.
+
+`requires.device.models` is a promise. The farm refuses to start an app whose declared models are
+not loaded, and offers to load them. Declare what your app genuinely cannot do its job without, and
+nothing else. Story Lantern cannot tell a story without a chat model, so it says `chat`.
+
+`requires.device.prefers` is the rest: the kinds your app uses when they are there and works
+without when they are not. It never stops a start. The farm prints one line as the app starts,
+shows it as a hint in `farm status` and `farm doctor`, and carries it in `--json` as
+`prefers: [{"kind": ..., "loaded": ...}]`.
+
+```
+Daybreak works better with embedding, image and rerank models loaded, and is starting without them.
+```
+
+Daybreak is the worked example. It reads the news and writes it up, which it cannot do without a
+chat model, so `models` is `["chat"]`. It also embeds every article, illustrates each story and
+reranks its search results, and its own code falls back to title overlap, no picture and vault order
+when those are missing. Those three are `prefers`. Put a kind in `models` only if your app is
+broken without it, because anything in that list is something a person has to load before they can
+run your app at all.
+
+`npuUnits` beside them is a rough figure for what your required models cost.
+
+| Write | To mean |
+| --- | --- |
+| `"chat"` | Any loaded model the device calls `main` |
+| `"embedding"`, `"rerank"`, `"image"`, `"ocr"`, `"music"` | Any loaded model of that kind, same word on both sides |
+| `"tts"` | Any loaded model the device calls `voice` |
+| `"asr"` | Any loaded model the device calls `audio` |
+| `"Tongyi-MAI/Z-Image-Turbo"` | That model and no other. Anything with a slash in it is read as a model id |
+
+Name an exact model only when your app really does depend on that one, because a person who has a
+different model of the same kind loaded will be told to load yours as well, and both will sit in
+the NPU at once. `npuUnits` beside it is a rough figure for what your models cost, which the farm
+prints at install so somebody can see whether their Tiiny has room.
 
 The command packs the current folder into `<id>-<version>.tar.gz`, skipping `.git`,
 `node_modules`, `__pycache__` and `.venv`, refuses any single file over 50 MB and a packed archive

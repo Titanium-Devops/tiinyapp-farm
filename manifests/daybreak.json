@@ -25,8 +25,15 @@
       8811
     ],
     "device": {
-      "models": [],
-      "npuUnits": 0
+      "models": [
+        "chat"
+      ],
+      "npuUnits": 28,
+      "prefers": [
+        "embedding",
+        "image",
+        "rerank"
+      ]
     }
   },
   "permissions": [

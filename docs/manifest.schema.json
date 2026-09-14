@@ -233,6 +233,14 @@
             "npuUnits": {
               "type": "integer",
               "minimum": 0
+            },
+            "prefers": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           }
         }

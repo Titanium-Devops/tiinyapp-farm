@@ -26,7 +26,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 
 import farm.farm as farm_module
-from farm.farm import (DEVICE_PORT, DEVICE_PROBE, Farm, FarmError, MODELS_PROBE,
+from farm.farm import (DEVICE_PORT, DEVICE_PROBE, Farm, FarmError, MODEL_KINDS, MODELS_PROBE,
                        describe_size, main, python_candidates)
 
 # The three ways the finder reaches the network, held before any test patches them, so a test about
@@ -70,6 +70,30 @@ ON_THE_CABLE = {"serial": "TNYM26072400300011Q", "name": "jason's Tiiny",
                 "address": "172.17.7.177", "via": "cable", "base": "http://172.17.7.177/v1",
                 "interfaces": [{"interface": "usb0", "address": "172.17.7.177"}],
                 "addresses": ["172.17.7.177"]}
+
+
+def a_model(ident, kind, units, state="running", seconds=None, port=None):
+    """One row of the shape Farm.model_state builds, as the device would have described it."""
+    return {"id": ident, "kind": kind, "capability": MODEL_KINDS.get(kind, kind), "units": units,
+            "state": state, "port": port, "seconds": seconds}
+
+
+# Recorded from Jason's Tiiny on 2026-09-14: four models loaded and 68 of 100 NPU units in use.
+LOADED = [a_model("Qwen/Qwen3-8B", "chat", 28), a_model("Qwen/Qwen3-Embedding-0.6B", "embedding", 1),
+          a_model("Tongyi-MAI/Z-Image-Turbo", "image", 32),
+          a_model("Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", "tts", 7)]
+DOWNLOADED = [a_model("Qwen/Qwen3-30B-A3B-Instruct", "chat", 55, "downloaded", seconds=30),
+              a_model("openai/gpt-oss-20b", "chat", 32, "downloaded", seconds=20),
+              a_model("Qwen/Qwen3-ASR-1.7B", "asr", 7, "downloaded", seconds=10)]
+
+
+def a_tiiny(loaded=(), downloaded=(), total=100, used=None, pending=()):
+    """What Farm.model_state hands back, without a Tiiny in the room."""
+    loaded = [dict(row) for row in loaded]
+    used = sum(row["units"] or 0 for row in loaded) if used is None else used
+    return {"loaded": loaded, "downloaded": [dict(row) for row in downloaded],
+            "pending": list(pending),
+            "npu": {"total": total, "used": used, "available": max(0, total - used)}}
 
 
 def seen(records, blocked=False, moved=None, python=None):
@@ -382,6 +406,10 @@ class FarmTests(unittest.TestCase):
                              entry={"python": "fake", "args": []})
         self.manifest["requires"]["python"] = "3.9"
         self.manifest["requires"]["ports"] = []
+        # The app most of these tests start needs nothing loaded on a Tiiny. The ones about models
+        # say what they need, because an app that declares one and is started without it is now
+        # refused, which is the whole point of that check.
+        self.manifest["requires"]["device"] = {"models": [], "npuUnits": 0}
         self.manifest.pop("health", None)
         self.manifest.pop("port", None)  # The app the other tests use takes the default, TIINYAPP_PORT.
         self.output = io.StringIO()
@@ -1450,13 +1478,618 @@ while True: time.sleep(0.1)
         self.assertIn('TIINYAPP_PORT', message)
 
     def test_failed_start_points_at_farm_device_when_the_app_needs_one(self):
-        """Story Lantern dies on a missing device; the log says nothing about farm device."""
+        """Story Lantern dies on a missing device; the log says nothing about farm device.
+
+        Started past the model check, because that check is what stops an app like this one
+        reaching a launch at all now, and this is about the launch that fails anyway.
+        """
         self.manifest['requires']['device'] = {'models': ['chat'], 'npuUnits': 1}
         self.make_release(code='raise SystemExit(1)\n')
         self.install()
         with self.assertRaises(FarmError) as error:
-            self.farm.start('fake-app')
+            self.farm.start('fake-app', model_check=False)
         self.assertIn('run farm device', str(error.exception))
+
+    def needs_a_model(self, *kinds, units=1):
+        """Install the fixture app as one that declares it needs these kinds loaded."""
+        self.manifest["requires"]["device"] = {"models": list(kinds), "npuUnits": units}
+        self.save_manifest()
+        self.install()
+
+    def test_a_preferred_model_that_is_missing_is_a_line_and_not_a_refusal(self):
+        """Jason's decision: Daybreak declares chat, because that is what it cannot work without,
+        and says a sentence about the rest rather than refusing to run the plainer version."""
+        self.configure_device()
+        self.manifest["requires"]["device"] = {"models": ["chat"], "npuUnits": 28,
+                                               "prefers": ["embedding", "image", "rerank"]}
+        self.save_manifest()
+        self.install()
+        only_chat = a_tiiny([a_model("Qwen/Qwen3-8B", "chat", 28)], DOWNLOADED)
+        with patch.object(self.farm, "model_state", return_value=only_chat):
+            self.farm.start("fake-app")
+        self.assertIsNotNone(self.farm.active("fake-app"))
+        self.assertIn("Fake app works better with embedding, image and rerank models loaded, and"
+                      " is starting without them.", self.output.getvalue())
+        self.assertNotIn("was not started", self.output.getvalue())
+
+    def test_one_preferred_model_reads_as_one(self):
+        self.configure_device()
+        self.manifest["requires"]["device"] = {"models": [], "npuUnits": 0, "prefers": ["tts"]}
+        self.save_manifest()
+        self.install()
+        with patch.object(self.farm, "model_state",
+                          return_value=a_tiiny([a_model("Qwen/Qwen3-8B", "chat", 28)], [])):
+            self.farm.start("fake-app")
+        self.assertIn("Fake app works better with a tts model loaded, and is starting without one.",
+                      self.output.getvalue())
+        self.assertIsNotNone(self.farm.active("fake-app"))
+
+    def test_a_preferred_model_that_is_loaded_is_said_nothing_about(self):
+        self.configure_device()
+        self.manifest["requires"]["device"] = {"models": ["chat"], "npuUnits": 28,
+                                               "prefers": ["embedding"]}
+        self.save_manifest()
+        self.install()
+        with patch.object(self.farm, "model_state", return_value=a_tiiny(LOADED, DOWNLOADED)):
+            self.farm.start("fake-app")
+        self.assertNotIn("works better with", self.output.getvalue())
+
+    def test_the_machine_answer_carries_what_an_app_is_better_with(self):
+        self.configure_device()
+        self.manifest["requires"]["device"] = {"models": ["chat"], "npuUnits": 28,
+                                               "prefers": ["embedding", "image"]}
+        self.save_manifest()
+        self.install()
+        answer = io.StringIO()
+        state = a_tiiny([a_model("Tongyi-MAI/Z-Image-Turbo", "image", 32)], DOWNLOADED)
+        with patch("farm.farm.Farm", return_value=self.farm), \
+                patch.object(self.farm, "model_state", return_value=state), \
+                contextlib.redirect_stdout(answer):
+            self.assertEqual(main(["start", "fake-app", "--json", "--no-update-check"]), 1)
+        payload = json.loads(answer.getvalue())
+        self.assertFalse(payload["started"])
+        self.assertEqual(payload["prefers"], [{"kind": "embedding", "loaded": False},
+                                              {"kind": "image", "loaded": True}])
+        self.assertEqual([row["kind"] for row in payload["missing"]], ["chat"])
+        # And on a start that worked, under the running app's row.
+        self.farm.seen_models = None
+        with patch.object(self.farm, "model_state",
+                          return_value=a_tiiny(LOADED, DOWNLOADED)):
+            self.farm.start("fake-app")
+            self.farm.seen_models = None
+            row = next(iter(self.farm.status_rows()))
+        self.assertEqual(row["models"]["prefers"], [{"kind": "embedding", "loaded": True},
+                                                    {"kind": "image", "loaded": True}])
+
+    def test_status_and_doctor_treat_a_preference_as_a_hint(self):
+        self.configure_device()
+        self.manifest["requires"]["device"] = {"models": ["chat"], "npuUnits": 28,
+                                               "prefers": ["embedding"]}
+        self.save_manifest()
+        self.install()
+        only_chat = a_tiiny([a_model("Qwen/Qwen3-8B", "chat", 28)], DOWNLOADED)
+        with patch.object(self.farm, "model_state", return_value=only_chat):
+            self.farm.start("fake-app")
+            self.farm.seen_models = None
+            self.farm.status()
+        self.assertIn("fake-app works better with embedding loaded.", self.output.getvalue())
+        self.farm.seen_models = None
+        with patch.object(self.farm, "probe_device", return_value=(0, "172.17.7.177", (3, 14))), \
+                patch("farm.farm.python_candidates", return_value=[]), \
+                patch.object(self.farm, "device_models", return_value=("ok", ["qwen3-4b"])), \
+                patch.object(self.farm, "model_state", return_value=only_chat):
+            self.assertTrue(self.farm.doctor())
+        self.assertIn("fake-app works better with embedding loaded, and works without.",
+                      self.output.getvalue())
+        hint = [note for note in self.farm.findings if note.get("prefers")][0]
+        self.assertTrue(hint["ok"])
+
+    def test_a_prefers_list_has_to_be_kinds(self):
+        from farm.farm import validate_manifest
+        good = copy.deepcopy(self.manifest)
+        good["requires"]["device"]["prefers"] = ["embedding", "image"]
+        validate_manifest(good, "fake-app")
+        for bad in ("embedding", [""], [3], {}):
+            broken = copy.deepcopy(self.manifest)
+            broken["requires"]["device"]["prefers"] = bad
+            with self.assertRaises(FarmError) as error:
+                validate_manifest(broken, "fake-app")
+            self.assertIn("prefers list must be kinds of model", str(error.exception))
+
+    def test_an_install_says_what_an_app_is_better_with(self):
+        from farm.farm import describe_requirements
+        said = describe_requirements({"python": "3.9", "ports": [],
+                                      "device": {"models": ["chat"], "npuUnits": 28,
+                                                 "prefers": ["embedding", "image"]}})
+        self.assertEqual(said, "Python 3.9 or newer, your Tiiny, for chat, 28 NPU units."
+                               " Better with embedding and image")
+
+    def test_start_refuses_when_the_kind_it_needs_is_not_loaded(self):
+        self.configure_device()
+        self.needs_a_model("chat")
+        state = a_tiiny([a_model("Qwen/Qwen3-Embedding-0.6B", "embedding", 1)], DOWNLOADED)
+        with patch.object(self.farm, "model_state", return_value=state), \
+                patch("farm.farm.interactive", return_value=False):
+            with self.assertRaises(FarmError) as error:
+                self.farm.start("fake-app")
+        printed = self.output.getvalue()
+        self.assertIn("Fake app needs chat on your Tiiny, and what is loaded is"
+                      " embedding Qwen/Qwen3-Embedding-0.6B 1 unit.", printed)
+        self.assertIn("Start it anyway with: farm start fake-app --no-model-check", printed)
+        self.assertIn("your Tiiny has no chat model loaded", str(error.exception))
+        self.assertIsNone(self.farm.active("fake-app"))
+
+    def test_start_is_happy_when_any_model_of_the_kind_is_loaded(self):
+        self.configure_device()
+        self.needs_a_model("chat", "tts")
+        with patch.object(self.farm, "model_state", return_value=a_tiiny(LOADED, DOWNLOADED)):
+            self.farm.start("fake-app")
+        self.assertIsNotNone(self.farm.active("fake-app"))
+        self.assertNotIn("needs chat", self.output.getvalue())
+
+    def test_a_manifest_may_name_one_exact_model_instead_of_a_kind(self):
+        """A need with a slash in it is a model id, because that is what a model id looks like."""
+        self.configure_device()
+        self.needs_a_model("chat", "Tongyi-MAI/Z-Image-Turbo")
+        with patch.object(self.farm, "model_state", return_value=a_tiiny(LOADED, DOWNLOADED)):
+            self.farm.start("fake-app")
+        self.assertIsNotNone(self.farm.active("fake-app"))
+
+    def test_an_exact_model_that_is_not_the_one_loaded_is_not_a_match(self):
+        self.configure_device()
+        self.needs_a_model("Tongyi-MAI/Z-Image-Turbo-Plus")
+        with patch.object(self.farm, "model_state", return_value=a_tiiny(LOADED, DOWNLOADED)), \
+                patch("farm.farm.interactive", return_value=False):
+            with self.assertRaises(FarmError):
+                self.farm.start("fake-app")
+        self.assertIn("Fake app needs Tongyi-MAI/Z-Image-Turbo-Plus on your Tiiny",
+                      self.output.getvalue())
+        self.assertIsNone(self.farm.active("fake-app"))
+
+    def test_start_load_loads_the_cheapest_model_that_fits_and_then_starts(self):
+        self.configure_device()
+        self.needs_a_model("chat")
+        empty = a_tiiny([], DOWNLOADED)
+        full = a_tiiny([a_model("openai/gpt-oss-20b", "chat", 32)], DOWNLOADED)
+        with patch.object(self.farm, "model_state", side_effect=[empty, empty, full, full]), \
+                patch.object(self.farm, "gateway", return_value={"message": "start loading"}) as asked, \
+                patch("farm.farm.time.sleep"):
+            self.farm.start("fake-app", load=True)
+        self.assertEqual(asked.call_args.args[1:3],
+                         ("POST", "/api/v1/models/openai%2Fgpt-oss-20b/start"))
+        printed = self.output.getvalue()
+        self.assertIn("Loading openai/gpt-oss-20b for chat. Your Tiiny says that one takes about"
+                      " 20 seconds.", printed)
+        self.assertIn("openai/gpt-oss-20b is loaded.", printed)
+        self.assertIsNotNone(self.farm.active("fake-app"))
+
+    def test_start_asks_before_loading_and_takes_no_for_an_answer(self):
+        self.configure_device()
+        self.needs_a_model("asr")
+        state = a_tiiny([], DOWNLOADED)
+        with patch.object(self.farm, "model_state", return_value=state), \
+                patch("farm.farm.interactive", return_value=True), \
+                patch("builtins.input", return_value="n") as asked:
+            with self.assertRaises(FarmError):
+                self.farm.start("fake-app")
+        self.assertEqual(asked.call_args.args[0], "Load Qwen/Qwen3-ASR-1.7B for asr now? [Y/n] ")
+        self.assertIsNone(self.farm.active("fake-app"))
+
+    def test_start_numbers_them_when_the_tiiny_has_several_of_that_kind(self):
+        self.configure_device()
+        self.needs_a_model("chat")
+        empty = a_tiiny([], DOWNLOADED)
+        full = a_tiiny([a_model("Qwen/Qwen3-30B-A3B-Instruct", "chat", 55)], DOWNLOADED)
+        with patch.object(self.farm, "model_state", side_effect=[empty, empty, full, full]), \
+                patch("farm.farm.interactive", return_value=True), \
+                patch("builtins.input", return_value="1"), \
+                patch.object(self.farm, "gateway", return_value={"message": "start loading"}), \
+                patch("farm.farm.time.sleep"):
+            self.farm.start("fake-app")
+        printed = self.output.getvalue()
+        self.assertIn("1. chat Qwen/Qwen3-30B-A3B-Instruct 55 units", printed)
+        self.assertIn("2. chat openai/gpt-oss-20b 32 units", printed)
+        self.assertIsNotNone(self.farm.active("fake-app"))
+
+    def test_a_model_that_will_not_fit_the_npu_is_not_offered(self):
+        self.configure_device()
+        self.needs_a_model("chat")
+        busy = [a_model("Tongyi-MAI/Z-Image-Turbo", "image", 32),
+                a_model("Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", "tts", 36)]
+        state = a_tiiny(busy, [DOWNLOADED[0]])
+        with patch.object(self.farm, "model_state", return_value=state), \
+                patch("farm.farm.interactive", return_value=False), \
+                patch.object(self.farm, "gateway") as never:
+            with self.assertRaises(FarmError):
+                self.farm.start("fake-app")
+        never.assert_not_called()
+        self.assertIn("Your Tiiny has chat Qwen/Qwen3-30B-A3B-Instruct 55 units for chat, and only"
+                      " 32 units free.", self.output.getvalue())
+
+    def test_a_kind_the_tiiny_has_never_downloaded_says_so(self):
+        self.configure_device()
+        self.needs_a_model("image")
+        with patch.object(self.farm, "model_state", return_value=a_tiiny([], DOWNLOADED)), \
+                patch("farm.farm.interactive", return_value=False):
+            with self.assertRaises(FarmError):
+                self.farm.start("fake-app")
+        self.assertIn("Your Tiiny has no image model downloaded, so there is nothing to load.",
+                      self.output.getvalue())
+
+    def test_no_model_check_starts_it_anyway(self):
+        """For somebody who knows better than the farm does. It still writes down what was loaded,
+        because that is what lets status say later that a model went away."""
+        self.configure_device()
+        self.needs_a_model("chat")
+        empty = a_tiiny([], DOWNLOADED)
+        with patch.object(self.farm, "model_state", return_value=empty):
+            self.farm.start("fake-app", model_check=False)
+        self.assertIsNotNone(self.farm.active("fake-app"))
+        self.assertNotIn("needs chat on your Tiiny", self.output.getvalue())
+        self.farm.stop("fake-app")
+        self.farm.seen_models = None
+        with patch.dict(os.environ, {"FARM_NO_MODEL_CHECK": "1"}), \
+                patch.object(self.farm, "model_state", return_value=empty):
+            self.farm.start("fake-app")
+        self.assertIsNotNone(self.farm.active("fake-app"))
+        self.assertNotIn("needs chat on your Tiiny", self.output.getvalue())
+
+    def test_start_answers_a_machine_with_what_is_missing_and_never_asks(self):
+        self.configure_device()
+        self.needs_a_model("chat")
+        answer = io.StringIO()
+        state = a_tiiny([a_model("Qwen/Qwen3-Embedding-0.6B", "embedding", 1)], DOWNLOADED)
+        with patch("farm.farm.Farm", return_value=self.farm), \
+                patch.object(self.farm, "model_state", return_value=state), \
+                patch("builtins.input", side_effect=AssertionError("asked a question")), \
+                contextlib.redirect_stdout(answer):
+            self.assertEqual(main(["start", "fake-app", "--json", "--no-update-check"]), 1)
+        payload = json.loads(answer.getvalue())
+        self.assertFalse(payload["started"])
+        self.assertEqual(payload["missing"], [{
+            "kind": "chat", "loaded": [],
+            "available": ["Qwen/Qwen3-30B-A3B-Instruct", "openai/gpt-oss-20b"]}])
+        self.assertIsNone(self.farm.active("fake-app"))
+
+    def test_watch_says_when_a_model_is_loaded_unloaded_or_changes(self):
+        self.configure_device()
+        chat = a_model("Qwen/Qwen3-8B", "chat", 28)
+        looks = [a_tiiny([]), a_tiiny([chat]),
+                 a_tiiny([dict(chat, state="stopping")]), a_tiiny([])]
+        with patch.object(self.farm, "model_state", side_effect=looks), \
+                patch("farm.farm.time.sleep") as slept, \
+                patch("farm.farm.time.strftime", return_value="16:10:00"):
+            self.farm.watch_models(rounds=4)
+        printed = self.output.getvalue()
+        self.assertIn("Watching your Tiiny's models, asking every 3 seconds. Ctrl-C to stop.",
+                      printed)
+        self.assertIn("16:10:00 Qwen/Qwen3-8B is loaded for chat, 28 units, 28 of 100 NPU units"
+                      " in use.", printed)
+        self.assertIn("16:10:00 Qwen/Qwen3-8B for chat is stopping, 28 of 100 NPU units in use.",
+                      printed)
+        self.assertIn("16:10:00 Qwen/Qwen3-8B for chat is not loaded any more, 0 of 100 NPU units"
+                      " in use.", printed)
+        self.assertEqual([held.args[0] for held in slept.call_args_list], [3.0, 3.0, 3.0])
+
+    def test_watch_answers_a_machine_with_one_object_per_change(self):
+        self.configure_device()
+        chat = a_model("Qwen/Qwen3-8B", "chat", 28)
+        answer = io.StringIO()
+        with patch.object(self.farm, "model_state", side_effect=[a_tiiny([]), a_tiiny([chat])]), \
+                patch("farm.farm.time.sleep"), contextlib.redirect_stdout(answer):
+            self.farm.watch_models(as_json=True, rounds=2)
+        lines = [json.loads(line) for line in answer.getvalue().splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1)
+        self.assertEqual({key: lines[0][key] for key in ("command", "event", "id", "kind", "units")},
+                         {"command": "models", "event": "loaded", "id": "Qwen/Qwen3-8B",
+                          "kind": "chat", "units": 28})
+        self.assertEqual(lines[0]["npu"], {"total": 100, "used": 28, "available": 72})
+        self.assertNotIn("Watching your Tiiny", answer.getvalue())
+
+    def test_a_watched_change_reaches_stdout_and_not_standard_error(self):
+        """The launcher reads stdout. Wrapping a watch the way a one-answer command is wrapped sent
+        every change to standard error and left it reading nothing until the watch ended."""
+        self.configure_device()
+        chat = a_model("Qwen/Qwen3-8B", "chat", 28)
+        answer = io.StringIO()
+        with patch("farm.farm.Farm", return_value=self.farm), \
+                patch.object(self.farm, "model_state",
+                             side_effect=[a_tiiny([]), a_tiiny([chat]), KeyboardInterrupt()]), \
+                patch("farm.farm.time.sleep"), contextlib.redirect_stdout(answer):
+            self.assertEqual(main(["models", "--watch", "--json", "--interval", "2",
+                                   "--no-update-check"]), 0)
+        lines = [json.loads(line) for line in answer.getvalue().splitlines() if line.strip()]
+        self.assertEqual([(row["event"], row["id"]) for row in lines],
+                         [("loaded", "Qwen/Qwen3-8B")])
+
+    def test_watch_keeps_going_when_the_tiiny_stops_answering(self):
+        self.configure_device()
+        with patch.object(self.farm, "model_state",
+                          side_effect=[a_tiiny([]), FarmError("nothing answered"), a_tiiny([])]), \
+                patch("farm.farm.time.sleep"):
+            self.farm.watch_models(rounds=3)
+        self.assertIn("nothing answered", self.output.getvalue())
+
+    def test_watch_stops_on_a_keyboard_interrupt_without_a_traceback(self):
+        self.configure_device()
+        with patch.object(self.farm, "model_state", side_effect=KeyboardInterrupt()), \
+                patch("farm.farm.time.sleep"):
+            self.farm.watch_models(rounds=2)
+        self.assertIn("Stopped watching.", self.output.getvalue())
+
+    def test_the_cheapest_model_that_fits_is_the_one_offered(self):
+        from farm.farm import pick_model
+        rows = [a_model("big/one", "chat", 55, "downloaded"),
+                a_model("small/one", "chat", 20, "downloaded"),
+                a_model("other/one", "tts", 5, "downloaded")]
+        choice, of_kind = pick_model(rows, "chat", 60)
+        self.assertEqual(choice["id"], "small/one")
+        self.assertEqual([row["id"] for row in of_kind], ["big/one", "small/one"])
+        # Nothing of that kind fits what is left.
+        self.assertIsNone(pick_model(rows, "chat", 10)[0])
+        # A cost the device does not report is not a reason to refuse to offer it.
+        self.assertEqual(pick_model([a_model("no/cost", "chat", None, "downloaded")],
+                                    "chat", 1)[0]["id"], "no/cost")
+        # An exact model id picks itself.
+        self.assertEqual(pick_model(rows, "big/one", 60)[0]["id"], "big/one")
+
+    def test_status_says_when_the_model_an_app_needs_went_away(self):
+        self.configure_device()
+        self.needs_a_model("chat")
+        with patch.object(self.farm, "model_state", return_value=a_tiiny(LOADED, DOWNLOADED)):
+            self.farm.start("fake-app")
+        record = json.loads((self.app / "process.json").read_text())
+        self.assertEqual(record["models"], {"chat": "Qwen/Qwen3-8B"})
+        self.farm.seen_models = None
+        gone = a_tiiny([row for row in LOADED if row["kind"] != "chat"], DOWNLOADED)
+        with patch.object(self.farm, "model_state", return_value=gone), \
+                patch("farm.farm.time.time", return_value=record["started"] + 200):
+            self.farm.status()
+        self.assertIn("fake-app is missing chat (Qwen/Qwen3-8B) was loaded when it started and is"
+                      " not now, first noticed just now.", self.output.getvalue())
+        self.assertIsNotNone(json.loads((self.app / "process.json").read_text())["unmetSince"])
+
+    def test_status_says_nothing_about_models_when_the_need_is_met(self):
+        self.configure_device()
+        self.needs_a_model("chat")
+        with patch.object(self.farm, "model_state", return_value=a_tiiny(LOADED, DOWNLOADED)):
+            self.farm.start("fake-app")
+            self.farm.seen_models = None
+            self.farm.status()
+        self.assertNotIn("is missing", self.output.getvalue())
+
+    def test_a_need_met_again_clears_the_moment_it_was_noticed(self):
+        self.configure_device()
+        self.needs_a_model("chat")
+        with patch.object(self.farm, "model_state", return_value=a_tiiny(LOADED, DOWNLOADED)):
+            self.farm.start("fake-app")
+        gone = a_tiiny([row for row in LOADED if row["kind"] != "chat"], DOWNLOADED)
+        self.farm.seen_models = None
+        with patch.object(self.farm, "model_state", return_value=gone):
+            self.farm.status()
+        self.assertIn("unmetSince", json.loads((self.app / "process.json").read_text()))
+        self.farm.seen_models = None
+        with patch.object(self.farm, "model_state", return_value=a_tiiny(LOADED, DOWNLOADED)):
+            self.farm.status()
+        self.assertNotIn("unmetSince", json.loads((self.app / "process.json").read_text()))
+
+    def test_status_answers_a_machine_with_the_models_an_app_needs(self):
+        self.configure_device()
+        self.needs_a_model("chat")
+        with patch.object(self.farm, "model_state", return_value=a_tiiny(LOADED, DOWNLOADED)):
+            self.farm.start("fake-app")
+        gone = a_tiiny([row for row in LOADED if row["kind"] != "chat"], DOWNLOADED)
+        self.farm.seen_models = None
+        answer = io.StringIO()
+        with patch("farm.farm.Farm", return_value=self.farm), \
+                patch.object(self.farm, "model_state", return_value=gone), \
+                contextlib.redirect_stdout(answer):
+            self.assertEqual(main(["status", "--json", "--no-update-check"]), 0)
+        row = json.loads(answer.getvalue())["running"][0]
+        self.assertEqual(row["models"]["needs"], ["chat"])
+        self.assertEqual(row["models"]["unmet"], ["chat"])
+        self.assertEqual(row["models"]["lost"], {"chat": "Qwen/Qwen3-8B"})
+
+    def test_doctor_names_every_installed_app_whose_model_is_not_loaded(self):
+        self.configure_device()
+        self.needs_a_model("chat")
+        gone = a_tiiny([row for row in LOADED if row["kind"] != "chat"], DOWNLOADED)
+        with patch.object(self.farm, "probe_device", return_value=(0, "172.17.7.177", (3, 14))), \
+                patch("farm.farm.python_candidates", return_value=[]), \
+                patch.object(self.farm, "device_models", return_value=("ok", ["qwen3-4b"])), \
+                patch.object(self.farm, "model_state", return_value=gone):
+            self.assertFalse(self.farm.doctor())
+        printed = self.output.getvalue()
+        self.assertIn("fake-app needs chat and your Tiiny has not got that loaded.", printed)
+        self.assertIn("Fix: load one with: farm start fake-app --load", printed)
+        finding = [note for note in self.farm.findings
+                   if note["check"] == "models" and not note["ok"]][0]
+        self.assertEqual((finding["id"], finding["missing"]), ("fake-app", ["chat"]))
+
+    def test_doctor_is_happy_when_every_app_has_what_it_needs(self):
+        self.configure_device()
+        self.needs_a_model("chat")
+        with patch.object(self.farm, "probe_device", return_value=(0, "172.17.7.177", (3, 14))), \
+                patch("farm.farm.python_candidates", return_value=[]), \
+                patch.object(self.farm, "device_models", return_value=("ok", ["qwen3-4b"])), \
+                patch.object(self.farm, "model_state", return_value=a_tiiny(LOADED, DOWNLOADED)):
+            self.assertTrue(self.farm.doctor())
+        self.assertIn("Your Tiiny has chat Qwen/Qwen3-8B 28 units,", self.output.getvalue())
+
+    def test_how_long_ago_is_said_the_way_a_person_says_it(self):
+        from farm.farm import since
+        self.assertEqual(since(5), "just now")
+        self.assertEqual(since(45), "45 seconds ago")
+        self.assertEqual(since(200), "3 minutes ago")
+        self.assertEqual(since(60 * 60 * 5), "5 hours ago")
+        self.assertEqual(since(60 * 60 * 72), "3 days ago")
+        self.assertEqual(since(-10), "just now")
+
+    def test_models_says_what_is_loaded_what_is_not_and_what_is_free(self):
+        self.configure_device()
+        with patch.object(self.farm, "model_state", return_value=a_tiiny(LOADED, DOWNLOADED)):
+            state = self.farm.models()
+        self.assertEqual(len(state["loaded"]), 4)
+        printed = self.output.getvalue()
+        self.assertIn("Your Tiiny has 4 models loaded, using 68 of 100 NPU units.", printed)
+        self.assertIn("  chat Qwen/Qwen3-8B 28 units running", printed)
+        self.assertIn("  embedding Qwen/Qwen3-Embedding-0.6B 1 unit running", printed)
+        self.assertIn("3 more models are downloaded and not loaded:", printed)
+        self.assertIn("  asr Qwen/Qwen3-ASR-1.7B 7 units", printed)
+        self.assertIn("32 NPU units are free.", printed)
+
+    def test_models_says_so_when_the_npu_is_empty(self):
+        self.configure_device()
+        with patch.object(self.farm, "model_state", return_value=a_tiiny([], DOWNLOADED)):
+            self.farm.models()
+        self.assertIn("Your Tiiny has no models loaded, using 0 of 100 NPU units, so nothing that"
+                      " needs one will work.", self.output.getvalue())
+
+    def test_models_with_no_tiiny_on_file_says_how_to_put_one_there(self):
+        with self.assertRaises(FarmError) as error:
+            self.farm.models()
+        self.assertIn("No Tiiny is on file. Run farm device --find", str(error.exception))
+
+    def test_models_answers_a_machine_with_kinds_beside_the_devices_own_words(self):
+        self.configure_device()
+        answer = io.StringIO()
+        with patch("farm.farm.Farm", return_value=self.farm), \
+                patch.object(self.farm, "model_state", return_value=a_tiiny(LOADED, DOWNLOADED)), \
+                contextlib.redirect_stdout(answer):
+            self.assertEqual(main(["models", "--json", "--no-update-check"]), 0)
+        payload = json.loads(answer.getvalue())
+        self.assertEqual(payload["command"], "models")
+        self.assertEqual(payload["npu"], {"total": 100, "used": 68, "available": 32})
+        self.assertEqual(payload["loaded"][0], {
+            "id": "Qwen/Qwen3-8B", "kind": "chat", "capability": "main", "units": 28,
+            "state": "running", "port": None, "seconds": None})
+        self.assertEqual([row["kind"] for row in payload["downloaded"]], ["chat", "chat", "asr"])
+
+    def test_the_farm_says_chat_where_the_device_says_main(self):
+        """Measured on live firmware: the capability values are main, embedding, rerank, image,
+        ocr, voice, audio and music. A manifest says chat, tts and asr for three of those."""
+        from farm.farm import DEVICE_KINDS, model_row
+        self.assertEqual(MODEL_KINDS["chat"], "main")
+        self.assertEqual(MODEL_KINDS["tts"], "voice")
+        self.assertEqual(MODEL_KINDS["asr"], "audio")
+        self.assertEqual(DEVICE_KINDS["main"], "chat")
+        row = model_row("Qwen/Qwen3-8B", {"capabilities": ["main"], "npu_usage": 28,
+                                          "status": "running", "port": 9098}, None)
+        self.assertEqual((row["kind"], row["capability"], row["units"], row["port"]),
+                         ("chat", "main", 28, 9098))
+        # A capability the farm has no word for is passed through rather than dropped.
+        unknown = model_row("x/y", {"capabilities": ["holography"]}, None)
+        self.assertEqual((unknown["kind"], unknown["capability"]), ("holography", "holography"))
+        # A model only on disk is described by the device's own list instead.
+        listed = model_row("a/b", {}, {"capabilities": ["voice"], "npu_usage": 5,
+                                       "status": "downloaded", "load_time": 10})
+        self.assertEqual((listed["kind"], listed["units"], listed["state"], listed["seconds"]),
+                         ("tts", 5, "downloaded", 10))
+
+    def test_the_lifecycle_api_is_asked_through_the_door_that_answers(self):
+        """Measured against live firmware on 2026-09-14: port 8800 was refused and the virtual
+        host on the management port answered, which is the way round the device's docs warn of."""
+        self.configure_device()
+        answer = io.BytesIO(json.dumps({"running": []}).encode())
+        with patch("farm.farm.urlopen", return_value=answer) as asked:
+            self.farm.gateway(self.farm.device_settings(), "GET", "/api/v1/models/running")
+        request = asked.call_args.args[0]
+        self.assertEqual(request.full_url, "http://172.17.7.177/api/v1/models/running")
+        self.assertEqual(request.get_header("Host"), "p8800.api.tiiny")
+        self.assertEqual(request.get_header("Authorization"), "Bearer device-key")
+        self.assertEqual(self.farm.door, ("http://172.17.7.177", "p8800.api.tiiny"))
+
+    def test_the_lifecycle_api_falls_back_to_port_8800(self):
+        self.configure_device()
+        answer = io.BytesIO(json.dumps({"running": []}).encode())
+        with patch("farm.farm.urlopen",
+                   side_effect=[URLError(OSError(errno.ECONNREFUSED, "refused")), answer]) as asked:
+            self.farm.gateway(self.farm.device_settings(), "GET", "/api/v1/models/running")
+        self.assertEqual(asked.call_args_list[1].args[0].full_url,
+                         "http://172.17.7.177:8800/api/v1/models/running")
+        self.assertIsNone(asked.call_args_list[1].args[0].get_header("Host"))
+        self.assertEqual(self.farm.door, ("http://172.17.7.177:8800", None))
+
+    def test_a_base_that_names_its_own_port_is_taken_at_its_word(self):
+        self.configure_device(base="http://172.17.7.177:8800/v1")
+        self.assertEqual(self.farm.gateway_doors(self.farm.device_settings()),
+                         [("http://172.17.7.177:8800", None)])
+
+    def test_the_lifecycle_api_never_repeats_the_key_or_the_devices_words(self):
+        self.configure_device()
+        with patch("farm.farm.urlopen",
+                   side_effect=HTTPError("http://d", 401, "no", {}, io.BytesIO(b"{}"))):
+            with self.assertRaises(FarmError) as error:
+                self.farm.gateway(self.farm.device_settings(), "GET", "/api/v1/models/running")
+        self.assertIn("refused the key on file", str(error.exception))
+        self.assertNotIn("device-key", str(error.exception))
+        # A refusal in a 200 body, which is how this gateway reports some failures.
+        with patch("farm.farm.urlopen", return_value=io.BytesIO(
+                json.dumps({"code": 150004, "message": "The operation failed to complete."}).encode())):
+            with self.assertRaises(FarmError) as busy:
+                self.farm.gateway(self.farm.device_settings(), "GET", "/api/v1/models/running")
+        self.assertIn("The operation failed to complete.", str(busy.exception))
+
+    def test_a_code_of_zero_is_a_success_and_not_a_refusal(self):
+        self.configure_device()
+        with patch("farm.farm.urlopen",
+                   return_value=io.BytesIO(json.dumps({"code": 0, "running": []}).encode())):
+            answer = self.farm.gateway(self.farm.device_settings(), "GET", "/api/v1/models/running")
+        self.assertEqual(answer["running"], [])
+
+    def test_the_lifecycle_api_names_a_blocked_local_network(self):
+        self.configure_device()
+        with patch("farm.farm.urlopen",
+                   side_effect=URLError(OSError(errno.EHOSTUNREACH, "No route to host"))):
+            with self.assertRaises(FarmError) as error:
+                self.farm.gateway(self.farm.device_settings(), "GET", "/api/v1/models/running")
+        self.assertIn("macOS is blocking it from your local network", str(error.exception))
+
+    def test_model_state_reads_the_three_answers_the_device_keeps_apart(self):
+        self.configure_device()
+        running = {"object": "list", "pending": ["a/loading"],
+                   "running": ["Qwen/Qwen3-8B", "Qwen/Qwen3-Embedding-0.6B"],
+                   "instances": {"running": [
+                       {"model_id": "Qwen/Qwen3-8B", "capabilities": ["main"], "npu_usage": 28,
+                        "status": "running", "port": 9098}]}}
+        listed = {"object": "list", "data": [
+            {"id": "Qwen/Qwen3-8B", "capabilities": ["main"], "npu_usage": 28, "status": "running"},
+            {"id": "Qwen/Qwen3-Embedding-0.6B", "capabilities": ["embedding"], "npu_usage": 1,
+             "status": "running"},
+            {"id": "Qwen/Qwen3-ASR-1.7B", "capabilities": ["audio"], "npu_usage": 7,
+             "status": "downloaded", "load_time": 10}]}
+        units = {"npu_total": 100, "npu_used": 29, "npu_available": 71}
+        with patch.object(self.farm, "gateway", side_effect=[running, listed, units]) as asked:
+            state = self.farm.model_state(self.farm.device_settings())
+        self.assertEqual([call.args[2] for call in asked.call_args_list],
+                         ["/api/v1/models/running", "/api/v1/models/", "/api/v1/models/npu/status"])
+        self.assertEqual([(row["id"], row["kind"], row["units"]) for row in state["loaded"]],
+                         [("Qwen/Qwen3-8B", "chat", 28),
+                          ("Qwen/Qwen3-Embedding-0.6B", "embedding", 1)])
+        self.assertEqual([row["id"] for row in state["downloaded"]], ["Qwen/Qwen3-ASR-1.7B"])
+        self.assertEqual(state["pending"], ["a/loading"])
+        self.assertEqual(state["npu"], {"total": 100, "used": 29, "available": 71})
+
+    def test_free_units_are_worked_out_when_the_device_does_not_say(self):
+        self.configure_device()
+        with patch.object(self.farm, "gateway",
+                          side_effect=[{"running": []}, {"data": []},
+                                       {"npu_total": 100, "npu_used": 68}]):
+            state = self.farm.model_state(self.farm.device_settings())
+        self.assertEqual(state["npu"], {"total": 100, "used": 68, "available": 32})
+
+    def test_an_app_that_needs_a_model_is_not_started_without_a_tiiny(self):
+        """Jason, 2026-09-14: an app was launched with no chat model loaded and answered every
+        message with an error, which reads as a broken app rather than an empty NPU."""
+        self.manifest['requires']['device'] = {'models': ['chat'], 'npuUnits': 1}
+        self.save_manifest()
+        self.install()
+        with self.assertRaises(FarmError) as error:
+            self.farm.start('fake-app')
+        said = str(error.exception)
+        self.assertIn('fake-app needs chat on your Tiiny, and no Tiiny is on file.', said)
+        self.assertIn('farm start fake-app --no-model-check', said)
+        self.assertIsNone(self.farm.active('fake-app'))
 
     def test_failed_start_stays_quiet_about_a_device_that_is_configured(self):
         self.manifest['requires']['device'] = {'models': ['chat'], 'npuUnits': 1}
@@ -1465,7 +2098,7 @@ while True: time.sleep(0.1)
         self.home.mkdir(parents=True, exist_ok=True)
         (self.home / 'device.json').write_text(json.dumps({'base': 'http://d/v1', 'key': 'k'}))
         with self.assertRaises(FarmError) as error:
-            self.farm.start('fake-app')
+            self.farm.start('fake-app', model_check=False)
         self.assertNotIn('run farm device', str(error.exception))
 
     def test_status_header_names_the_status_column(self):
@@ -1666,7 +2299,8 @@ while True: time.sleep(0.1)
     def test_cli_port_option_dispatches_to_start(self):
         with patch('farm.farm.Farm', return_value=self.farm), patch.object(self.farm, 'start') as start:
             self.assertEqual(main(['start', 'fake-app', '--port', '43211']), 0)
-        start.assert_called_once_with('fake-app', port=43211, python=None)
+        start.assert_called_once_with('fake-app', port=43211, python=None, load=False,
+                                     model_check=True)
 
     def test_status_legacy_record_uses_manifest_health(self):
         self.install()
@@ -2437,7 +3071,8 @@ while True: time.sleep(0.1)
                 patch.object(self.farm, "start") as start, patch.object(self.farm, "stop") as stop:
             self.assertEqual(main(["start"]), 0)
             self.assertEqual(main(["stop"]), 0)
-        start.assert_called_once_with(None, port=None, python=None)
+        start.assert_called_once_with(None, port=None, python=None, load=False,
+                                      model_check=True)
         stop.assert_called_once_with(None)
 
     def other_python(self, name="other-python3"):
