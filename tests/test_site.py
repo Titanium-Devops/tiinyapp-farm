@@ -641,7 +641,7 @@ assert.equal(anonymous.children[0].children[0].tag, 'span');
             nav = re.search(r'<nav\b[^>]*>(.*?)</nav>', html, re.S).group(1)
             doc = Document(nav)
             anchors = [attrs for tag, attrs in doc.tags if tag == 'a']
-            self.assertEqual([attrs['href'] for attrs in anchors[:4]], ['/', '/catalog/', '/install/', '/submit/'])
+            self.assertEqual([attrs['href'] for attrs in anchors[:5]], ['/', '/catalog/', '/install/', '/docs/', '/submit/'])
             current = [attrs for attrs in anchors if attrs.get('aria-current') == 'page']
             self.assertEqual([attrs['href'] for attrs in current], [active])
             self.assertIn('on', current[0].get('class', '').split())
