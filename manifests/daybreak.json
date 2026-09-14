@@ -54,5 +54,9 @@
     "repo": "https://github.com/webdevtodayjason/daybreak",
     "homepage": "https://github.com/webdevtodayjason/daybreak"
   },
-  "updates": "auto"
+  "updates": "auto",
+  "media": {
+    "icon": "/assets/art/daybreak-icon.png",
+    "header": "/assets/art/daybreak-header.webp"
+  }
 }
