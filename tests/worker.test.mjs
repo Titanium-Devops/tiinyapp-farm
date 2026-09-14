@@ -1194,3 +1194,34 @@ test('a maker repository the farm app cannot read is asked for without a credent
   assert.equal(result.status, 'found');
   assert.equal(f.releasePulls.length, 1);
 });
+
+// docs/openapi.json is built from worker/openapi.py, and tests/test_openapi.py walks the route
+// table against it by reading the source. This is the other half of that: every documented route
+// is asked for, through the front door, and has to answer as itself rather than fall through to
+// the catch-all, with a status the document lists.
+test('openapi: every documented route answers, and answers something the document promises', async () => {
+  const loaded = spawnSync('python3', ['-c',
+    'import json, runpy; print(json.dumps(runpy.run_path("worker/openapi.py")["spec"]()))'],
+    { encoding: 'utf8' });
+  assert.equal(loaded.status, 0, loaded.stderr);
+  const spec = JSON.parse(loaded.stdout);
+  const f = fixture();
+  f.env.FARM_COORDINATOR = { idFromName: name => name, get: () => ({
+    fetch: request => createApp({ fetcher: f.fetcher, now: f.now, proofRoutes, releaseRoutes, seedRoutes, artRoutes })(request, f.env) }) };
+  const wrong = [];
+  for (const [path, item] of Object.entries(spec.paths)) {
+    if (item['x-farm-source'] === 'assets') continue;
+    for (const [method, operation] of Object.entries(item)) {
+      if (method === 'x-farm-source') continue;
+      const where = path.replace(/\{(\w+)\}/g, (_, name) =>
+        operation.parameters.find(parameter => parameter.name === name).example);
+      const response = await worker.fetch(new Request(ORIGIN + where,
+        { method: method.toUpperCase(), headers: { Origin: ORIGIN } }), f.env);
+      const body = await response.text();
+      const named = method.toUpperCase() + ' ' + path + ' answered ' + response.status;
+      if (body.includes('This route does not exist.')) wrong.push(named + ', the catch-all');
+      else if (!operation.responses[String(response.status)]) wrong.push(named + ', undocumented');
+    }
+  }
+  assert.deepEqual(wrong, []);
+});

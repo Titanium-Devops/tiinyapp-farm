@@ -391,12 +391,6 @@ def my_farm():
 <noscript><p>JavaScript is needed to load your profile settings and submission status.</p></noscript></section><script type="module" src="/assets/farm.js"></script>'''.replace('{icon("copy")}', icon("copy"))
 
 
-def agent_guide(text):
-    return f'''<section class="page agent-doc"><h1>Publish to tiinyapp.farm</h1>
-<p class="lede">Plain instructions for AI assistants and people publishing from a project folder.</p>
-<pre class="agent-guide">{e(text)}</pre></section>'''
-
-
 # The documentation pages are written as markdown in docs/site/ so that editing them
 # never means editing HTML. This is the small subset of markdown those files use.
 LIST_ITEM = re.compile(r'^(\s*)([-*]|[0-9]+\.)\s+(.*)$')
@@ -560,6 +554,8 @@ def build(source=ROOT, output=None, today=None):
     output = Path(output) if output else source / "site" / "dist"
     today = today or datetime.now(timezone.utc).date()
     render_card = runpy.run_path(str(ROOT / 'scripts/share-cards.py'))['render_card']
+    # The one description of the HTTP surface, served at /docs/openapi.json.
+    openapi = runpy.run_path(str(ROOT / 'worker/openapi.py'))['spec']
     snapshot = source / 'site/makers.json'
     makers = json.loads(snapshot.read_text()) if snapshot.exists() else []
     for maker in makers:
@@ -587,11 +583,12 @@ def build(source=ROOT, output=None, today=None):
             target.write_text(content, encoding="utf-8")
 
         apps = [app for _, app in manifests]
+        # /llms.txt is the plain-text index an assistant fetches first. The guide it points at is
+        # a documentation page like any other, at /docs/agents/.
         guide = (source / 'docs/agents.txt').read_text(encoding='utf-8')
         pages = {"/": ("App catalog", home_page(apps)), "/catalog/": ("Catalog", catalog_page(apps)),
                  "/install/": ("Install an app", steps()), "/submit/": ("Submit an app", seeds()),
-                 "/submit/done/": ("App submitted", seeds()), "/account/": ("Your apps", my_farm()),
-                 "/docs/agents/": ("Publish for a person", agent_guide(guide))}
+                 "/submit/done/": ("App submitted", seeds()), "/account/": ("Your apps", my_farm())}
         entries = doc_entries(source)
         for entry in entries:
             pages[entry['url']] = (entry['title'], doc_page(entry, entries))
@@ -624,6 +621,7 @@ def build(source=ROOT, output=None, today=None):
                                          ensure_ascii=False) + '\n')
         write('categories.json', json.dumps({'map': CATEGORIES, 'order': CATEGORY_ORDER}, ensure_ascii=False) + '\n')
         write('llms.txt', guide)
+        write('docs/openapi.json', json.dumps(openapi(), indent=2, ensure_ascii=False) + '\n')
         write('site.webmanifest', json.dumps({'name': 'tiinyapp.farm', 'short_name': 'tiinyapp.farm',
               'start_url': '/', 'display': 'standalone', 'theme_color': '#090D14', 'background_color': '#090D14',
               'icons': [{'src': '/brand/favicon-192.png', 'sizes': '192x192', 'type': 'image/png'},

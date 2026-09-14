@@ -2279,3 +2279,259 @@ while True: time.sleep(0.1)
             self.assertTrue(self.farm.doctor())
         self.assertIn("farm 0.1.9 is out and you are on 0.1.7. Run: farm self-update",
                       self.output.getvalue())
+
+    # --json: the same commands, answered to a machine. The shapes below are the ones
+    # docs/site/11-agents.md documents, so a change here is a change to that page.
+
+    def json_cli(self, *args):
+        """One --json command through main(), keeping the prose out of the test's own output."""
+        answer, prose = io.StringIO(), io.StringIO()
+        with patch("farm.farm.Farm", return_value=self.farm), \
+                contextlib.redirect_stdout(answer), contextlib.redirect_stderr(prose):
+            code = main([*args, "--json"])
+        return code, json.loads(answer.getvalue()), prose.getvalue()
+
+    def test_json_list_carries_the_state_of_every_installed_app_and_the_catalog(self):
+        self.install()
+        self.other_app(version="0.2.0")
+        code, payload, _ = self.json_cli("list")
+        self.assertEqual((code, payload["command"]), (0, "list"))
+        self.assertEqual(payload["installed"], [{"id": "fake-app", "name": "Fake app",
+                                                 "version": "0.1.0", "pitch": self.manifest["pitch"],
+                                                 "running": False, "updateAvailable": None}])
+        catalog = {row["id"]: row for row in payload["catalog"]}
+        self.assertEqual(sorted(catalog), ["fake-app", "other-app"])
+        self.assertEqual(catalog["fake-app"]["installed"], "0.1.0")
+        self.assertEqual(catalog["other-app"]["installed"], None)
+        self.assertEqual(catalog["other-app"]["release"], "ready")
+
+    def test_json_list_says_which_release_a_catalog_entry_has(self):
+        del self.manifest["release"]
+        self.save_manifest()
+        self.assertEqual(self.json_cli("list")[1]["catalog"][0]["release"], "none")
+        self.make_release()
+        self.manifest["release"]["sha256"] = "pending"
+        self.save_manifest()
+        self.assertEqual(self.json_cli("list")[1]["catalog"][0]["release"], "pending")
+
+    def test_json_install_answers_with_the_version_the_path_and_what_it_declares(self):
+        code, payload, prose = self.json_cli("install", "fake-app", "-y")
+        self.assertEqual((code, payload["installed"]), (0, True))
+        self.assertEqual(payload["command"], "install")
+        self.assertEqual(payload["version"], "0.1.0")
+        self.assertEqual(payload["path"], str(self.app / "0.1.0"))
+        self.assertFalse(payload["library"])
+        self.assertEqual(payload["permissions"], self.manifest["permissions"])
+        self.assertIn("Ready.", prose)
+        self.assertEqual((self.app / "current").read_text().strip(), "0.1.0")
+
+    def test_json_install_never_asks_and_says_so_without_yes(self):
+        with patch("builtins.input", side_effect=AssertionError("asked a question")):
+            code, payload, _ = self.json_cli("install", "fake-app")
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"]["command"], "install")
+        self.assertIn("--yes", payload["error"]["message"])
+        self.assertFalse((self.app / "current").exists())
+
+    def test_json_start_status_and_stop_carry_the_port_the_link_and_the_log(self):
+        self.manifest["requires"]["ports"] = [7861]
+        self.save_manifest()
+        self.install()
+        with patch("farm.farm.socket.create_connection", side_effect=[
+                ConnectionRefusedError(), contextlib.nullcontext()]):
+            code, started, _ = self.json_cli("start", "fake-app")
+        self.assertEqual((code, started["running"], started["already"]), (0, True, False))
+        self.assertEqual(started["ports"], [7861])
+        self.assertEqual(started["port"], 7861)
+        self.assertEqual(started["url"], "http://localhost:7861")
+        self.assertEqual(started["log"], str(self.app / "farm.log"))
+        self.assertEqual(started["pid"], self.farm.active("fake-app"))
+        row = self.json_cli("status")[1]["running"][0]
+        self.assertEqual(row["id"], "fake-app")
+        self.assertEqual((row["pid"], row["port"], row["url"]), (started["pid"], 7861, started["url"]))
+        self.assertEqual((row["version"], row["installed"]), ("0.1.0", "0.1.0"))
+        self.assertEqual((row["restartToUpdate"], row["health"], row["updateAvailable"]),
+                         (False, None, None))
+        self.assertGreaterEqual(row["uptime"], 0)
+        self.assertEqual(self.json_cli("start", "fake-app")[1]["already"], True)
+        code, stopped, _ = self.json_cli("stop", "fake-app")
+        self.assertEqual((code, stopped), (0, {"command": "stop", "id": "fake-app", "stopped": True}))
+        self.assertEqual(self.json_cli("stop", "fake-app")[1]["stopped"], False)
+        self.assertEqual(self.json_cli("status")[1], {"command": "status", "running": []})
+
+    def test_json_start_and_stop_with_no_id_name_the_apps_instead_of_asking(self):
+        self.install()
+        self.other_app(install=True)
+        with patch("builtins.input", side_effect=AssertionError("asked a question")):
+            code, payload, _ = self.json_cli("start")
+            self.assertEqual(code, 1)
+            self.assertEqual(payload["error"]["message"],
+                             "Run: farm start <id>, naming one of fake-app and other-app.")
+            self.assertEqual(self.json_cli("stop")[1]["error"]["message"], "Nothing is running.")
+
+    def test_json_check_lists_what_is_newer_and_all_takes_it(self):
+        self.install()
+        self.assertEqual(self.json_cli("check")[1],
+                         {"command": "check", "updates": [], "unreachable": [], "updated": []})
+        self.make_release("0.2.0")
+        self.manifest["release"]["notes"] = "Faster starts."
+        self.save_manifest()
+        code, payload, _ = self.json_cli("check")
+        self.assertEqual((code, payload["updated"]), (0, []))
+        self.assertEqual(payload["updates"], [{"id": "fake-app", "name": "Fake app",
+                                               "installed": "0.1.0", "available": "0.2.0",
+                                               "notes": "Faster starts.",
+                                               "updatedAt": self.manifest["updatedAt"]}])
+        self.assertEqual(self.json_cli("check", "--all")[1]["updated"], ["fake-app"])
+        self.assertEqual((self.app / "current").read_text().strip(), "0.2.0")
+
+    def test_json_update_says_what_moved_and_what_did_not(self):
+        self.install()
+        code, payload, _ = self.json_cli("update", "fake-app")
+        self.assertEqual((code, payload["updated"]), (0, False))
+        self.assertEqual((payload["previous"], payload["version"], payload["available"]),
+                         ("0.1.0", "0.1.0", None))
+        self.make_release("0.2.0")
+        code, payload, _ = self.json_cli("update", "fake-app")
+        self.assertEqual((code, payload["updated"], payload["running"]), (0, True, False))
+        self.assertEqual((payload["previous"], payload["version"], payload["available"]),
+                         ("0.1.0", "0.2.0", "0.2.0"))
+
+    def test_json_doctor_carries_every_line_it_prints_with_its_fix(self):
+        self.configure_device()
+        self.install()
+        with patch.object(self.farm, "probe_device", return_value=(0, "172.17.7.177", (3, 14))), \
+                patch("farm.farm.python_candidates", return_value=[]), \
+                patch.object(self.farm, "device_models", return_value=("refused", [])):
+            code, payload, prose = self.json_cli("doctor")
+        self.assertEqual((code, payload["ok"]), (1, False))
+        for finding in payload["findings"]:
+            self.assertIn(finding["message"], prose)
+            if finding["fix"]:
+                self.assertIn("Fix: " + finding["fix"], prose)
+        found = {finding["check"]: finding for finding in payload["findings"]}
+        self.assertEqual(found["device"]["ok"], True)
+        self.assertEqual(found["device"]["address"], "172.17.7.177")
+        self.assertEqual(found["key"]["ok"], False)
+        self.assertEqual(found["key"]["fix"],
+                         "copy the key again from TiinyOS, Settings, API Key, then run farm device.")
+        self.assertEqual(found["app"], {"check": "app", "ok": True, "fix": None, "id": "fake-app",
+                                        "message": "fake-app declares no port."})
+        self.assertNotIn("device-key", json.dumps(payload))
+
+    def test_json_doctor_names_the_app_and_the_port_something_else_is_holding(self):
+        self.configure_device()
+        self.manifest["requires"]["ports"] = [43210]
+        self.save_manifest()
+        self.install()
+        with patch.object(self.farm, "probe_device", return_value=(0, "172.17.7.177", (3, 14))), \
+                patch("farm.farm.python_candidates", return_value=[]), \
+                patch.object(self.farm, "device_models", return_value=("ok", ["qwen3-4b"])), \
+                patch.object(self.farm, "tcp_ready", return_value=True):
+            code, payload, _ = self.json_cli("doctor")
+        held = next(f for f in payload["findings"] if f["check"] == "port")
+        self.assertEqual((code, payload["ok"], held["ok"]), (1, False, False))
+        self.assertEqual((held["id"], held["port"]), ("fake-app", 43210))
+        self.assertEqual(held["fix"], "stop whatever has it, or put the app somewhere else:"
+                                      " farm start fake-app --port N.")
+        self.assertEqual(next(f for f in payload["findings"] if f["check"] == "models")["models"],
+                         ["qwen3-4b"])
+
+    def test_json_errors_use_the_sentence_a_person_would_see(self):
+        code, payload, _ = self.json_cli("start", "fake-app")
+        self.assertEqual((code, payload), (1, {"error": {"command": "start", "id": "fake-app",
+                                                         "message": "fake-app is not installed."}}))
+        self.assertEqual(self.json_cli("install", "Upper", "-y")[1]["error"]["message"],
+                         "Invalid app id; use lowercase letters, digits and dashes (not tiiny).")
+
+    def test_json_puts_one_object_on_stdout_and_the_prose_on_standard_error(self):
+        env = os.environ | {"HOME": str(self.root), "USERPROFILE": str(self.root),
+                            "FARM_CATALOG": str(self.catalog)}
+        command = [sys.executable, str(ROOT / "farm/farm.py")]
+        done = subprocess.run(command + ["install", "fake-app", "--json", "-y"],
+                              env=env, text=True, capture_output=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout)["version"], "0.1.0")
+        self.assertEqual(done.stdout.count("\n"), 1)
+        self.assertIn("Ready. Run: farm start fake-app", done.stderr)
+        done = subprocess.run(command + ["list", "--json"], env=env, text=True,
+                              capture_output=True, timeout=60)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        self.assertEqual([row["id"] for row in json.loads(done.stdout)["installed"]], ["fake-app"])
+
+    @contextlib.contextmanager
+    def catalog_offering(self, version):
+        """A local site whose catalog.json publishes this farm version, so the update notice
+        has something to say. The live site is never asked anything by a test."""
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                raw = json.dumps({"cli": version, "apps": []}).encode()
+                self.send_response(200 if self.path == "/catalog.json" else 404)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield f"http://127.0.0.1:{server.server_port}"
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    def through_a_terminal(self, arguments, origin):
+        """One farm command whose standard output really is a terminal, and what reached it.
+
+        The other on_a_terminal above patches this test's own stdout; this one gives a child
+        process a real one, which is the only way to see what a person would see."""
+        import pty
+        primary, secondary = pty.openpty()
+        env = os.environ | {"HOME": str(self.root), "USERPROFILE": str(self.root),
+                            "FARM_CATALOG": str(self.catalog), "FARM_API_ORIGIN": origin}
+        env.pop("FARM_NO_UPDATE_CHECK", None)
+        written = []
+        def drain():
+            while True:
+                try:
+                    chunk = os.read(primary, 65536)
+                except OSError:
+                    return
+                if not chunk:
+                    return
+                written.append(chunk)
+        reader = threading.Thread(target=drain, daemon=True)
+        reader.start()
+        try:
+            done = subprocess.run([sys.executable, str(ROOT / "farm/farm.py"), *arguments],
+                                  env=env, stdout=secondary, stderr=subprocess.PIPE, timeout=60)
+        finally:
+            os.close(secondary)
+            reader.join(10)
+            os.close(primary)
+        return done, b"".join(written).decode().replace("\r\n", "\n")
+
+    @unittest.skipIf(os.name == "nt", "pseudo-terminals are POSIX")
+    def test_a_terminal_asking_for_json_is_given_json_and_no_update_notice(self):
+        """Jason's farm says when a newer farm is out. That line is for a person, so it never
+        lands in the middle of an answer meant for a machine, terminal or not."""
+        self.install()
+        stamp = self.root / ".tiinyapps/update-check.json"
+        with self.catalog_offering("99.0.0") as origin:
+            done, answered = self.through_a_terminal(["list", "--json"], origin)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertEqual([row["id"] for row in json.loads(answered)["installed"]], ["fake-app"])
+            self.assertNotIn("is out and you are on", answered)
+            # It did not even look: nothing asked the site, so nothing was remembered.
+            self.assertFalse(stamp.exists())
+            # The same command without --json is where a person gets told.
+            done, said = self.through_a_terminal(["list"], origin)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertIn(f"farm 99.0.0 is out and you are on {farm_module._version()}."
+                          " Run: farm self-update", said)
+            self.assertTrue(stamp.exists())

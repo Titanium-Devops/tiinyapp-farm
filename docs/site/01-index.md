@@ -32,10 +32,12 @@ a red check. It says what the scanner refuses and why.
 ## If you are writing a tool
 
 The [API reference](/docs/api/) documents every route the farm's Worker serves, its authentication,
-its rate limits and its error shapes. If you are an AI assistant publishing on someone's behalf,
-read [Publish to tiinyapp.farm](/docs/agents/) instead; it is the same ground in the order an
-assistant needs it, and it is served at
-[https://tiinyapp.farm/llms.txt](https://tiinyapp.farm/llms.txt) as plain text.
+its rate limits and its error shapes, and [openapi.json](/docs/openapi.json) is the same surface as
+a machine-readable OpenAPI 3.1 description. If you are an AI assistant working on somebody's
+machine or against the API, read [The farm for AI assistants](/docs/agents/) instead; it is the
+same ground in the order an assistant needs it, from finding the person's Tiiny to publishing what
+they made. [https://tiinyapp.farm/llms.txt](https://tiinyapp.farm/llms.txt) is the plain-text index
+that points at both.
 
 ## The parts
 
@@ -46,3 +48,4 @@ assistant needs it, and it is served at
 | The site | Static pages built from the manifests, plus a Cloudflare Worker for the API |
 | The checks | GitHub Actions on every pull request that adds or changes a manifest |
 | The schema | [manifest.schema.json](/docs/manifest.schema.json), the file both checkers read |
+| The API description | [openapi.json](/docs/openapi.json), every route the Worker answers |
