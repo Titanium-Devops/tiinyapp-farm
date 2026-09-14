@@ -245,6 +245,23 @@ GitHub`.
 
 **A published tag never moves.** The farm records the checksum of the archive it downloaded when it listed your version. If you force-move that tag afterwards, GitHub serves different bytes under the same version, every `farm install` fails its checksum, and nobody can tell which copy they have. A fix is always a new version number.
 
+## Two fields worth filling in
+
+Neither is required and neither ever will be, but both are worth the two minutes, and the reason is
+[the launcher](/docs/launcher/): the desktop app most people will use once it ships.
+
+**An icon.** The launcher shows the catalog as a grid of icons with the name underneath, so an app
+with no icon is a blank tile beside apps that have one. Put a square PNG or WebP at `media.icon`,
+at least 256 by 256. If you have no art, write one sentence describing your app's scene on the
+submission form and press Generate art, and the farm draws an icon and a header in the house style.
+See [Art in the farm's hand](/docs/art/).
+
+**A `health` path.** Give the manifest a path such as `/health` on your first declared port,
+answering a JSON object with a `version` field. Without it, anything watching your app can only say
+it started. With it, the launcher and `farm status` can say it is ready, and they can tell a person
+when the version that is running is no longer the version on disk, which is the usual sign that an
+update needs a restart. See [`health` in the manifest reference](/docs/manifest/).
+
 ## Limits in one place
 
 | Limit | Value |
