@@ -341,6 +341,31 @@ failed, and never when output is not a terminal, so scripts never see it. `--no-
 command, or `FARM_NO_UPDATE_CHECK=1` in the environment, turns it off, and `farm doctor` reports the
 same thing among its checks.
 
+## Answering a machine with --json
+
+Eight commands take `--json`: `list`, `status`, `check`, `update`, `install`, `start`, `stop` and
+`doctor`. The command does the same work and answers one JSON object on standard output, with
+nothing else on it. Everything it would have printed goes to standard error instead, and the exit
+codes do not move.
+
+```
+farm install tiiny-brain --json -y
+farm start tiiny-brain --json
+farm doctor --json
+```
+
+No `--json` command reads standard input, so none of them can stop and ask a question. `install`
+needs `--yes`, `start` and `stop` need an app id rather than offering the chooser, and `check` lists
+what is newer without taking any of it unless you add `--all` or `--yes`. A failure answers
+`{"error": {"command": ..., "message": ...}}` carrying the same sentence you would have read, and
+exits 1. The line about a newer farm is left off a `--json` answer, and `farm doctor --json` carries
+it among its findings instead.
+
+`device`, `login`, `publish`, `release`, `remove` and `self-update` have no `--json`.
+
+Every shape is documented, with an example of each, in
+[The farm for AI assistants](/docs/agents/).
+
 ## The environment it reads
 
 | Variable | Effect |

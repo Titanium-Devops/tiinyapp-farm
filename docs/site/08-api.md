@@ -11,6 +11,13 @@ account, maker and app file routes, is handled by the Worker; everything else is
 The base is `https://tiinyapp.farm`. Responses are JSON with `Cache-Control: no-store` unless
 stated otherwise.
 
+Everything on this page is also served as a machine-readable description at
+[openapi.json](/docs/openapi.json): OpenAPI 3.1, every route with its authentication, its request
+and response shapes, its rate limits and its errors. It is built from one source in the repository,
+and a test walks the Worker's route table against it, so a route with no entry there fails the
+build. If you are an assistant rather than a person, start at
+[The farm for AI assistants](/docs/agents/).
+
 ## Authentication
 
 There are two credentials and they are not interchangeable.
@@ -21,7 +28,7 @@ previous session rather than adding one.
 
 **A bearer token.** Create one on [Your apps](/account/), copy it once, and send it as
 `Authorization: Bearer farm_...`. A token is `farm_` followed by 40 hexadecimal characters. Only
-four routes accept one:
+these routes accept one:
 
 | Method | Path |
 | --- | --- |
@@ -29,13 +36,14 @@ four routes accept one:
 | PUT | `/api/seeds/<id>` |
 | POST | `/api/media` |
 | GET | `/api/seeds/mine` |
+| GET, POST | `/api/seeds/<id>/art` |
 
 Everywhere else a token is ignored and the cookie decides. Creating and revoking tokens needs the
-cookie, so a token cannot mint another token. Tokens are stored as SHA-256 hashes, never in the
-clear, and each use records the time it was last used.
+cookie, so a token cannot mint another token, and so does checking for a new release. Tokens are
+stored as SHA-256 hashes, never in the clear, and each use records the time it was last used.
 
 **The origin rule.** Any POST, PUT, PATCH or DELETE that does not carry a bearer token on one of
-those four routes must send `Origin: https://tiinyapp.farm`, or it is refused with 403 and
+those routes must send `Origin: https://tiinyapp.farm`, or it is refused with 403 and
 `Please submit this form from tiinyapp.farm.` This is what stops another site posting with a
 visitor's cookie.
 
@@ -240,7 +248,8 @@ need no credential still work and anything further answers 503.
 | `/manifests/<id>.json` | One app manifest, the file the installer reads |
 | `/catalog.json` | `{"cli": "0.1.9", "apps": [...]}`: the newest `farm` version, and every manifest |
 | `/categories.json` | The tag to category map and the category order |
-| `/llms.txt` | The publishing guide as plain text, for assistants |
+| `/llms.txt` | The plain-text index for assistants |
+| `/docs/openapi.json` | This page as OpenAPI 3.1 |
 
 Three old paths answer 301: `/plant` to `/install/`, `/seeds` to `/submit/`, and `/farm` to
 `/account/`.

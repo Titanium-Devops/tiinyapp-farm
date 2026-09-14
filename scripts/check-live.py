@@ -29,7 +29,7 @@ FILES = [
     "/llms.txt", "/robots.txt", "/sitemap.xml", "/catalog.json", "/categories.json",
     "/site.webmanifest", "/assets/site.css", "/assets/farm.js", "/assets/session.js",
     "/brand/og-image.png", "/brand/favicon.ico", "/docs/SUBMIT.md",
-    "/docs/manifest.schema.json", "/manifests/",
+    "/docs/manifest.schema.json", "/docs/openapi.json", "/manifests/",
 ]
 REDIRECTS = {"/account/": 302}
 

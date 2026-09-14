@@ -22,6 +22,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SITE = runpy.run_path(str(ROOT / 'scripts/build-site.py'))
+SITE_SPEC = runpy.run_path(str(ROOT / 'worker/openapi.py'))['spec']()
 TODAY = date(2026, 9, 12)
 
 
@@ -249,7 +250,7 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         self.assertIn('Release check: ', account)
 
     def test_required_pages_and_byte_identical_manifests(self):
-        for path in ('index.html', 'catalog/index.html', 'install/index.html', 'submit/index.html', 'account/index.html', 'docs/agents/index.html', 'llms.txt', 'catalog.json', 'categories.json', 'manifests/index.html', 'sitemap.xml', 'robots.txt', '404.html'):
+        for path in ('index.html', 'catalog/index.html', 'install/index.html', 'submit/index.html', 'account/index.html', 'docs/agents/index.html', 'docs/openapi.json', 'llms.txt', 'catalog.json', 'categories.json', 'manifests/index.html', 'sitemap.xml', 'robots.txt', '404.html'):
             self.assertTrue((self.output / path).is_file(), path)
         for path in (ROOT / 'manifests').glob('*.json'):
             self.assertEqual(path.read_bytes(), (self.output / 'manifests' / path.name).read_bytes())
@@ -566,17 +567,24 @@ assert.equal(anonymous.children[0].children[0].tag, 'span');
         self.assertIn('id="account-farm" href="/account/" hidden', (self.output / 'submit/index.html').read_text())
 
     def test_agent_guide_and_account_token_controls(self):
-        guide = (ROOT / 'docs/agents.txt').read_text()
-        self.assertEqual((self.output / 'llms.txt').read_text(), guide)
+        index = (ROOT / 'docs/agents.txt').read_text()
+        self.assertEqual((self.output / 'llms.txt').read_text(), index)
+        # The index is short and its whole job is to name the two things worth reading first.
+        self.assertLess(len(index), 4000)
+        for named in ('https://tiinyapp.farm/docs/agents/', 'https://tiinyapp.farm/docs/openapi.json',
+                      'never make one up', 'farm device --key-stdin'):
+            self.assertIn(named, index)
         page = (self.output / 'docs/agents/index.html').read_text()
         visible = ' '.join(Document(page).text)
         for phrase in ('what the farm is', 'farm publish', 'curl --fail-with-body', '/api/media',
-                       '/api/seeds', 'farm.json', 'Ask the person for their token; never make one up.',
-                       'pull request URL', 'https://tiinyapp.farm/account/'):
+                       '/api/seeds', 'farm.json', 'never make one up', 'pull request url',
+                       'https://tiinyapp.farm/account/', 'device.json', '39218',
+                       'farm doctor --json', 'farm install tiiny-brain --json -y'):
             self.assertIn(phrase.lower(), visible.lower())
+        rules = page.split('The field rules:')[1].split('</ul>')[0]
         for field in ('id', 'name', 'pitch', 'description', 'version', 'license', 'category',
                       'entry', 'permissions', 'links', 'media'):
-            self.assertRegex(guide, rf'(?m)^\* {field} ')
+            self.assertIn(f'<code>{field}</code>', rules)
         account = Document((self.output / 'account/index.html').read_text())
         self.assertTrue({'api-tokens-heading', 'create-token', 'token-form', 'token-name',
                          'token-reveal', 'new-token', 'copy-token', 'token-status',
@@ -586,6 +594,16 @@ assert.equal(anonymous.children[0].children[0].tag, 'span');
                          "api('/api/tokens/' + encodeURIComponent(token.id), { method: 'DELETE' })",
                          'navigator.clipboard.writeText'):
             self.assertIn(contract, script)
+
+    def test_the_built_site_serves_the_api_description_the_route_walk_checks(self):
+        """tests/test_openapi.py holds it against the Worker; this is the file that is served."""
+        spec = json.loads((self.output / 'docs/openapi.json').read_text())
+        self.assertEqual(spec['openapi'], '3.1.0')
+        self.assertEqual(spec, SITE_SPEC)
+        self.assertIn('/api/seeds', spec['paths'])
+        self.assertIn('/docs/openapi.json', spec['paths'])
+        self.assertIn('/docs/openapi.json', (self.output / 'docs/agents/index.html').read_text())
+        self.assertIn('/docs/openapi.json', (self.output / 'docs/api/index.html').read_text())
 
     def test_seed_tabs_control_three_panels_with_only_first_visible(self):
         doc = Document((self.output / 'submit/index.html').read_text())

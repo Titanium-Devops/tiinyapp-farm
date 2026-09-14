@@ -489,10 +489,16 @@ def paths():
             "An old path", "301 to /account/.", tags=["Pages the Worker serves"],
             answers={"301": REDIRECT})},
         "/catalog.json": {"x-farm-source": "assets", "get": op(
-            "Every manifest in one array", "The whole catalog in one file. Read this first when"
-            " you want to see what the farm has.", tags=["The catalog"],
-            answers={"200": answer("Every app.", {"type": "array", "items": {
-                "$ref": "#/components/schemas/Manifest"}})})},
+            "Every manifest in one file", "The whole catalog, and the newest farm version, in one"
+            " file. Read this first when you want to see what the farm has. A deploy in flight"
+            " can still be serving the older shape, which is the apps array on its own.",
+            tags=["The catalog"],
+            answers={"200": answer("The catalog.", obj(
+                {"cli": {"type": "string",
+                         "description": "The newest tiinyapp-farm on PyPI, as the site knows it."},
+                 "apps": {"type": "array",
+                          "items": {"$ref": "#/components/schemas/Manifest"}}},
+                ["cli", "apps"]))})},
         "/manifests/{id}.json": {"x-farm-source": "assets", "get": op(
             "One app manifest", "The file the installer reads before it downloads anything.",
             tags=["The catalog"], parameters=[APP],
