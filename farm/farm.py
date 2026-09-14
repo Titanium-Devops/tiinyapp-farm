@@ -716,7 +716,13 @@ def probe_network(peers, budget=FIND_BUDGET):
     if not found and tiinyos_serving(timeout=_remaining(deadline, FIND_TIMEOUT)):
         found = [{"serial": None, "name": None, "address": urlsplit(TIINYOS_BASE).hostname,
                   "via": VIA_CLIENT, "base": TIINYOS_BASE, "interfaces": [], "addresses": []}]
-    return {"found": found, "errno": refused}
+    # Having reached a box over the cable or the network is proof the local network was not
+    # refused, whatever else could not be sent. A host can forbid broadcast and route everything
+    # else, and a GitHub macOS runner does exactly that, so a datagram that went nowhere is not
+    # evidence on its own. The TiinyOS client does not count: it answers on loopback, which a
+    # refused interpreter reaches as readily as an allowed one.
+    reached = any(record["via"] in (VIA_CABLE, VIA_NETWORK) for record in found)
+    return {"found": found, "errno": 0 if reached else refused}
 
 
 def describe_device(record):
