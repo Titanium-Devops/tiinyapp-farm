@@ -37,7 +37,7 @@ Five apps on it today, and all five are mine, which is the part I'd like to chan
 
 Story Lantern writes a bedtime story, paints the page, and reads it out loud in a warm voice.
 Characters come back the same across nights, which is the part a five-year-old notices.
-TiinyBench measures what your Tiiny actually does instead of what the spec sheet says, including
+TiinyBench measures what your Tiiny does under real work, including
 what a reasoning model charges you in wall time for tokens nobody reads. Titanium Tiiny Bot is a
 local assistant with chat, files, memories and voice, running on the standard library with no pip
 installs. Tiiny Brain reads a folder of your own markdown notes, works out which names keep
