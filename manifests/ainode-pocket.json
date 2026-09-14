@@ -49,9 +49,9 @@
     "homepage": "https://ainode.dev/pocket"
   },
   "release": {
-    "url": "https://tiinyapp.farm/seeds-files/ainode-pocket/0.1.0/ainode-pocket-0.1.0.tar.gz",
-    "sha256": "e55088d9cfc6345d3e24f4a27776e578efea9b217ee62a428543c9c0b7129602",
-    "size": 480440
+    "url": "https://github.com/getainode/ainode-pocket/archive/refs/tags/v0.1.0.tar.gz",
+    "sha256": "a08a552488a4da4e356afcd00cf1b8dd8897d8ea0e3ea3eebd0f6a5e215034a4",
+    "size": 480188
   },
   "port": {
     "argv": "--port"
@@ -61,5 +61,5 @@
     "icon": "/assets/art/ainode-pocket-icon.png",
     "header": "/assets/art/ainode-pocket-header.webp"
   },
-  "updates": "manual"
+  "updates": "auto"
 }
