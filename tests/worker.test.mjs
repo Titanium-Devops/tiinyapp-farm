@@ -7,11 +7,16 @@ import { spawnSync } from 'node:child_process';
 import { createApp, sha256, boundedBody } from '../worker/index.mjs';
 import { proofRoutes } from '../worker/proof.mjs';
 import { seedRoutes, releaseURL } from '../worker/seeds.mjs';
+import { artRoutes, headerPrompt, iconPrompt, cleanScene, DAILY } from '../worker/art.mjs';
 import { checkManifest } from '../worker/manifest.mjs';
 import worker, { FarmCoordinator } from '../worker/main.mjs';
 const ORIGIN = 'https://tiinyapp.farm';
 const PROFILE = 'https://www.tiinyverse.com/users/39628b1e-e94e-4bd8-800e-5437d5336e1f';
 const archive = gzipSync(Buffer.from('fixture source archive; extraction is checked separately in Python CI'));
+const DRAWINGS = 'https://api.openai.com/v1/images/generations';
+// Only the magic bytes matter: the Worker sniffs the type it was sent rather than trusting the ask.
+const drawnPNG = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.from('fixture icon pixels')]);
+const drawnWEBP = Buffer.concat([Buffer.from('RIFF'), Buffer.from([0, 0, 0, 0]), Buffer.from('WEBP'), Buffer.from('fixture header pixels')]);
 class Store {
   values = new Map();
   async get(key, type) { const value = this.values.get(key); return type === 'json' && value ? JSON.parse(value) : value ?? null; }
@@ -22,8 +27,11 @@ function fixture() {
   let clock = Date.parse('2026-09-12T12:00:00Z');
   const store = new Store(), objects = new Map(), mails = [], calls = [], manifests = [], published = new Map();
   let html = '<h1>Aster &amp; Fern</h1>', githubId = 42, githubFail = '', profileStatus = 200, resendStatus = 200;
+  const draws = [];
+  let drawStatus = 200, drawPayload = null;
   const env = { FARM: store, SESSION_SECRET: 'test-secret-with-at-least-32-characters', RESEND_API_KEY: 'resend-secret',
     GITHUB_CLIENT_ID: 'client', GITHUB_CLIENT_SECRET: 'client-secret', FARM_GITHUB_TOKEN: 'farm-only-secret',
+    OPENAI_API_KEY: 'drawing-only-secret',
     SEEDS: { async put(key, value, options) { objects.set(key, { value, options }); },
       async get(key) { const object = objects.get(key); return object && { body: object.value, size: object.value.length, httpEtag: '"fixture"' }; },
       async delete(key) { objects.delete(key); } },
@@ -36,6 +44,15 @@ function fixture() {
   const fetcher = async (url, options = {}) => {
     calls.push({ url: String(url), ...options });
     const reply = (body, status = 200) => new Response(JSON.stringify(body), { status });
+    if (String(url) === DRAWINGS) {
+      const body = JSON.parse(options.body);
+      assert.equal(options.headers.Authorization, 'Bearer drawing-only-secret');
+      draws.push(body);
+      if (drawStatus !== 200) return new Response(JSON.stringify(drawPayload ?? { error: { message: 'never repeat me' } }), { status: drawStatus });
+      if (drawPayload) return reply(drawPayload);
+      const pixels = body.output_format === 'png' ? drawnPNG : drawnWEBP;
+      return reply({ created: 1, data: [{ b64_json: pixels.toString('base64') }], usage: { output_tokens: 4160, total_tokens: 4300 } });
+    }
     if (String(url) === 'https://api.resend.com/emails') { mails.push(JSON.parse(options.body)); return reply({ id: 'mail' }, resendStatus); }
     if (String(url).startsWith('https://www.tiinyverse.com/')) {
       assert.equal(options.headers['User-Agent'], 'tiinyapp-farm-verifier/1.0'); assert.equal(options.redirect, 'manual'); assert.ok(options.signal);
@@ -70,7 +87,7 @@ function fixture() {
     if (String(url) === 'https://loop.example.org/a') return new Response(null, { status: 302, headers: { location: 'https://loop.example.org/a' } });
     throw new Error('Unexpected fetch: ' + url);
   };
-  const app = createApp({ fetcher, now: () => clock, proofRoutes, seedRoutes });
+  const app = createApp({ fetcher, now: () => clock, proofRoutes, seedRoutes, artRoutes });
   const call = async (path, body, session = '', extra = {}, method = 'POST') => app(new Request(ORIGIN + path, {
     ...(body === undefined ? {} : { method, body: body instanceof FormData ? body : JSON.stringify(body) }),
     headers: { Origin: ORIGIN, ...(session ? { Cookie: session } : {}), ...(body && !(body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...extra },
@@ -89,9 +106,10 @@ function fixture() {
     const result = await response.json(); html = `<h1>Aster &amp; Fern</h1><p>${result.code}</p>`;
     assert.equal((await call('/api/tiinyverse/verify', {}, session)).status, 200);
   }
-  return { env, store, objects, mails, manifests, published, calls, call, email, proof, fetcher,
+  return { env, store, objects, mails, manifests, published, calls, draws, call, email, proof, fetcher,
     advance: n => { clock += n; }, html: s => { html = s; }, githubId: n => { githubId = n; }, githubFail: s => { githubFail = s; },
-    profileStatus: n => { profileStatus = n; }, resendStatus: n => { resendStatus = n; } };
+    profileStatus: n => { profileStatus = n; }, resendStatus: n => { resendStatus = n; }, now: () => clock,
+    drawing: (status, payload = null) => { drawStatus = status; drawPayload = payload; } };
 }
 function seedForm({ upload = false, ...changes } = {}) {
   const form = new FormData();
@@ -778,4 +796,169 @@ test('legacy pages permanently redirect and account stays private', async () => 
   const anonymous = await worker.fetch(new Request(ORIGIN + '/account/'), f.env);
   assert.equal(anonymous.status, 302);
   assert.equal(anonymous.headers.get('Location'), '/submit/');
+});
+
+
+const artFixture = JSON.parse(await readFile(new URL('./art-prompts.json', import.meta.url), 'utf8'));
+const MEDIA = /^https:\/\/tiinyapp\.farm\/media\/[0-9a-f-]+\/little-library\/[a-f0-9]{32}\.(png|webp)$/;
+
+async function maker(f, address = 'grower@example.org') {
+  const signed = await f.email(address);
+  await f.proof(signed.cookie);
+  return signed.cookie;
+}
+const drawArt = (f, cookie, scene = 'a corkboard of pinned cards joined by threads of light', id = 'little-library') =>
+  f.call('/api/seeds/' + id + '/art', { scene }, cookie);
+
+test('the Worker builds the same two prompts as farm/art.py, from the same fixture', () => {
+  for (const item of artFixture.cases) {
+    assert.equal(cleanScene(item.scene), item.clean);
+    assert.equal(headerPrompt(item.scene), item.header);
+    assert.equal(iconPrompt(item.scene), item.icon);
+  }
+  for (const refused of artFixture.refused) assert.throws(() => cleanScene(refused), error => error.status === 400);
+  assert.equal(DAILY, 3);
+});
+
+test('app art: one pair, the sizes and formats the shelf uses, filed under the app and served back', async () => {
+  const f = fixture(), cookie = await maker(f);
+  const response = await drawArt(f, cookie);
+  assert.equal(response.status, 201, await response.clone().text());
+  const drawn = await response.json();
+  assert.match(drawn.header, MEDIA);
+  assert.match(drawn.icon, MEDIA);
+  assert.equal(drawn.scene, 'a corkboard of pinned cards joined by threads of light.');
+  assert.equal(drawn.remaining, 2);
+  const [header, icon] = f.draws;
+  assert.equal(header.model, 'gpt-image-2');
+  assert.equal(header.size, '1536x1024');
+  assert.equal(header.quality, 'high');
+  assert.equal(header.output_format, 'webp');
+  assert.equal(header.n, 1);
+  assert.equal(header.prompt, headerPrompt('a corkboard of pinned cards joined by threads of light'));
+  assert.equal(icon.size, '1024x1024');
+  assert.equal(icon.output_format, 'png');
+  assert.equal(icon.background, 'transparent');
+  assert.equal(icon.prompt, iconPrompt('a corkboard of pinned cards joined by threads of light'));
+  assert.equal(f.objects.size, 2);
+  for (const [key, object] of f.objects) {
+    assert.match(key, /^media\/[0-9a-f-]+\/little-library\/[a-f0-9]{32}\.(png|webp)$/);
+    assert.equal(object.options.httpMetadata.contentType, key.endsWith('.png') ? 'image/png' : 'image/webp');
+  }
+  // The stored pair is reachable through the same image route as an uploaded image.
+  const served = await worker.fetch(new Request(drawn.icon), f.env);
+  assert.equal(served.status, 200);
+  assert.equal(served.headers.get('Content-Type'), 'image/png');
+  // The key is never repeated to the maker, in any answer.
+  assert.ok(!JSON.stringify(drawn).includes('drawing-only-secret'));
+});
+
+test('app art: reading back the pair, its scene and what is left of the daily allowance', async () => {
+  const f = fixture(), cookie = await maker(f);
+  const empty = await (await f.call('/api/seeds/little-library/art', undefined, cookie)).json();
+  assert.deepEqual(empty, { scene: '', remaining: 3 });
+  const drawn = await (await drawArt(f, cookie, 'sprouts queuing at a lantern-lit gate')).json();
+  const stored = await (await f.call('/api/seeds/little-library/art', undefined, cookie)).json();
+  assert.equal(stored.scene, 'sprouts queuing at a lantern-lit gate.');
+  assert.equal(stored.header, drawn.header);
+  assert.equal(stored.icon, drawn.icon);
+  assert.equal(stored.remaining, 2);
+});
+
+test('app art: maker only, verified only, and never another maker s app', async () => {
+  const f = fixture();
+  assert.equal((await drawArt(f, '')).status, 401);
+  const signed = await f.email('unverified@example.org');
+  assert.equal((await drawArt(f, signed.cookie)).status, 403);
+  const owner = await maker(f, 'owner@example.org');
+  assert.equal((await f.call('/api/seeds', seedForm(), owner)).status, 201);
+  f.githubId(77);
+  const stranger = await f.email('stranger@example.org');
+  f.html('<h1>Other maker</h1>');
+  const link = await (await f.call('/api/tiinyverse/link', { profileUrl: 'https://www.tiinyverse.com/users/8c1f2d3e-4a5b-6c7d-8e9f-0a1b2c3d4e5f' }, stranger.cookie)).json();
+  f.html(`<h1>Other maker</h1><p>${link.code}</p>`);
+  assert.equal((await f.call('/api/tiinyverse/verify', {}, stranger.cookie)).status, 200);
+  const refused = await drawArt(f, stranger.cookie);
+  assert.equal(refused.status, 403);
+  assert.match((await refused.json()).error, /verified maker/);
+  assert.equal(f.draws.length, 0);
+  // A method the route does not answer says so instead of drawing.
+  assert.equal((await f.call('/api/seeds/little-library/art', {}, owner, {}, 'DELETE')).status, 405);
+});
+
+test('app art: three a day for one app, one at a time, and a failed drawing costs nothing', async () => {
+  const f = fixture(), cookie = await maker(f);
+  for (let i = 0; i < 3; i++) assert.equal((await drawArt(f, cookie)).status, 201);
+  const fourth = await drawArt(f, cookie);
+  assert.equal(fourth.status, 429);
+  assert.match((await fourth.json()).error, /3 times a day/);
+  assert.equal(f.draws.length, 6);
+  f.advance(86400001);
+  assert.equal((await drawArt(f, cookie)).status, 201);
+  // A drawing already running for this app refuses the second press rather than spending a try.
+  await f.store.put('art-inflight:little-library', JSON.stringify(f.now()));
+  const doubled = await drawArt(f, cookie);
+  assert.equal(doubled.status, 409);
+  assert.equal((await (await f.call('/api/seeds/little-library/art', undefined, cookie)).json()).remaining, 2);
+  await f.store.delete('art-inflight:little-library');
+  f.drawing(500);
+  assert.equal((await drawArt(f, cookie)).status, 502);
+  // The failure did not take the maker's second try.
+  assert.equal((await (await f.call('/api/seeds/little-library/art', undefined, cookie)).json()).remaining, 2);
+  f.drawing(200);
+  assert.equal((await drawArt(f, cookie)).status, 201);
+});
+
+test('app art: every failure from the drawing service becomes a sentence a maker can act on', async () => {
+  const f = fixture(), cookie = await maker(f);
+  assert.equal((await f.call('/api/seeds/little-library/art', { scene: 'ab' }, cookie)).status, 400);
+  assert.equal((await f.call('/api/seeds/little-library/art', { scene: 'x'.repeat(201) }, cookie)).status, 400);
+  assert.equal((await f.call('/api/seeds/little-library/art', {}, cookie)).status, 400);
+  assert.equal(f.draws.length, 0, 'a bad scene line never reaches the drawing service');
+  f.drawing(400);
+  const refused = await drawArt(f, cookie);
+  assert.equal(refused.status, 422);
+  assert.match((await refused.json()).error, /different words/);
+  f.drawing(429);
+  assert.equal((await drawArt(f, cookie)).status, 503);
+  f.drawing(200, { created: 1, data: [] });
+  assert.equal((await drawArt(f, cookie)).status, 502);
+  f.drawing(200, { created: 1, data: [{ b64_json: Buffer.from('not an image at all').toString('base64') }] });
+  const wrong = await drawArt(f, cookie);
+  assert.equal(wrong.status, 502);
+  assert.match((await wrong.json()).error, /format the farm cannot keep/);
+  f.drawing(200);
+  delete f.env.OPENAI_API_KEY;
+  const off = await drawArt(f, cookie);
+  assert.equal(off.status, 503);
+  assert.match((await off.json()).error, /not switched on/);
+  assert.equal(f.objects.size, 0, 'nothing is filed when no drawing arrives');
+});
+
+test('app art: the pair reaches the submission this app already has', async () => {
+  const f = fixture(), cookie = await maker(f);
+  assert.equal((await f.call('/api/seeds', seedForm(), cookie)).status, 201);
+  const before = await (await f.call('/api/seeds/mine', undefined, cookie, {}, 'GET')).json();
+  assert.equal(before.seeds[0].icon, undefined);
+  const drawn = await (await drawArt(f, cookie)).json();
+  const after = await (await f.call('/api/seeds/mine', undefined, cookie, {}, 'GET')).json();
+  assert.equal(after.seeds[0].icon, drawn.icon);
+  const record = await f.store.get('seed:little-library@0.1.0', 'json');
+  assert.deepEqual(record.media, { header: drawn.header, icon: drawn.icon });
+});
+
+test('drawing app art runs outside the coordinator queue, so no other maker waits behind it', async () => {
+  const f = fixture();
+  const seen = [];
+  f.env.FARM_COORDINATOR = { idFromName: () => 'farm', get: () => ({ fetch: request => {
+    seen.push(new URL(request.url).pathname);
+    return createApp({ fetcher: f.fetcher, proofRoutes, seedRoutes, artRoutes })(request, f.env);
+  } }) };
+  const coordinator = new FarmCoordinator({ storage: new Map([]), waitUntil: () => {} }, f.env);
+  assert.equal(typeof coordinator.fetch, 'function');
+  const source = await readFile(new URL('../worker/main.mjs', import.meta.url), 'utf8');
+  assert.match(source, /\/art\$\/\.test\(pathname\)\) return execute\(\)/);
+  const response = await worker.fetch(new Request(ORIGIN + '/api/seeds/little-library/art', { method: 'POST', headers: { Origin: ORIGIN, 'Content-Type': 'application/json' }, body: '{}' }), f.env);
+  assert.equal(seen.at(-1), '/api/seeds/little-library/art');
+  assert.equal(response.status, 401);
 });

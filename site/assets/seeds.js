@@ -190,7 +190,7 @@ onSubmit('seed-form', async () => {
     form.set('version', originalSeed?.version || '0.1.0');
     form.delete('releaseUrl'); form.delete('archive');
   }
-  form.delete('releaseChoice'); form.delete('permissionChoices');
+  form.delete('releaseChoice'); form.delete('permissionChoices'); form.delete('scene'); form.delete('artMedia');
   if (originalSeed) {
     form.set('screenshots', JSON.stringify(originalSeed.screenshots));
     for (const [key, value] of Object.entries({ python: originalSeed.requires.python ?? '', ports: originalSeed.requires.ports.join(','), models: originalSeed.requires.device.models.join(','), npuUnits: originalSeed.requires.device.npuUnits, tags: originalSeed.tags.join(','), health: originalSeed.health ?? '', selfcheck: originalSeed.selfcheck ? 'true' : '' })) form.set(key, String(value));
@@ -224,6 +224,11 @@ onSubmit('seed-form', async () => {
     }
     if (urls.length) media[kind] = kind === 'gallery' ? urls : urls[0];
   }
+  // Art the farm drew is already filed under this app; an image chosen in the same pass wins.
+  try {
+    const drawn = JSON.parse(byId('art-media')?.value || '{}');
+    for (const kind of ['icon', 'header']) if (drawn[kind] && !groups[kind].length) media[kind] = drawn[kind];
+  } catch { /* A draft from an older version of this page has nothing staged. */ }
   form.set('media', JSON.stringify(media));
   status('Submitting your app for maintainer review…');
   const result = await api(updateId ? '/api/seeds/' + encodeURIComponent(updateId) : '/api/seeds', form, updateId ? 'PUT' : 'POST');

@@ -2,7 +2,8 @@ import { mediaPattern } from './makers.mjs';
 import { createApp, json } from './index.mjs';
 import { proofRoutes } from './proof.mjs';
 import { seedRoutes } from './seeds.mjs';
-const app = createApp({ proofRoutes, seedRoutes });
+import { artRoutes } from './art.mjs';
+const app = createApp({ proofRoutes, seedRoutes, artRoutes });
 
 // A single durable coordinator prevents KV's eventual consistency from allowing
 // double code redemption, duplicate profile claims or simultaneous seed writes.
@@ -27,7 +28,11 @@ export class FarmCoordinator {
     };
     // Read-only lookups must not sit behind a large upload or GitHub PR request.
     // In particular, CI's ten-second owner lookup remains responsive.
-    if (request.method === 'GET' && ['/api/owners'].includes(new URL(request.url).pathname)) return execute();
+    // Drawing app art holds the model for a minute or more, which no other maker should wait
+    // behind; the route reserves its own daily slot and refuses a second drawing for the same app.
+    const { pathname } = new URL(request.url);
+    if (request.method === 'GET' && ['/api/owners'].includes(pathname)) return execute();
+    if (request.method === 'POST' && /^\/api\/seeds\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*\/art$/.test(pathname)) return execute();
     const operation = this.tail.then(execute);
     this.tail = operation.catch(() => {});
     return operation;

@@ -112,6 +112,31 @@ curl --fail-with-body \
   https://tiinyapp.farm/api/media
 ```
 
+## Art in the farm's hand
+
+| Method | Path | Body | Answers |
+| --- | --- | --- | --- |
+| POST | `/api/seeds/<id>/art` | `{"scene": "one sentence"}` | 201 with `{"header", "icon", "scene", "remaining"}` |
+| GET | `/api/seeds/<id>/art` | none | The pair last drawn for this app, its scene, and `remaining` |
+
+The farm draws a wide header and a square icon in its house style from one sentence describing the
+scene. Both are filed as your images under `media/<you>/<id>/` and answered as URLs you can put
+straight into `media`. See [Art in the farm's hand](/docs/art/) for what to write.
+
+The scene is 3 to 200 characters on one line; anything else answers 400 without spending a try. You
+need a verified Tiiny profile, and the app ID has to be yours or unclaimed, or the answer is 403.
+Three drawings per app per day, and one at a time per app: a second request while one is running
+answers 409. A drawing takes a minute or two, so give the call a generous timeout. A refusal from
+the drawing service answers 422 and a failure answers 502, and neither costs you a try.
+
+```
+curl --fail-with-body \
+  -H "Authorization: Bearer $FARM_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"scene": "a corkboard of pinned cards joined by threads of light"}' \
+  https://tiinyapp.farm/api/seeds/my-app/art
+```
+
 ## Apps
 
 | Method | Path | Sends | Answers |
@@ -231,6 +256,7 @@ Three old paths answer 301: `/plant` to `/install/`, `/seeds` to `/submit/`, and
 | Submissions | 5 per hour per account |
 | Comments | 5 per hour per account |
 | Release checks | 1 per minute per app |
+| App art | 3 per app per day, one drawing at a time |
 | API tokens | 5 live per account |
 | JSON request body | 16 KiB |
 | Image upload | 2 MiB |
@@ -239,6 +265,7 @@ Three old paths answer 301: `/plant` to `/install/`, `/seeds` to `/submit/`, and
 | Comment text | 1,000 characters |
 | Bio | 600 characters |
 | Any outbound fetch the farm makes | 10 seconds, and a bounded body |
+| Drawing one image | 2 minutes, and a bounded body |
 
 ## Errors
 

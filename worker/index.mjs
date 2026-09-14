@@ -27,13 +27,13 @@ function equal(a, b) {
   for (let i = 0; i < a.length; i++) difference |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return difference === 0;
 }
-export async function boundedBody(response, limit) {
+export async function boundedBody(response, limit, timeout = 10000) {
   if (Number(response.headers.get('Content-Length')) > limit) { await response.body?.cancel(); fail(413, 'The file or response is too large.'); }
   const reader = response.body?.getReader();
   if (!reader) return new Uint8Array();
   const chunks = []; let size = 0;
   let timedOut = false;
-  const timer = setTimeout(() => { timedOut = true; void reader.cancel().catch(() => {}); }, 10000);
+  const timer = setTimeout(() => { timedOut = true; void reader.cancel().catch(() => {}); }, timeout);
   try {
     while (true) {
       const { value, done } = await reader.read();
@@ -48,12 +48,14 @@ export async function boundedBody(response, limit) {
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
   return bytes;
 }
-export async function remote(fetcher, url, options = {}, limit = 200 * 1024) {
+// Drawing an image runs minutes past the ten seconds every other outside call is given, so the
+// deadline is a parameter rather than a constant.
+export async function remote(fetcher, url, options = {}, limit = 200 * 1024, timeout = 10000) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10000);
+  const timer = setTimeout(() => controller.abort(), timeout);
   try {
     const response = await fetcher(url, { ...options, redirect: 'manual', signal: controller.signal });
-    const bytes = await boundedBody(response, limit);
+    const bytes = await boundedBody(response, limit, timeout);
     return { status: response.status, ok: response.ok, headers: response.headers, bytes, text: () => new TextDecoder().decode(bytes) };
   } finally { clearTimeout(timer); }
 }
@@ -65,11 +67,12 @@ async function bodyJSON(request) {
   }
   catch (e) { if (e instanceof HttpError) throw e; fail(400, 'Send a valid JSON object.'); }
 }
-export function createApp({ fetcher = fetch, now = () => Date.now(), seedRoutes = async () => null, proofRoutes = async () => null } = {}) {
+export function createApp({ fetcher = fetch, now = () => Date.now(), seedRoutes = async () => null, proofRoutes = async () => null, artRoutes = async () => null } = {}) {
   return async function handle(request, env) {
     const url = new URL(request.url), path = url.pathname;
     const bearerRoute = (request.method === 'POST' && ['/api/seeds', '/api/media'].includes(path)) ||
       (request.method === 'PUT' && /^\/api\/seeds\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(path)) ||
+      (['GET', 'POST'].includes(request.method) && /^\/api\/seeds\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*\/art$/.test(path)) ||
       (request.method === 'GET' && path === '/api/seeds/mine');
     const bearerMatch = bearerRoute && request.headers.get('Authorization')?.match(/^Bearer\s+(.+)$/i);
     const get = async key => env.FARM.get(key, 'json');
@@ -251,7 +254,7 @@ export function createApp({ fetcher = fetch, now = () => Date.now(), seedRoutes 
       }
       const context = { request, env, url, path, get, put, del, now, fetcher, bodyJSON, random,
         currentUser, requireUser: async () => { const user = await currentUser(); if (!user) fail(401, 'Sign in to your account first.'); return user; } };
-      return await socialRoutes(context) || await makerRoutes(context) || await proofRoutes(context) || await seedRoutes(context) || json({ error: 'This route does not exist.' }, 404);
+      return await socialRoutes(context) || await makerRoutes(context) || await proofRoutes(context) || await artRoutes(context) || await seedRoutes(context) || json({ error: 'This route does not exist.' }, 404);
     } catch (error) {
       return json({ error: error instanceof HttpError ? error.message : 'The request could not be completed. Please try again.' }, error.status || 502);
     }

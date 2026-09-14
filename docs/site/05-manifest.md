@@ -138,6 +138,10 @@ the submission checks nor be installed.
 
 Image URLs are either an HTTPS URL or a site-relative path beginning `/assets/` or `/media/`.
 
+`media.icon` and `media.header` are either images you upload or the pair the farm drew for you
+from a one-sentence scene. Both land in the same field and both reach the catalog through the same
+pull request. See [Art in the farm's hand](/docs/art/).
+
 ## Fields the release path adds
 
 > Arrives with the release path. Both fields are on the open pull request

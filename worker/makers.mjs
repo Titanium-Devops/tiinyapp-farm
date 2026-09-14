@@ -28,7 +28,9 @@ export function httpsURL(value) {
   if (url.protocol !== 'https:' || !url.hostname || url.username || url.password) fail(400, 'Use an HTTPS URL.');
   return url.href;
 }
-export const mediaPattern = /^media\/[a-zA-Z0-9_-]+\/[a-f0-9]{32}\.(png|jpg|webp)$/;
+// media/<user>/<32 hex>.<ext> for anything a maker uploads, and one app ID folder deeper for art
+// the farm drew for that app.
+export const mediaPattern = /^media\/[a-zA-Z0-9_-]+\/(?:[a-z][a-z0-9]*(?:-[a-z0-9]+)*\/)?[a-f0-9]{32}\.(png|jpg|webp)$/;
 export function imageType(bytes) {
   if (bytes.length >= 8 && [137,80,78,71,13,10,26,10].every((b, i) => bytes[i] === b)) return ['png', 'image/png'];
   if (bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) return ['jpg', 'image/jpeg'];
