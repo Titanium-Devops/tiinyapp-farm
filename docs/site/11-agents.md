@@ -246,6 +246,12 @@ the device says `main`, `voice` and `audio` where a manifest says `chat`, `tts` 
 `embedding`, `rerank`, `image`, `ocr` and `music` are the same word on both sides. `units` is NPU
 memory residency, so `available` is what says whether another model fits.
 
+`farm models --load <id> --json` loads one model by name and answers with the state it left, and
+`farm models --unload <id> --json` takes one out again. A load that will not fit the free units is
+refused with the number and asks the device for nothing; an unload of a model a running app needs
+is refused unless you add `--force`. Between them and the check below, nothing has to reach past
+the farm to the device to change what is loaded.
+
 `farm start <id> --json` does the check itself and never asks a question, which is what you want:
 
 ```json
@@ -255,8 +261,10 @@ memory residency, so `available` is what says whether another model fits.
 ```
 
 Nothing was launched. `available` is what is on the device's disk and could be loaded for that
-need. Add `--load` to have the farm load the cheapest one that fits and then start the app, or ask
-the person which of `available` they want. `farm start <id> --json --no-model-check` starts it
+need. Add `--load` to have the farm load the cheapest one that fits and then start the app, which
+works the same way for you as it does for a person: the answer comes back with `started` true and
+a `loaded` list of what it had to load first. Or ask the person which of `available` they want and
+load that one yourself with `farm models --load`. `farm start <id> --json --no-model-check` starts it
 anyway, which is almost never the right thing to do on somebody's behalf.
 
 While an app runs, `farm status --json` carries the same check per app under `models`:
@@ -273,7 +281,9 @@ reason to stop or restart anything. `loaded` is null when the farm could not ask
 which is not the same as nothing being loaded.
 
 To watch rather than poll, `farm models --watch --json` writes one object per change to standard
-output as it happens, with `event` of `loaded`, `unloaded` or `changed`. It runs until you stop it.
+output as it happens, with `event` of `loaded`, `unloaded` or `changed`. It runs until you stop it,
+and it stops on its own when whatever was reading it goes away, so you do not have to reap one you
+lost track of.
 
 ## Put the key where the farm reads it
 

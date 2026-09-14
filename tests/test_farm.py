@@ -1734,6 +1734,45 @@ while True: time.sleep(0.1)
         self.assertIsNotNone(self.farm.active("fake-app"))
         self.assertNotIn("needs chat on your Tiiny", self.output.getvalue())
 
+    def test_load_and_start_from_a_machine_loads_and_then_starts(self):
+        """The launcher had to put the failure on its own button: check_models answered the
+        missing list before it tried to load, so --load only ever worked on the prose path."""
+        self.configure_device()
+        self.needs_a_model("chat")
+        empty = a_tiiny([], DOWNLOADED)
+        full = a_tiiny([a_model("openai/gpt-oss-20b", "chat", 32)], DOWNLOADED)
+        answer = io.StringIO()
+        with patch("farm.farm.Farm", return_value=self.farm), \
+                patch.object(self.farm, "model_state", side_effect=[empty, empty, full, full]), \
+                patch.object(self.farm, "gateway", return_value={"message": "start loading"}) as asked, \
+                patch("builtins.input", side_effect=AssertionError("asked a question")), \
+                patch("farm.farm.time.sleep"), contextlib.redirect_stdout(answer):
+            self.assertEqual(main(["start", "fake-app", "--load", "--json",
+                                   "--no-update-check"]), 0)
+        payload = json.loads(answer.getvalue())
+        self.assertTrue(payload["started"])
+        self.assertEqual(payload["loaded"], ["openai/gpt-oss-20b"])
+        self.assertIsNotNone(payload["pid"])
+        self.assertEqual(asked.call_args.args[2], "/api/v1/models/openai%2Fgpt-oss-20b/start")
+        self.assertIsNotNone(self.farm.active("fake-app"))
+
+    def test_load_and_start_from_a_machine_says_what_it_could_not_load(self):
+        self.configure_device()
+        self.needs_a_model("image")
+        answer = io.StringIO()
+        with patch("farm.farm.Farm", return_value=self.farm), \
+                patch.object(self.farm, "model_state", return_value=a_tiiny([], DOWNLOADED)), \
+                patch.object(self.farm, "gateway") as never, \
+                contextlib.redirect_stdout(answer):
+            self.assertEqual(main(["start", "fake-app", "--load", "--json",
+                                   "--no-update-check"]), 1)
+        payload = json.loads(answer.getvalue())
+        self.assertFalse(payload["started"])
+        self.assertEqual(payload["loaded"], [])
+        self.assertEqual([row["kind"] for row in payload["missing"]], ["image"])
+        never.assert_not_called()
+        self.assertIsNone(self.farm.active("fake-app"))
+
     def test_start_answers_a_machine_with_what_is_missing_and_never_asks(self):
         self.configure_device()
         self.needs_a_model("chat")
@@ -1750,6 +1789,119 @@ while True: time.sleep(0.1)
             "kind": "chat", "loaded": [],
             "available": ["Qwen/Qwen3-30B-A3B-Instruct", "openai/gpt-oss-20b"]}])
         self.assertIsNone(self.farm.active("fake-app"))
+
+    def test_models_load_puts_one_model_in_the_npu_by_name(self):
+        """The launcher had a Load button on every model on disk and nothing to wire it to."""
+        self.configure_device()
+        empty = a_tiiny([], DOWNLOADED)
+        full = a_tiiny([a_model("openai/gpt-oss-20b", "chat", 32)], DOWNLOADED)
+        with patch.object(self.farm, "model_state", side_effect=[empty, full, full]), \
+                patch.object(self.farm, "gateway", return_value={"message": "start loading"}) as asked, \
+                patch("farm.farm.time.sleep"):
+            state = self.farm.load_one("openai/gpt-oss-20b")
+        self.assertEqual(asked.call_args.args[1:3],
+                         ("POST", "/api/v1/models/openai%2Fgpt-oss-20b/start"))
+        self.assertEqual([row["id"] for row in state["loaded"]], ["openai/gpt-oss-20b"])
+        self.assertIn("openai/gpt-oss-20b is loaded.", self.output.getvalue())
+
+    def test_a_load_that_will_not_fit_says_how_much_short_it_is(self):
+        self.configure_device()
+        state = a_tiiny(LOADED, DOWNLOADED)  # 68 of 100 used, so 32 free
+        with patch.object(self.farm, "model_state", return_value=state), \
+                patch.object(self.farm, "gateway") as never:
+            with self.assertRaises(FarmError) as error:
+                self.farm.load_one("Qwen/Qwen3-30B-A3B-Instruct")
+        never.assert_not_called()
+        self.assertEqual(str(error.exception),
+                         "Qwen/Qwen3-30B-A3B-Instruct needs 55 units and your Tiiny has 32 units"
+                         " free, 23 short. Unload something first: farm models --unload <id>")
+
+    def test_loading_a_model_the_tiiny_has_never_heard_of_is_refused(self):
+        self.configure_device()
+        with patch.object(self.farm, "model_state", return_value=a_tiiny(LOADED, DOWNLOADED)):
+            for call in (lambda: self.farm.load_one("nobody/nothing"),
+                         lambda: self.farm.unload_one("nobody/nothing")):
+                with self.assertRaises(FarmError) as error:
+                    call()
+                self.assertIn("Your Tiiny has no model called nobody/nothing", str(error.exception))
+
+    def test_loading_one_that_is_already_loaded_asks_the_device_for_nothing(self):
+        self.configure_device()
+        with patch.object(self.farm, "model_state", return_value=a_tiiny(LOADED, DOWNLOADED)), \
+                patch.object(self.farm, "gateway") as never:
+            self.farm.load_one("Qwen/Qwen3-8B")
+        never.assert_not_called()
+        self.assertIn("Qwen/Qwen3-8B is already loaded.", self.output.getvalue())
+
+    def test_models_unload_takes_one_out_by_name(self):
+        self.configure_device()
+        full = a_tiiny(LOADED, DOWNLOADED)
+        gone = a_tiiny([row for row in LOADED if row["kind"] != "image"], DOWNLOADED)
+        with patch.object(self.farm, "model_state", side_effect=[full, gone]), \
+                patch.object(self.farm, "gateway", return_value={"removed_container_ids": ["x"]}) as asked:
+            state = self.farm.unload_one("Tongyi-MAI/Z-Image-Turbo")
+        self.assertEqual(asked.call_args.args[1:3],
+                         ("POST", "/api/v1/models/Tongyi-MAI%2FZ-Image-Turbo/stop"))
+        self.assertNotIn("Tongyi-MAI/Z-Image-Turbo", [row["id"] for row in state["loaded"]])
+        self.assertIn("Tongyi-MAI/Z-Image-Turbo is unloaded.", self.output.getvalue())
+
+    def test_a_model_a_running_app_needs_is_held_back(self):
+        """Unloading it turns a working app into one that answers every message with an error,
+        which is the thing this whole wave is about."""
+        self.configure_device()
+        self.needs_a_model("chat")
+        with patch.object(self.farm, "model_state", return_value=a_tiiny(LOADED, DOWNLOADED)):
+            self.farm.start("fake-app")
+        self.farm.seen_models = None
+        with patch.object(self.farm, "model_state", return_value=a_tiiny(LOADED, DOWNLOADED)), \
+                patch.object(self.farm, "gateway") as never:
+            with self.assertRaises(FarmError) as error:
+                self.farm.unload_one("Qwen/Qwen3-8B")
+        never.assert_not_called()
+        self.assertEqual(str(error.exception),
+                         "fake-app is running and needs Qwen/Qwen3-8B. Stop it first, or unload"
+                         " anyway with: farm models --unload Qwen/Qwen3-8B --force")
+
+    def test_force_unloads_it_anyway(self):
+        self.configure_device()
+        self.needs_a_model("chat")
+        with patch.object(self.farm, "model_state", return_value=a_tiiny(LOADED, DOWNLOADED)):
+            self.farm.start("fake-app")
+        self.farm.seen_models = None
+        gone = a_tiiny([row for row in LOADED if row["kind"] != "chat"], DOWNLOADED)
+        with patch.object(self.farm, "model_state", side_effect=[a_tiiny(LOADED, DOWNLOADED), gone]), \
+                patch.object(self.farm, "gateway", return_value={}) as asked:
+            self.farm.unload_one("Qwen/Qwen3-8B", force=True)
+        self.assertEqual(asked.call_args.args[2], "/api/v1/models/Qwen%2FQwen3-8B/stop")
+
+    def test_a_second_model_of_the_same_kind_leaves_the_unload_alone(self):
+        """The need is met either way, so nothing is at risk and nothing is held back."""
+        self.configure_device()
+        self.needs_a_model("chat")
+        two = a_tiiny(LOADED + [a_model("openai/gpt-oss-20b", "chat", 32)], DOWNLOADED)
+        with patch.object(self.farm, "model_state", return_value=two):
+            self.farm.start("fake-app")
+        self.farm.seen_models = None
+        with patch.object(self.farm, "model_state", side_effect=[two, two]), \
+                patch.object(self.farm, "gateway", return_value={}) as asked:
+            self.farm.unload_one("Qwen/Qwen3-8B")
+        self.assertEqual(asked.call_args.args[2], "/api/v1/models/Qwen%2FQwen3-8B/stop")
+
+    def test_load_and_unload_answer_a_machine_with_the_state_they_left(self):
+        self.configure_device()
+        empty = a_tiiny([], DOWNLOADED)
+        full = a_tiiny([a_model("openai/gpt-oss-20b", "chat", 32)], DOWNLOADED)
+        answer = io.StringIO()
+        with patch("farm.farm.Farm", return_value=self.farm), \
+                patch.object(self.farm, "model_state", side_effect=[empty, full, full]), \
+                patch.object(self.farm, "gateway", return_value={"message": "start loading"}), \
+                patch("farm.farm.time.sleep"), contextlib.redirect_stdout(answer):
+            self.assertEqual(main(["models", "--load", "openai/gpt-oss-20b", "--json",
+                                   "--no-update-check"]), 0)
+        payload = json.loads(answer.getvalue())
+        self.assertEqual(payload["command"], "models")
+        self.assertEqual([row["id"] for row in payload["loaded"]], ["openai/gpt-oss-20b"])
+        self.assertEqual(payload["npu"], {"total": 100, "used": 32, "available": 68})
 
     def test_watch_says_when_a_model_is_loaded_unloaded_or_changes(self):
         self.configure_device()
@@ -1801,6 +1953,46 @@ while True: time.sleep(0.1)
         lines = [json.loads(line) for line in answer.getvalue().splitlines() if line.strip()]
         self.assertEqual([(row["event"], row["id"]) for row in lines],
                          [("loaded", "Qwen/Qwen3-8B")])
+
+    def test_a_watch_stops_when_nobody_is_reading_it_any_more(self):
+        """A watch writes only when something changes, so a launcher that was killed rather than
+        quit could leave one polling for ever without ever meeting a broken pipe."""
+        self.configure_device()
+        read_fd, write_fd = os.pipe()
+        os.close(read_fd)
+        with os.fdopen(write_fd, "w") as closed:
+            with patch("sys.stdout", closed), patch.object(self.farm, "model_state") as never, \
+                    patch("farm.farm.time.sleep") as slept:
+                self.farm.watch_models(as_json=True, rounds=50)
+        never.assert_not_called()
+        slept.assert_not_called()
+
+    def test_a_watch_somebody_is_reading_is_left_alone(self):
+        from farm.farm import reader_gone
+        read_fd, write_fd = os.pipe()
+        try:
+            with os.fdopen(write_fd, "w") as live:
+                self.assertFalse(reader_gone(live))
+                os.close(read_fd)
+                read_fd = None
+                self.assertTrue(reader_gone(live))
+        finally:
+            if read_fd is not None:
+                os.close(read_fd)
+        # A file is not a pipe and never hangs up, and neither does anything that cannot answer.
+        self.assertFalse(reader_gone(io.StringIO()))
+        with (self.root / "plain.txt").open("w") as plain:
+            self.assertFalse(reader_gone(plain))
+
+    def test_a_reader_that_goes_mid_write_stops_the_watch_quietly(self):
+        """The Windows path, where there is no poll for a pipe, and the narrow race on POSIX."""
+        self.configure_device()
+        chat = a_model("Qwen/Qwen3-8B", "chat", 28)
+        with patch("farm.farm.reader_gone", return_value=False), \
+                patch.object(self.farm, "model_state", side_effect=[a_tiiny([]), a_tiiny([chat])]), \
+                patch.object(self.farm, "say_model_change", side_effect=BrokenPipeError()), \
+                patch("farm.farm.time.sleep"):
+            self.farm.watch_models(as_json=True, rounds=10)
 
     def test_watch_keeps_going_when_the_tiiny_stops_answering(self):
         self.configure_device()

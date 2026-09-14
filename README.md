@@ -73,7 +73,7 @@ uses where nobody is there to answer a question.
 | --- | --- | --- |
 | `farm device --find` | Looks for a Tiiny on the cable, on this network and at the TiinyOS client, and prints what answered | `--json` |
 | `farm device` | Saves the device base URL and API key that every app is launched with | `--base BASE`, `--key-stdin` |
-| `farm models` | Says what your Tiiny has loaded, what is on its disk and what the NPU has free | `--watch`, `--interval N`, `--json` |
+| `farm models` | Says what your Tiiny has loaded, what is on its disk and what the NPU has free | `--load ID`, `--unload ID`, `--force`, `--watch`, `--interval N`, `--json` |
 
 `--find` saves nothing and needs no key. It prints one line per Tiiny with its serial number, the
 address to use, how it was reached and the base URL to save, and exits 1 when nothing answered.
@@ -105,10 +105,15 @@ launches anything, because an app started without its model runs and then fails 
 
 ```sh
 farm models                      # what is loaded, what is on disk, what is free
+farm models --load Qwen/Qwen3-8B # load one by name, if it fits the free units
+farm models --unload Qwen/Qwen3-8B     # and take it out again
 farm models --watch              # a line every time one is loaded or unloaded
 farm start titanium-tiiny-bot    # refuses and offers to load what is missing
 farm start titanium-tiiny-bot --load   # loads it without asking, then starts
 ```
+
+An unload is held back when a running app needs that model; `--force` does it anyway. A watch stops
+on its own when whatever was reading it goes away.
 
 `farm status` and `farm doctor` say when a model an app needs is no longer loaded.
 `--no-model-check`, or `FARM_NO_MODEL_CHECK=1`, starts it anyway.
