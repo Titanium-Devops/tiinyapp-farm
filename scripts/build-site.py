@@ -65,6 +65,16 @@ FIELDS = {
 }
 
 
+def cli_version():
+    """The farm version this site publishes, so the CLI can tell a person it has fallen behind
+    without anything on this site or in the command talking to PyPI. It is the version of the
+    package this script ships beside, whatever tree the manifests are built from."""
+    found = re.search(r'^version\s*=\s*"([^"]+)"', (ROOT / "pyproject.toml").read_text(), re.M)
+    if not found:
+        raise SystemExit("pyproject.toml has no version for the catalog to publish.")
+    return found.group(1)
+
+
 def e(value):
     return escape(str(value), quote=True)
 
@@ -610,7 +620,8 @@ def build(source=ROOT, output=None, today=None):
             write(url.lstrip('/') + 'index.html', page(title, body, url, scripts))
         write('404.html', page('Page not found', '<section class="sect"><h1>Page not found</h1><p>This page does not exist. ' + link('/', 'Return to the catalog') + '.</p></section>', '/404.html'))
         write('sitemap.xml', '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + ''.join(f'<url><loc>{ORIGIN}{url}</loc></url>' for url in sorted(pages) if url not in ("/account/", "/submit/done/")) + '</urlset>\n')
-        write('catalog.json', json.dumps([app for _, app in manifests], ensure_ascii=False) + '\n')
+        write('catalog.json', json.dumps({'cli': cli_version(), 'apps': [app for _, app in manifests]},
+                                         ensure_ascii=False) + '\n')
         write('categories.json', json.dumps({'map': CATEGORIES, 'order': CATEGORY_ORDER}, ensure_ascii=False) + '\n')
         write('llms.txt', guide)
         write('site.webmanifest', json.dumps({'name': 'tiinyapp.farm', 'short_name': 'tiinyapp.farm',

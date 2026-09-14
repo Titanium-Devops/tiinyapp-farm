@@ -42,7 +42,9 @@ def app_ids(origin, timeout):
         if ids:
             return ids
     body, _, _ = fetch(origin + "/catalog.json", BROWSER, timeout)
-    return sorted(app["id"] for app in json.loads(body))
+    published = json.loads(body)
+    apps = published if isinstance(published, list) else published.get("apps", [])
+    return sorted(app["id"] for app in apps)
 
 
 def fetch(url, agent, timeout):

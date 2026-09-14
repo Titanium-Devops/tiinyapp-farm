@@ -48,6 +48,9 @@ DEVICE_PORT = 39218
 LOCAL_NETWORK_TIMEOUT = 2.0
 # 65 on macOS, 113 on Linux, and Windows sockets answer with the WSA number instead.
 NO_ROUTE = {errno.EHOSTUNREACH, 10065}
+# How often the farm looks to see whether the farm itself has moved on, and how long it waits.
+UPDATE_CHECK_EVERY = 24 * 60 * 60
+UPDATE_CHECK_TIMEOUT = 2.0
 WINDOWS = os.name == "nt"
 MAX_UNPACKED = 2 * 1024 * 1024 * 1024
 MAX_PUBLISH = 50 * 1024 * 1024
@@ -426,6 +429,13 @@ def python_candidates(skip=()):
         seen.add(real)
         found.append(path)
     return found
+
+
+def newer_version(offered, running):
+    """Whether the catalog is publishing a farm newer than this one. Anything unreadable is not."""
+    if not isinstance(offered, str) or not VERSION.fullmatch(offered) or not VERSION.fullmatch(running or ""):
+        return False
+    return tuple(map(int, offered.split("."))) > tuple(map(int, running.split(".")))
 
 
 def private_address(address):
@@ -1543,6 +1553,102 @@ class Farm:
         self.config_home.mkdir(parents=True, exist_ok=True, mode=0o700)
         atomic_write(self.config_home / "settings.json", json.dumps(saved, indent=2) + "\n")
 
+    def published_cli(self, timeout=UPDATE_CHECK_TIMEOUT):
+        """The farm version the catalog publishes. The site writes it into catalog.json, so this
+        never asks PyPI anything, and an older catalog that is still an array simply has none."""
+        with open_url(self.api_origin + "/catalog.json", timeout=timeout) as response:
+            published = json.loads(response.read(4 * 1024 * 1024))
+        return published.get("cli") if isinstance(published, dict) else None
+
+    def remembered_cli(self):
+        """What the last look found, and when. One look a day is enough to catch a release."""
+        try:
+            stamp = read_json(self.config_home / "update-check.json")
+            return (str(stamp.get("cli") or ""), float(stamp.get("checked") or 0))
+        except (OSError, ValueError, TypeError, AttributeError):
+            return "", 0.0
+
+    def offered_cli(self, now=None):
+        """The newest farm the catalog has offered, looked up at most once a day and never in a
+        way that can delay or fail the command a person actually ran."""
+        if os.environ.get("FARM_NO_UPDATE_CHECK"):
+            return ""
+        offered, checked = self.remembered_cli()
+        now = time.time() if now is None else now
+        if 0 <= now - checked < UPDATE_CHECK_EVERY:
+            return offered
+        try:
+            offered = self.published_cli() or ""
+        except Exception:  # noqa: BLE001 - offline, slow, or a catalog that has not shipped one yet.
+            offered = ""
+        try:
+            self.config_home.mkdir(parents=True, exist_ok=True, mode=0o700)
+            atomic_write(self.config_home / "update-check.json",
+                         json.dumps({"cli": offered, "checked": now}) + "\n")
+        except OSError:
+            pass
+        return offered
+
+    def update_notice(self):
+        """Jason, 2026-09-14: "there's a new farm update out there, should there be some sort of
+        polling that checks and says, hey, you're running at X and version XYZ is out." One line,
+        after whatever the person actually asked for, and never in a script."""
+        try:
+            if not sys.stdout.isatty():
+                return
+            running = _version()
+            offered = self.offered_cli()
+            if newer_version(offered, running):
+                print(f"farm {offered} is out and you are on {running}. Run: farm self-update")
+        except Exception:  # noqa: BLE001 - a notice must never be the reason a command fails.
+            return
+
+    def pipx_venv(self):
+        """pipx puts each command in its own virtual environment, and pip inside one of those is
+        not how a person is meant to move it forward."""
+        parts = Path(sys.prefix).parts
+        return "pipx" in parts and "venvs" in parts
+
+    def self_update(self):
+        """Move the farm itself forward. It never touches an installed app."""
+        running = _version()
+        if self.pipx_venv():
+            command = [shutil.which("pipx") or "pipx", "upgrade", "tiinyapp-farm"]
+            print("Upgrading the farm with pipx.")
+        else:
+            command = [sys.executable, "-m", "pip", "install", "--upgrade", "tiinyapp-farm"]
+            print(f"Upgrading the farm with pip, in {sys.executable}.")
+        try:
+            done = subprocess.run(command, capture_output=True, text=True, timeout=600)
+        except FileNotFoundError:
+            raise FarmError("pipx is not on this machine, so the farm cannot upgrade itself."
+                            " Run: pipx upgrade tiinyapp-farm where pipx is installed.") from None
+        except subprocess.SubprocessError:
+            raise FarmError("The upgrade did not finish. Run it again, or upgrade by hand with"
+                            f" {shlex.join(command)}.") from None
+        said = [line.strip() for line in (done.stdout or done.stderr or "").splitlines() if line.strip()]
+        if said:
+            print(said[-1])
+        if done.returncode:
+            raise FarmError("The upgrade did not go through, and the farm is still "
+                            + running + ". The line above is what it said.")
+        now = self.installed_cli()
+        print(f"farm is now {now}." if now else f"The farm was {running} and has been upgraded.")
+        print("That is the version you were already on, so nothing changed." if now == running else
+              "The next farm command you run is the new one.")
+
+    @staticmethod
+    def installed_cli():
+        """Ask a fresh interpreter, because this one is still running the version it started with."""
+        try:
+            done = subprocess.run([sys.executable, "-c",
+                                   "from importlib.metadata import version; print(version('tiinyapp-farm'))"],
+                                  capture_output=True, text=True, timeout=60)
+            found = done.stdout.strip().splitlines()[-1].strip()
+        except (OSError, IndexError, subprocess.SubprocessError):
+            return ""
+        return found if VERSION.fullmatch(found) else ""
+
     def app_python(self):
         """The interpreter the farm runs apps with, when it has had to pick one and it is still there."""
         saved = self.settings().get("python")
@@ -1910,6 +2016,9 @@ class Farm:
         version = ".".join(map(str, sys.version_info[:3]))
         print(f"farm {_version()}, running apps with {interpreter}"
               + (f" (Python {version})." if Path(interpreter) == Path(sys.executable) else "."))
+        offered = self.offered_cli()
+        if newer_version(offered, _version()):
+            print(f"farm {offered} is out and you are on {_version()}. Run: farm self-update")
         settings = self.device_settings()
         models, working = [], None
         if not settings:
@@ -1975,6 +2084,8 @@ def _version():
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", action="version", version="farm " + _version())
+    parser.add_argument("--no-update-check", action="store_true",
+                        help="Do not look for a newer farm (or set FARM_NO_UPDATE_CHECK=1)")
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("install", "update", "start", "stop", "remove"):
         command = commands.add_parser(name)
@@ -2008,12 +2119,14 @@ def main(argv=None):
     status.add_argument("--token", help="API token (otherwise FARM_TOKEN or ~/.tiinyapps/token)")
     commands.add_parser("list")
     commands.add_parser("doctor")
+    commands.add_parser("self-update")
     check = commands.add_parser("check")
     check.add_argument("--yes", "-y", action="store_true", help="Update everything newer without asking")
     check.add_argument("--all", dest="every", action="store_true",
                        help="Update everything with a newer version without asking")
     args = parser.parse_args(argv)
     farm = Farm()
+    code = 0
     try:
         if args.command == "install":
             farm.install(args.id, yes=args.yes)
@@ -2034,7 +2147,9 @@ def main(argv=None):
         elif args.command == "remove":
             farm.remove(args.id, purge=args.purge)
         elif args.command == "doctor":
-            return 0 if farm.doctor() else 1
+            code = 0 if farm.doctor() else 1
+        elif args.command == "self-update":
+            farm.self_update()
         elif args.command == "start":
             farm.start(args.id, port=args.port, python=args.python)
         elif args.command == "stop":
@@ -2049,7 +2164,10 @@ def main(argv=None):
     except (EOFError, KeyboardInterrupt):
         print("Cancelled.", file=sys.stderr)
         return 1
-    return 0
+    # After the work, never before it, and never on top of a command that failed.
+    if not args.no_update_check and args.command not in ("doctor", "self-update"):
+        farm.update_notice()
+    return code
 
 
 if __name__ == "__main__":
