@@ -54,7 +54,7 @@
     "size": 480440
   },
   "port": {
-    "argv": "--serve"
+    "argv": "--port"
   },
   "featured": false,
   "media": {
