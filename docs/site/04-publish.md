@@ -116,8 +116,31 @@ missing. This is the whole shape of that file; unknown fields are refused.
 | `category` | Required. One of `assistant`, `family`, `audio`, `developer-tools`, `library` |
 | `entry` | Required. `null` for a library, a command string, `{"command": "..."}`, or `{"python": "package.module", "args": []}` |
 | `permissions` | Required. Any of `microphone`, `files`, `network`, `device`. Use `[]` for none |
+| `requires.device.models` | Required. The kinds of model your app cannot work without, or exact model ids. Use `[]` for none |
+| `requires.device.npuUnits` | Required. Roughly what those models cost on the NPU, as a whole number. `0` when the app needs none |
 | `links` | Optional. `repo`, `homepage` and `video` only, all HTTPS |
 | `media` | Optional. `icon`, `header` and `screenshots`, as paths inside the project |
+
+### Declare what your app cannot work without
+
+`requires.device.models` is a promise, not an inventory. The farm refuses to start an app whose
+declared models are not loaded, and offers to load them, so declare what your app genuinely cannot
+work without and nothing else. A feature that degrades when a model is missing does not belong
+there: Daybreak falls back to title overlap when the embedding model is absent, and Story Lantern
+cannot tell a story at all without a chat model.
+
+| Write | To mean |
+| --- | --- |
+| `"chat"` | Any loaded model the device calls `main` |
+| `"embedding"`, `"rerank"`, `"image"`, `"ocr"`, `"music"` | Any loaded model of that kind, same word on both sides |
+| `"tts"` | Any loaded model the device calls `voice` |
+| `"asr"` | Any loaded model the device calls `audio` |
+| `"Tongyi-MAI/Z-Image-Turbo"` | That model and no other. Anything with a slash in it is read as a model id |
+
+Name an exact model only when your app really does depend on that one, because a person who has a
+different model of the same kind loaded will be told to load yours as well, and both will sit in
+the NPU at once. `npuUnits` beside it is a rough figure for what your models cost, which the farm
+prints at install so somebody can see whether their Tiiny has room.
 
 The command packs the current folder into `<id>-<version>.tar.gz`, skipping `.git`,
 `node_modules`, `__pycache__` and `.venv`, refuses any single file over 50 MB and a packed archive

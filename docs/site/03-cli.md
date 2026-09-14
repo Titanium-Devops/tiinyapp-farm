@@ -195,6 +195,35 @@ farm start <id> --port 7799
 | --- | --- |
 | `--port N` | Replace the app's first declared port. Must be 1 to 65535. Refused by an app whose manifest says its port is fixed |
 | `--python PATH` | Run this app with this Python, and keep it for later starts on this machine |
+| `--load` | Load whatever model the app needs without asking first |
+| `--no-model-check` | Start even if the models the app needs are not loaded (or set `FARM_NO_MODEL_CHECK=1`) |
+
+### The models an app needs
+
+Before anything is launched, `farm start` checks what the manifest declares in
+`requires.device.models` against what your Tiiny has loaded. An app that needs a chat model and is
+started without one starts perfectly well and then answers every message with an error, which reads
+as a broken app rather than an empty NPU, so the farm refuses instead and says what is missing:
+
+```
+Titanium Tiiny Bot needs chat on your Tiiny, and what is loaded is embedding Qwen/Qwen3-Embedding-0.6B 1 unit and tts Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice 7 units.
+Load Qwen/Qwen3-8B for chat now? [Y/n]
+```
+
+Each kind is met by any loaded model of that kind. A need with a slash in it is an exact model id
+and is met by that model only. The offer picks the cheapest downloaded model of that kind that fits
+what the NPU has free, numbers them when there are several, and says so rather than offering one
+when nothing of that kind is downloaded or nothing fits. Loading waits for your Tiiny to say the
+model is running before the app starts, for as long as the device's own estimate for that model
+suggests.
+
+`--load` says yes to all of it without asking. `--json` never asks and answers with what is
+missing instead:
+
+```json
+{"command": "start", "id": "titanium-tiiny-bot", "ok": false, "started": false,
+ "missing": [{"kind": "chat", "loaded": [], "available": ["Qwen/Qwen3-8B", "openai/gpt-oss-20b"]}]}
+```
 
 With no id it numbers the installed apps that are not running and could be, then asks the same
 question `farm update` asks:
@@ -303,6 +332,55 @@ On Windows the process is terminated through a handle held across the identity c
 process ID cannot be hit by mistake. An app that was not running is reported, not treated as an
 error. If the process still will not die, the process records are kept rather than removed.
 
+## farm models
+
+```
+farm models
+farm models --json
+farm models --watch
+```
+
+What your Tiiny has loaded right now, what it has on disk, and what is left of the NPU:
+
+```
+Your Tiiny has 4 models loaded, using 68 of 100 NPU units.
+  chat Qwen/Qwen3-8B 28 units running
+  embedding Qwen/Qwen3-Embedding-0.6B 1 unit running
+  image Tongyi-MAI/Z-Image-Turbo 32 units running
+  tts Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice 7 units running
+16 more models are downloaded and not loaded:
+  chat openai/gpt-oss-20b 32 units
+32 NPU units are free.
+```
+
+The kind is the device's own capability for that model, in the farm's word for it. Your Tiiny says
+`main`, `voice` and `audio`; a manifest and this list say `chat`, `tts` and `asr`. The other five,
+`embedding`, `rerank`, `image`, `ocr` and `music`, are the same word on both sides. NPU units are
+memory residency rather than a compute reservation, so several models are resident at once and the
+free figure is what says whether another one fits.
+
+| Flag | Meaning |
+| --- | --- |
+| `--watch` | Keep looking, and print a line whenever a model changes state. Ctrl-C to stop |
+| `--interval N` | Seconds between looks with `--watch`. Default 3 |
+| `--json` | One JSON object of the lot, or with `--watch` one object per change |
+
+```
+16:33:55 Qwen/Qwen3-TTS-12Hz-1.7B-Base is loaded for tts, 5 units, 73 of 100 NPU units in use.
+16:33:59 Qwen/Qwen3-TTS-12Hz-1.7B-Base for tts is not loaded any more, 68 of 100 NPU units in use.
+```
+
+`--watch --json` writes one object per change to standard output as it happens, which is what a
+launcher reads:
+
+```json
+{"command": "models", "event": "loaded", "id": "Qwen/Qwen3-8B", "kind": "chat",
+ "capability": "main", "units": 28, "state": "running",
+ "npu": {"total": 100, "used": 96, "available": 4}, "at": 1789421728}
+```
+
+`event` is `loaded`, `unloaded` or `changed`.
+
 ## farm list
 
 ```
@@ -328,6 +406,19 @@ offered, on the port the app really took. The version shown is the one the app r
 health path when it has one, and a mismatch with the installed version is reported as
 `restart to update`. A row whose app has a newer version in the catalog ends with
 `update available: 0.1.0`. Health that cannot be read is labelled rather than guessed.
+
+An app that declares it needs a model gets a second line whenever your Tiiny does not have that
+model loaded now, naming the one that was loaded when the app started if there was one:
+
+```
+titanium-tiiny-bot 55663 7788 http://localhost:7788 10s running 0.1.15
+  titanium-tiiny-bot is missing chat (Qwen/Qwen3-8B) was loaded when it started and is not now, first noticed just now.
+```
+
+The farm writes down when it first saw the need go unmet, because your Tiiny cannot say when a
+model was unloaded and the thing worth knowing is whether it happened before or after the app
+stopped working. `--json` carries the same under `models`, as `needs`, `unmet`, `lost` and `since`.
+`farm doctor` reports the same thing for every installed app, running or not.
 
 With an app id it is a remote command instead: it asks the farm about your own submission of that
 app and prints its state, each check with its status, and each review. It needs an API token.
@@ -453,6 +544,7 @@ Every shape is documented, with an example of each, in
 | `TIINY_BASE` | Device base URL for `farm device` in its scripted form |
 | `TIINY_KEY` | Device API key for `farm device` in its scripted form |
 | `FARM_NO_UPDATE_CHECK` | Set to anything and the farm never looks for a newer farm |
+| `FARM_NO_MODEL_CHECK` | Set to anything and `farm start` never checks the models an app needs |
 | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` | The proxy the farm fetches through, and the hosts it does not. Lowercase spellings work too |
 
 The farm reads its proxy from those variables only, and never from macOS System Settings. Asking

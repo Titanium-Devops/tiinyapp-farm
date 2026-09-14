@@ -73,6 +73,7 @@ uses where nobody is there to answer a question.
 | --- | --- | --- |
 | `farm device --find` | Looks for a Tiiny on the cable, on this network and at the TiinyOS client, and prints what answered | `--json` |
 | `farm device` | Saves the device base URL and API key that every app is launched with | `--base BASE`, `--key-stdin` |
+| `farm models` | Says what your Tiiny has loaded, what is on its disk and what the NPU has free | `--watch`, `--interval N`, `--json` |
 
 `--find` saves nothing and needs no key. It prints one line per Tiiny with its serial number, the
 address to use, how it was reached and the base URL to save, and exits 1 when nothing answered.
@@ -96,6 +97,21 @@ Neither value is ever printed back.
 ```sh
 farm device --base http://openai.api.tiiny/v1 --key-stdin < private-key-file
 ```
+
+### Models
+
+An app declares the kinds of model it cannot work without, and `farm start` checks them before it
+launches anything, because an app started without its model runs and then fails at every message.
+
+```sh
+farm models                      # what is loaded, what is on disk, what is free
+farm models --watch              # a line every time one is loaded or unloaded
+farm start titanium-tiiny-bot    # refuses and offers to load what is missing
+farm start titanium-tiiny-bot --load   # loads it without asking, then starts
+```
+
+`farm status` and `farm doctor` say when a model an app needs is no longer loaded.
+`--no-model-check`, or `FARM_NO_MODEL_CHECK=1`, starts it anyway.
 
 ### Health
 
@@ -155,7 +171,8 @@ farm doctor --json
 ```
 
 `login`, `publish`, `release`, `remove` and `self-update` have no `--json`, and `device` takes it
-only with `--find`.
+only with `--find`. `farm models --watch --json` streams one object per change instead of answering
+once.
 
 ### Exit codes
 
@@ -198,6 +215,7 @@ What the farm reads:
 | `TIINY_BASE` | Device base URL for `farm device` in its scripted form |
 | `TIINY_KEY` | Device API key for `farm device` in its scripted form |
 | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` | The proxy the farm fetches through, and the hosts it does not |
+| `FARM_NO_MODEL_CHECK` | Set to anything and `farm start` never checks the models an app needs |
 
 The farm takes its proxy from those variables and never from macOS System Settings, because asking
 the machine corrupts the process it is asked in and everything that process then starts.

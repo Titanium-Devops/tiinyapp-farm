@@ -223,6 +223,56 @@ The TiinyOS client answers every name under `api.tiiny` on loopback, so a name r
 nothing about whether a Tiiny is there. Ask the surface instead: `http://openai.api.tiiny/v1/models`
 with no key answers 401 when a box is behind it, and 404 or a refused connection when there is not.
 
+## Check the models before you start an app
+
+An app that declares it needs a kind of model and is started without one runs, and then answers
+every message with an error. It looks like a broken app and it is an empty NPU. Do not start an app
+without checking, and do not tell somebody an app is broken until you have:
+
+```
+farm models --json
+```
+
+```json
+{"command": "models", "npu": {"total": 100, "used": 68, "available": 32}, "pending": [],
+ "loaded": [{"id": "Qwen/Qwen3-8B", "kind": "chat", "capability": "main", "units": 28,
+             "state": "running", "port": 9098, "seconds": 8}],
+ "downloaded": [{"id": "openai/gpt-oss-20b", "kind": "chat", "capability": "main", "units": 32,
+                 "state": "downloaded", "port": null, "seconds": 20}]}
+```
+
+`kind` is the farm's word and `capability` is the device's own. They differ for three of the eight:
+the device says `main`, `voice` and `audio` where a manifest says `chat`, `tts` and `asr`.
+`embedding`, `rerank`, `image`, `ocr` and `music` are the same word on both sides. `units` is NPU
+memory residency, so `available` is what says whether another model fits.
+
+`farm start <id> --json` does the check itself and never asks a question, which is what you want:
+
+```json
+{"command": "start", "id": "titanium-tiiny-bot", "ok": false, "started": false,
+ "missing": [{"kind": "chat", "loaded": [],
+              "available": ["Qwen/Qwen3-8B", "openai/gpt-oss-20b"]}]}
+```
+
+Nothing was launched. `available` is what is on the device's disk and could be loaded for that
+need. Add `--load` to have the farm load the cheapest one that fits and then start the app, or ask
+the person which of `available` they want. `farm start <id> --json --no-model-check` starts it
+anyway, which is almost never the right thing to do on somebody's behalf.
+
+While an app runs, `farm status --json` carries the same check per app under `models`:
+
+```json
+{"needs": ["chat", "tts"], "unmet": ["chat"], "lost": {"chat": "Qwen/Qwen3-8B"},
+ "since": 1789421576.68}
+```
+
+`lost` names the model that was meeting a need when the app started and is not loaded any more, and
+`since` is when the farm first noticed. An `unmet` of `null` means the farm could not ask the Tiiny,
+which is not the same as nothing being loaded.
+
+To watch rather than poll, `farm models --watch --json` writes one object per change to standard
+output as it happens, with `event` of `loaded`, `unloaded` or `changed`. It runs until you stop it.
+
 ## Put the key where the farm reads it
 
 `farm device` saves the address and the key once. Ask the person for the key, take it on standard
@@ -242,6 +292,9 @@ subprocess.run(["farm", "device", "--base", base, "--key-stdin"],
 It writes `~/.tiinyapps/device.json` with mode 0600, names the installed apps those settings reach,
 and offers one command to try them with. Run it again to change either value. `TIINY_BASE` and
 `TIINY_KEY` in the environment do the same job without a file.
+
+`farm models` takes `--json`, and with `--watch` it streams one object per change rather than
+answering once.
 
 `farm device` takes `--json` with `--find` and nowhere else, because saving a key needs the hidden
 prompt or standard input and no `--json` command reads either. `login`, `publish`, `release` and
