@@ -140,7 +140,7 @@ def page(title, body, path, scripts=()):
     dimensions = '<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">' if path.startswith('/apps/') else ''
     active = ('install' if path == '/install/' else 'submit' if path.startswith('/submit/') else
               'catalog' if path == '/catalog/' else 'apps' if path == '/' or path.startswith(('/apps/', '/makers/')) else '')
-    navigation = ''.join(f'<a href="{url}"' + (' class="on" aria-current="page"' if key == active else '') + f'>{label}</a>' for key, url, label in [('apps', '/', 'Apps'), ('catalog', '/catalog/', 'Catalog'), ('install', '/install/', 'Install'), ('submit', '/submit/', 'Submit an app')])
+    navigation = ''.join(f'<a href="{url}"' + (' class="on" aria-current="page"' if key == active else '') + f'>{label}</a>' for key, url, label in [('apps', '/', 'Apps'), ('catalog', '/catalog/', 'Catalog'), ('install', '/install/', 'Install'), ('docs', '/docs/', 'Docs'), ('submit', '/submit/', 'Submit an app')])
     page_scripts = ''.join(f'<script type="module" src="{e(src)}"></script>' for src in scripts)
     return f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
