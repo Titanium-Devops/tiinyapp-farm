@@ -110,6 +110,7 @@ The same command as `farm update` with no id, under the word most people reach f
 ## farm start
 
 ```
+farm start
 farm start <id>
 farm start <id> --port 7799
 ```
@@ -117,6 +118,22 @@ farm start <id> --port 7799
 | Flag | Meaning |
 | --- | --- |
 | `--port N` | Replace the app's first declared port. Must be 1 to 65535. Refused by an app whose manifest says its port is fixed |
+
+With no id it numbers the installed apps that are not running and could be, then asks the same
+question `farm update` asks:
+
+```
+2 installed apps are ready to start.
+1. TiinyBench 0.1.1
+2. Tiiny Brain 0.1.1
+Start which? A number, "all", or Enter to leave them.
+```
+
+Exactly one candidate is a plain `Start TiinyBench? [Y/n]` rather than a list of one, and the answer
+defaults to yes. A library is never on the list, because it has nothing to start, and neither is an
+app that is already running. With nothing left to start it says which of those is the reason in one
+line. Run from a script, where nothing is a terminal, it prints the list and names the ids to run by
+hand. A port belongs to one app, so `--port` with no id is refused.
 
 A start that worked ends with the link to open on its own line, the one-line summary, how to stop
 it, and the log path last:
@@ -151,10 +168,23 @@ and a busy port on such an app is not answered with advice that cannot work.
 ## farm stop
 
 ```
+farm stop
 farm stop <id>
 ```
 
-Sends SIGINT to the process group, waits up to five seconds, then sends SIGKILL and waits two more.
+With no id it numbers the running apps with the port each one took, then asks:
+
+```
+2 apps are running.
+1. AINode Pocket 0.1.0 on port 7863
+2. TiinyBench 0.1.1 on port 7864
+Stop which? A number, "all", or Enter to leave them.
+```
+
+Exactly one running app is a plain `Stop AINode Pocket? [Y/n]`, and nothing running says so in one
+line. A script gets the list and the ids to run by hand, and stops nothing.
+
+With an id it sends SIGINT to the process group, waits up to five seconds, then sends SIGKILL and waits two more.
 On Windows the process is terminated through a handle held across the identity check, so a recycled
 process ID cannot be hit by mistake. An app that was not running is reported, not treated as an
 error. If the process still will not die, the process records are kept rather than removed.

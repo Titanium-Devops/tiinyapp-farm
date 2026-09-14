@@ -433,6 +433,50 @@ def interactive():
         return False
 
 
+def ask_which(question, count, everything=False):
+    """The one question the farm's choosers ask, and what the answer to it means.
+
+    Returns the indexes chosen and the answer as typed. The indexes are None when there was nobody
+    there to answer, and empty both when the person left them alone and when they named something
+    that is not on the list, which the answer tells apart."""
+    if everything:
+        return list(range(count)), "all"
+    if not interactive():
+        return None, ""
+    try:
+        answer = input(question).strip().lower()
+    except EOFError:
+        # Windows calls NUL a terminal, so a script can reach the question anyway.
+        # End of input is nobody there, not a person cancelling.
+        print()
+        return None, ""
+    if not answer:
+        return [], ""
+    if answer == "all":
+        return list(range(count)), answer
+    if answer.isascii() and answer.isdigit() and 1 <= int(answer) <= count:
+        return [int(answer) - 1], answer
+    return [], answer
+
+
+def ask_yes(question):
+    """One question whose default is yes. None when there was nobody there to answer it."""
+    if not interactive():
+        return None
+    try:
+        answer = input(question).strip().lower()
+    except EOFError:
+        print()
+        return None
+    return not answer or answer in ("y", "yes")
+
+
+def name_one(verb, idents):
+    """How to do it by hand, for when there was nobody there to ask."""
+    return (f"Run: farm {verb} {idents[0]}." if len(idents) == 1 else
+            f"Run: farm {verb} <id>, naming one of {join_words(idents)}.")
+
+
 class Farm:
     def __init__(self, home=None, catalog=None, api_origin=None):
         self.home = Path(home) if home is not None else Path.home() / "tiinyapps"
@@ -946,6 +990,103 @@ class Farm:
                   if module.is_file() else
                   f"Its files are in {destination}; import what you need from there.")
 
+    def running_apps(self):
+        """Every app running now, with the name a person reads and the port it really took."""
+        rows = []
+        for path in sorted(self.home.glob("*/farm.pid")):
+            ident = path.parent.name
+            with self.guard(ident):
+                try:
+                    if not self.active(ident):
+                        continue
+                    _, manifest = self.installed(ident)
+                    _, port = self.running_port(ident)
+                except (FarmError, OSError, ValueError):
+                    continue
+            rows.append((ident, manifest, port))
+        return rows
+
+    def startable_apps(self):
+        """Every installed app that could be started right now: runnable, and not already running."""
+        rows = []
+        for current in sorted(self.home.glob("*/current")):
+            ident = current.parent.name
+            with self.guard(ident):
+                try:
+                    _, manifest = self.installed(ident)
+                except (FarmError, OSError, ValueError):
+                    continue
+                if manifest["entry"] is None or self.active(ident):
+                    continue
+            rows.append((ident, manifest))
+        return rows
+
+    def choose_to_stop(self):
+        """Jason, 2026-09-14: "Does it ask me which app I want to stop?" Now it does."""
+        rows = self.running_apps()
+        if not rows:
+            print("Nothing is running.")
+            return
+        if len(rows) == 1:
+            ident, manifest, _ = rows[0]
+            answer = ask_yes(f"Stop {manifest['name']}? [Y/n] ")
+            if answer is None:
+                print(f"{manifest['name']} is running. " + name_one("stop", [ident]))
+            elif answer:
+                self.stop(ident)
+            else:
+                print("Left as it is.")
+            return
+        print(f"{len(rows)} apps are running.")
+        for number, (_, manifest, port) in enumerate(rows, 1):
+            print(f"{number}. {manifest['name']} {manifest['version']}"
+                  + (f" on port {port}" if port else ""))
+        chosen, answer = ask_which('Stop which? A number, "all", or Enter to leave them. ', len(rows))
+        if chosen is None:
+            print("Nothing was stopped. " + name_one("stop", [row[0] for row in rows]))
+            return
+        if not chosen:
+            print("Left as they are." if not answer else
+                  f"There is no {answer} in that list, so nothing was stopped.")
+            return
+        for index in chosen:
+            self.stop(rows[index][0])
+
+    def choose_to_start(self):
+        """The same question farm stop asks, for the apps that are sitting there not running."""
+        rows = self.startable_apps()
+        if not rows:
+            if not any(self.home.glob("*/current")):
+                print("Nothing is installed yet. Run: farm list to see what the catalog has.")
+            elif self.running_apps():
+                print("Everything you have installed is already running.")
+            else:
+                print("Nothing you have installed is a runnable app; a library has nothing to start.")
+            return
+        if len(rows) == 1:
+            ident, manifest = rows[0]
+            answer = ask_yes(f"Start {manifest['name']}? [Y/n] ")
+            if answer is None:
+                print(f"{manifest['name']} is installed and not running. " + name_one("start", [ident]))
+            elif answer:
+                self.start(ident)
+            else:
+                print("Left as it is.")
+            return
+        print(f"{len(rows)} installed apps are ready to start.")
+        for number, (_, manifest) in enumerate(rows, 1):
+            print(f"{number}. {manifest['name']} {manifest['version']}")
+        chosen, answer = ask_which('Start which? A number, "all", or Enter to leave them. ', len(rows))
+        if chosen is None:
+            print("Nothing was started. " + name_one("start", [row[0] for row in rows]))
+            return
+        if not chosen:
+            print("Left as they are." if not answer else
+                  f"There is no {answer} in that list, so nothing was started.")
+            return
+        for index in chosen:
+            self.start(rows[index][0])
+
     def running_port(self, ident):
         """Whether an app is running now, and the port it really took, so an update can put it back."""
         if not self.active(ident):
@@ -1028,33 +1169,18 @@ class Farm:
         if not found:
             print("Everything you have installed is the newest the catalog has.")
             return
-        unasked = ("Nothing was updated. Run: farm update <id> to take one,"
-                   " or farm update --all to take them all.")
-        if everything or yes:
-            answer = "all"
-        elif not interactive():
-            print(unasked)
+        chosen, answer = ask_which('Update which? A number, "all", or Enter to leave them. ',
+                                   len(found), everything=everything or yes)
+        if chosen is None:
+            print("Nothing was updated. Run: farm update <id> to take one,"
+                  " or farm update --all to take them all.")
             return
-        else:
-            try:
-                answer = input('Update which? A number, "all", or Enter to leave them. ').strip().lower()
-            except EOFError:
-                # Windows calls NUL a terminal, so a script can reach the question anyway.
-                # End of input is nobody there, not a person cancelling.
-                print()
-                print(unasked)
-                return
-        if not answer:
-            print("Left as they are.")
+        if not chosen:
+            print("Left as they are." if not answer else
+                  f"There is no {answer} in that list, so nothing was updated.")
             return
-        if answer == "all":
-            for ident, _, _ in found:
-                self.update(ident, yes=True)
-            return
-        if answer.isascii() and answer.isdigit() and 1 <= int(answer) <= len(found):
-            self.update(found[int(answer) - 1][0], yes=True)
-            return
-        print(f"There is no {answer} in that list, so nothing was updated.")
+        for index in chosen:
+            self.update(found[index][0], yes=True)
 
     def device(self, base=None, key_stdin=False):
         scripted = base is not None or key_stdin or any(
@@ -1286,7 +1412,11 @@ class Farm:
         raise FarmError(f"Port {busy} is already in use and nothing above it up to {busy + span} is free;"
                         f" use farm start {ident} --port N.")
 
-    def start(self, ident, port=None):
+    def start(self, ident=None, port=None):
+        if ident is None:
+            if port is not None:
+                raise FarmError("A port belongs to one app, so name it: farm start <id> --port N.")
+            return self.choose_to_start()
         if port is not None and (type(port) is not int or not 1 <= port <= 65535):  # noqa: E721
             raise FarmError("Port must be an integer between 1 and 65535.")
         with self.guard(ident):
@@ -1450,7 +1580,9 @@ class Farm:
         (app / "process.json").unlink(missing_ok=True)
         return bool(pid)
 
-    def stop(self, ident):
+    def stop(self, ident=None):
+        if ident is None:
+            return self.choose_to_stop()
         with self.guard(ident):
             print(f"Stopped {ident}." if self._stop(ident) else f"{ident} is not running.")
 
@@ -1524,8 +1656,10 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("install", "update", "start", "stop", "remove"):
         command = commands.add_parser(name)
-        command.add_argument("id", nargs="?" if name == "update" else None,
-                             help="App id; with no id, farm update lists everything newer" if name == "update" else None)
+        asks = {"update": "App id; with no id it lists everything newer and asks which to take",
+                "start": "App id; with no id it lists what is not running and asks which to start",
+                "stop": "App id; with no id it lists what is running and asks which to stop"}
+        command.add_argument("id", nargs="?" if name in asks else None, help=asks.get(name))
         if name == "install":
             command.add_argument("--yes", "-y", action="store_true", help="Accept the install prompt")
         if name == "update":

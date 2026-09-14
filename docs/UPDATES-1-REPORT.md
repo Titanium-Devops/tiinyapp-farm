@@ -13,10 +13,15 @@ was really on. `farm list`, `farm status` and `farm start` say when something ne
   `Farm.install` grew a `restart` flag that swaps its last line, and says the data directory is
   kept on the update path. `farm update` takes an optional id plus `--all`, and `farm check` is a
   new subcommand. Standard library only, no new imports.
+- The id is optional on `farm start` and `farm stop` too. Jason, 2026-09-14: "Does it ask me which
+  app I want to stop?" Bare `farm stop` numbers the running apps and asks the same question the
+  update chooser asks, bare `farm start` numbers the installed apps that are not running and could
+  be, and exactly one candidate is a plain yes or no instead of a list of one. All three choosers
+  now go through `ask_which`, `ask_yes` and `name_one`.
 - `docs/manifest.schema.json` and `docs/site/05-manifest.md`: an optional one-line `release.notes`.
   The release object is `additionalProperties: false`, so without this the note the brief asks for
   could never reach a real catalog entry. It is optional and nothing breaks without it.
-- `tests/test_farm.py`: 30 new tests and one fixture helper for a second installed app.
+- `tests/test_farm.py`: 44 new tests and one fixture helper for a second installed app.
 - `docs/site/02-getting-started.md` and `docs/site/03-cli.md`.
 
 Rebased onto main after PR #18. `farm start` keeps both the line this work adds under the link and
@@ -35,7 +40,7 @@ reaches the question and must still leave with nothing changed and exit 0.
 | Run | Tests | Result |
 | --- | --- | --- |
 | `python3 -m unittest` on this branch's base | 212 | OK, 2 skipped |
-| `python3 -m unittest` after | 242 | OK, 2 skipped |
+| `python3 -m unittest` after | 256 | OK, 2 skipped |
 
 Measured on Jason's MacBook, Darwin 25.6.0 arm64, Python 3.14.6. The new tests cover the list with
 one newer, two newer and none; the number choice, `all`, Enter, an answer that is not on the list,
@@ -187,3 +192,75 @@ Everything you have installed is the newest the catalog has.
 
 - The version in `pyproject.toml` is untouched, as the brief says.
 - Nothing was started on 7788, 8430 or 8431, and nothing outside the scratch `HOME` was written.
+
+## The choosers, live
+
+The same scratch `HOME` and wheel, with AINode Pocket on 7863 and TiinyBench on 7864. Their
+installed manifests had their declared ports moved into the 7861 to 7869 range for this run.
+
+```
+# Two apps running, on 7863 and 7864.
+
+$ farm stop
+2 apps are running.
+1. AINode Pocket 0.1.0 on port 7863
+2. TiinyBench 0.1.1 on port 7864
+Stop which? A number, "all", or Enter to leave them. 
+Left as they are.
+(exit 0)
+
+$ farm stop
+2 apps are running.
+1. AINode Pocket 0.1.0 on port 7863
+2. TiinyBench 0.1.1 on port 7864
+Nothing was stopped. Run: farm stop <id>, naming one of ainode-pocket and tiiny-bench.
+(exit 0)
+
+$ farm stop
+2 apps are running.
+1. AINode Pocket 0.1.0 on port 7863
+2. TiinyBench 0.1.1 on port 7864
+Stop which? A number, "all", or Enter to leave them. 2
+Stopped tiiny-bench.
+(exit 0)
+
+$ farm stop
+Stop AINode Pocket? [Y/n] y
+Stopped ainode-pocket.
+(exit 0)
+
+$ farm stop
+Nothing is running.
+(exit 0)
+
+$ farm start
+3 installed apps are ready to start.
+1. AINode Pocket 0.1.0
+2. TiinyBench 0.1.1
+3. Tiiny Brain 0.1.1
+Start which? A number, "all", or Enter to leave them. 1
+AINode Pocket is running.
+Open http://localhost:7863
+One endpoint and one page for every Tiiny you own.
+Stop it with: farm stop ainode-pocket
+Log: /private/tmp/claude-501/-Users-sem-orca-workspaces-grok-bot-0-18-reconstructed-gb/5d8b03a4-9c9b-4e51-af12-2606d5d99b44/scratchpad/updates1/home/tiinyapps/ainode-pocket/farm.log
+(exit 0)
+
+$ farm start
+2 installed apps are ready to start.
+1. TiinyBench 0.1.1
+2. Tiiny Brain 0.1.1
+Start which? A number, "all", or Enter to leave them. n
+There is no n in that list, so nothing was started.
+(exit 0)
+
+$ farm start
+2 installed apps are ready to start.
+1. TiinyBench 0.1.1
+2. Tiiny Brain 0.1.1
+Nothing was started. Run: farm start <id>, naming one of tiiny-bench and tiiny-brain.
+(exit 0)
+```
+
+Tiiny Brain appears on the start list and was deliberately left alone: it declares a fixed port
+outside the range this work may touch.

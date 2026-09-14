@@ -144,6 +144,19 @@ nothing is left half running.
 it terminates the process through a held handle so that a recycled process ID cannot be hit by
 mistake.
 
+Neither command needs the app's name. Run `farm stop` on its own and it asks which of the running
+apps to stop, and `farm start` on its own asks which of the installed ones to start:
+
+```
+2 apps are running.
+1. AINode Pocket 0.1.0 on port 7863
+2. TiinyBench 0.1.1 on port 7864
+Stop which? A number, "all", or Enter to leave them.
+```
+
+When only one app fits it asks about that one instead, `Stop AINode Pocket? [Y/n]`, and yes is the
+default. Nothing running says so in one line.
+
 ## The port rule
 
 Every app declares the port it listens on. Before starting anything, `farm start` checks that
