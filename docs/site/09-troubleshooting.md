@@ -93,6 +93,12 @@ and offers what it found as the default, so pressing enter at the first question
 it on, plug the cable in or put it on the same network, and run `farm device --find` again. The
 address can always be typed in by hand instead.
 
+**`... was refused your local network.`** Not the same finding as no Tiiny. macOS grants the local
+network per binary, so a Python you installed yourself is refused until you allow it, and the farm
+cannot see past that to say whether a Tiiny is there. System Settings, Privacy and Security, Local
+Network, turn on Python, then run `farm device --find` again. If another Python on this machine can
+get through, the farm says which one found it and runs your apps with that one from then on.
+
 **The prompt refuses to run.** `farm device` will not fall back to echoing what you type. Run it in
 a real terminal, or use the scripted form:
 `farm device --base http://openai.api.tiiny/v1 --key-stdin < key-file`.

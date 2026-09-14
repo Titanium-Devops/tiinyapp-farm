@@ -50,3 +50,26 @@ Worktree: `git -C /Users/sem/code/tiinyapp-farm-main worktree add -b device-find
 Never touch /Users/sem/code/tiinyapp-farm or tiinyapp-farm-main. PR against main, do not merge. The
 device key is never read by this wave at all; the finder needs no key. Every `gh` call needs
 `< /dev/null`. Timeouts on everything. Report measured facts separated from plans.
+
+## Addendum, Jason 2026-09-14 14:41: "remember the python may be different we have to solve that"
+
+macOS grants the Local Network permission per binary. Last night his miniconda Python got
+EHOSTUNREACH to 172.17.7.177 while Homebrew's and /usr/bin/python3 reached the same box in
+milliseconds. farm 0.1.8 already handles that for apps: choose_python, the saved python setting,
+local_network_hint, and the errno 65/113 probe run in a child interpreter.
+
+The finder must use the same machinery rather than its own sockets in the current process only. Run
+the search through the interpreter the farm has chosen for apps (`self.app_python() or
+sys.executable`), and when it meets EHOSTUNREACH walk the other interpreters the farm already knows
+how to find, exactly as choose_python does for a start. Three outcomes must be distinguishable in
+the output and in `--json`:
+
+1. Found.
+2. Nothing on the cable or network, saying what was tried.
+3. This Python is blocked from the local network, with the Local Network hint and, if another
+   interpreter did reach the device, the sentence that the farm will use that one and has saved the
+   setting.
+
+A blocked Python must never be reported as "no Tiiny found". Tests for that branch with the probe
+patched per interpreter. Under the launcher the interpreter is the bundled one and the permission
+belongs to the app bundle, so the same code path just works there.

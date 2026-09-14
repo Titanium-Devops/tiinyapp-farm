@@ -82,6 +82,11 @@ farm device --find
 jason's Tiiny (TNYM26072400300011Q) at 172.17.7.177, over the cable, base http://172.17.7.177/v1
 ```
 
+It looks under the Python the farm runs apps with, because macOS grants the local network per
+binary and an app is what you are going to run. A Python that has been refused is told so, with the
+settings path that lifts it, and never reported as no Tiiny found. If another Python on the machine
+can get through, the farm keeps that one and says so.
+
 With no flags `farm device` runs that search first and offers what it found as the default, then
 prompts for both values without echoing, and refuses to run if the terminal cannot hide the input.
 With either flag, or with `TIINY_BASE` or `TIINY_KEY` set, it skips the search, takes the scripted

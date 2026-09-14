@@ -56,7 +56,8 @@ farm device --find --json
 ```
 
 ```json
-{"command": "device", "ok": true,
+{"command": "device", "ok": true, "blocked": false, "python": "/usr/local/bin/python3",
+ "moved": null,
  "found": [{"serial": "TNYM26072400300011Q", "name": "jason's Tiiny", "address": "172.17.7.177",
             "via": "cable", "base": "http://172.17.7.177/v1",
             "interfaces": [{"interface": "usb0", "address": "172.17.7.177"},
@@ -64,8 +65,17 @@ farm device --find --json
 ```
 
 `via` is `cable`, `network` or `TiinyOS client`, `base` is the URL to hand `farm device --base`, and
-`ok` is false with exit 1 when nothing answered. The search is capped at six seconds. Use this
-before writing your own, and read the rest of this section to know what it is doing.
+`ok` is false with exit 1 when nothing answered. The search is capped at six seconds.
+
+`blocked` is the one to read before you tell somebody there is no Tiiny. macOS grants the local
+network per binary and grants it silently, so a Python that has not been allowed gets EHOSTUNREACH
+where another gets the device in milliseconds. `blocked` true means the farm could not see, not that
+nothing is there, and the right thing to say is the Local Network settings path, not "check your
+cable". `python` is the interpreter that did the looking, and `moved` is the one the farm changed to
+and saved when it had to find another. Do the same in your own code: the answer that counts is the
+one from the binary that will be doing the reaching.
+
+Use this before writing your own, and read the rest of this section to know what it is doing.
 
 A Tiiny answers `http://<address>:39218/device.json` on the local network, with no credential. That
 answer carries a serial number, so it identifies a box rather than merely finding an open port. It

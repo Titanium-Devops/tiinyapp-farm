@@ -68,14 +68,43 @@ Run farm device to save it. It offers this address and asks for the key.
 
 One box that answers on the cable and on the network is one line, not two: the serial number in
 `device.json` is what says how many Tiinys are really there, and the cable is offered first because
-a /30 never moves and a network address does. Nothing found says what was tried, and exits 1.
+a /30 never moves and a network address does.
 
 The whole search is capped at six seconds and every socket in it carries a timeout, so a filtered
 port cannot hang it. Measured at 0.9 seconds on an M-series Mac with one Tiiny on the cable.
 
-`--json` answers `{"command": "device", "ok": ..., "found": [...]}`, one entry per Tiiny with its
-`serial`, `name`, `address`, `via`, `base` and the `interfaces` its `device.json` lists. `ok` is
-false and the exit code 1 when nothing answered.
+### Which Python does the looking
+
+macOS grants the local network per binary, and grants it silently, so the same code finds a Tiiny
+under one Python and gets no route at all under another. The farm therefore does the looking under
+the Python it runs apps with, not under the one running the CLI, because an app is what you are
+going to run. When that one is refused, the farm asks the other Pythons on this machine, exactly as
+a failed `farm start` does, and keeps the first that gets through.
+
+Under the launcher this is the bundled Python and the permission belongs to the app bundle, so the
+same path needs nothing special there.
+
+### The three answers
+
+| It says | What happened |
+| --- | --- |
+| One line per Tiiny | Found. `farm device` will offer the first one |
+| `No Tiiny answered.` and what was tried | Nothing is there. Exit 1 |
+| `... was refused your local network`, and the Local Network settings path | macOS is blocking that Python. Never reported as no Tiiny found, because it is not the same thing |
+
+A refused Python that another Python could get past says which one found it, and that the farm has
+saved it and will run apps with it from now on.
+
+```
+jason's Tiiny (TNYM26072400300011Q) at 172.17.7.177, over the cable, base http://172.17.7.177/v1
+/opt/homebrew/bin/python3 found it. The Python the farm was using cannot reach your local network, so the farm will run apps with that one from now on, and has saved it.
+```
+
+`--json` answers `{"command": "device", "ok": ..., "blocked": ..., "python": ..., "moved": ...,
+"found": [...]}`, one `found` entry per Tiiny with its `serial`, `name`, `address`, `via`, `base`
+and the `interfaces` its `device.json` lists. `blocked` is true when macOS refused the local
+network, `python` is the interpreter whose answer this is, and `moved` is the one the farm changed
+to and saved, or null. `ok` is false and the exit code 1 when nothing answered.
 
 After saving it names the installed apps these settings reach, which is every installed app that
 declares the `device` permission or asks for device models, and offers one `farm start` command to

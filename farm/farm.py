@@ -476,6 +476,25 @@ def _remaining(deadline, most):
     return max(0.05, min(most, deadline - time.monotonic()))
 
 
+def run_probe(command, timeout, stdin=None):
+    """Ask another interpreter something, without forking this one.
+
+    Measured on macOS 25.6 on 2026-09-14: once urllib has been through the macOS name and proxy
+    path for a host it could not fetch, every fork in this process produces a child that dies of
+    SIGSEGV before it reaches exec. subprocess forks whenever close_fds is on and posix_spawns when
+    it is off, and the spawn survives it, so every probe asks for the spawn. Nothing of the farm's
+    rides along: Python has opened its descriptors close-on-exec since PEP 446, so the fds that
+    close_fds would have closed are closed anyway.
+
+    Without this a Tiiny on the TiinyOS client's hostname makes farm doctor report that no other
+    Python on the machine can reach the device, and stops the farm ever moving apps to one that
+    can, because every child it asks is killed before it can answer. Found while building the
+    finder, which walks the same Pythons.
+    """
+    return subprocess.run(command, capture_output=True, text=True, timeout=timeout,
+                          close_fds=False, input=stdin)
+
+
 def host_addresses():
     """Every 172.17 address this machine holds, settled by bind and nothing else.
 
@@ -519,21 +538,27 @@ def usb_peers():
 
 
 def device_json(address, timeout=FIND_TIMEOUT):
-    """What the box at this address says about itself, or None.
+    """What the box at this address says about itself, and the routing error if it said nothing.
 
     No credential is involved. The discovery page is open, which is what lets the farm find a Tiiny
     before anybody has handed it a key, and the serial number in the answer means this identifies a
     box rather than merely finding an open port.
+
+    A Python that macOS has refused the local network is told EHOSTUNREACH here rather than left in
+    silence, and that is a different answer from a box that is not switched on. The errno is the
+    only thing that tells the two apart, so it comes back with the payload.
     """
     try:
         with urlopen(f"http://{url_host(address)}:{DEVICE_PORT}/device.json", timeout=timeout) as answer:
             found = json.loads(answer.read(256 * 1024))
     except HTTPError as error:
         error.close()
-        return None
-    except (OSError, ValueError, HTTPException):
-        return None
-    return found if isinstance(found, dict) and found.get("serial_number") else None
+        return None, 0
+    except URLError as error:
+        return None, getattr(error.reason, "errno", None) or 0
+    except (OSError, ValueError, HTTPException) as error:
+        return None, getattr(error, "errno", None) or 0
+    return (found, 0) if isinstance(found, dict) and found.get("serial_number") else (None, 0)
 
 
 def udp_devices(targets, timeout=FIND_TIMEOUT, grace=0.4):
@@ -541,9 +566,10 @@ def udp_devices(targets, timeout=FIND_TIMEOUT, grace=0.4):
 
     One packet finds what a port scan would need a whole sweep for, and it finds a box whose address
     has moved. The wait ends shortly after the first answer, because the rest of the budget was only
-    ever for boxes that are not there.
+    ever for boxes that are not there. The routing error of the last datagram that could not be sent
+    comes back with the answers, for the same reason the discovery page's does.
     """
-    found, seen = [], set()
+    found, seen, refused = [], set(), 0
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         try:
@@ -555,10 +581,11 @@ def udp_devices(targets, timeout=FIND_TIMEOUT, grace=0.4):
             try:
                 sock.sendto(DISCOVERY_TOKEN, (target, UDP_DISCOVERY_PORT))
                 asked = True
-            except OSError:
+            except OSError as error:
+                refused = error.errno or refused
                 continue
         if not asked:
-            return found
+            return found, refused
         deadline = time.monotonic() + timeout
         while True:
             left = deadline - time.monotonic()
@@ -582,7 +609,7 @@ def udp_devices(targets, timeout=FIND_TIMEOUT, grace=0.4):
             deadline = min(deadline, time.monotonic() + grace)
     finally:
         sock.close()
-    return found
+    return found, refused
 
 
 def tiinyos_serving(timeout=FIND_TIMEOUT):
@@ -655,31 +682,41 @@ def fold_device(records, address, payload, via):
     return record
 
 
-def find_devices(budget=FIND_BUDGET):
-    """Every Tiiny this machine can see, folded together by serial number.
+def probe_network(peers, budget=FIND_BUDGET):
+    """Every Tiiny this machine can see, folded together by serial number, and the routing error
+    met on the way if there was one.
 
     Three ways, in the order a found address is worth trusting. The cable is a /30 that never moves.
     The responder answers a broadcast, so it finds a box on the network as well, and finds one whose
     address has changed. The TiinyOS client is asked only when the first two found nothing, because
     the box it serves is the box on the cable and naming it twice would read as two Tiinys.
+
+    Everything here puts a packet on the wire, which is why it is one function: macOS grants the
+    local network per binary, so where this runs decides what it can see, and the farm runs all of
+    it under the interpreter whose answer counts. The TiinyOS client is the exception, being
+    loopback, and is asked anyway.
     """
     deadline = time.monotonic() + budget
-    peers = usb_peers()
-    records = {}
+    records, refused = {}, 0
     for peer in peers:
-        payload = device_json(peer, timeout=_remaining(deadline, FIND_TIMEOUT))
+        payload, code = device_json(peer, timeout=_remaining(deadline, FIND_TIMEOUT))
         if payload:
             fold_device(records, peer, payload, VIA_CABLE)
-    for address, payload in udp_devices(["255.255.255.255"] + peers,
-                                        timeout=_remaining(deadline, FIND_TIMEOUT)):
+        elif code in NO_ROUTE:
+            refused = code
+    answers, code = udp_devices(["255.255.255.255"] + list(peers),
+                                timeout=_remaining(deadline, FIND_TIMEOUT))
+    for address, payload in answers:
         fold_device(records, address, payload, VIA_CABLE if address in peers else VIA_NETWORK)
+    if code in NO_ROUTE:
+        refused = code
     found = sorted(records.values(), key=lambda r: (VIA_ORDER.index(r["via"]), r["serial"] or ""))
     for record in found:
         record["base"] = device_base(record.pop("payload"), record["address"])
     if not found and tiinyos_serving(timeout=_remaining(deadline, FIND_TIMEOUT)):
         found = [{"serial": None, "name": None, "address": urlsplit(TIINYOS_BASE).hostname,
                   "via": VIA_CLIENT, "base": TIINYOS_BASE, "interfaces": [], "addresses": []}]
-    return found
+    return {"found": found, "errno": refused}
 
 
 def describe_device(record):
@@ -688,6 +725,18 @@ def describe_device(record):
     serial = f" ({record['serial']})" if record.get("serial") else ""
     return (f"{named}{serial} at {record['address']}, {VIA_WORDS[record['via']]},"
             f" base {record['base']}")
+
+
+# Run by the interpreter the farm runs apps with, when that is not the one running the CLI. It
+# imports this very module out of the directory it was handed, so the child runs the same finder
+# rather than a second copy of it, and nothing secret goes anywhere near the command line.
+FIND_PROBE = """import json, sys
+sys.path.insert(0, sys.argv[1])
+from farm.farm import probe_network
+answer = probe_network(json.loads(sys.argv[2]), float(sys.argv[3]))
+answer["python"] = list(sys.version_info[:2])
+print(json.dumps(answer))
+"""
 
 
 # Run by the interpreter that reaches the Tiiny, with the key on stdin so no command line
@@ -1574,23 +1623,104 @@ class Farm:
         for index in chosen:
             self.update(found[index][0], yes=True)
 
+    def probed(self, interpreter, peers, budget=FIND_BUDGET):
+        """The half of the search that puts a packet on the wire, run by one named interpreter.
+
+        In this process when that is the one already running, and in a child otherwise, because the
+        only way to know what macOS lets a binary see is to ask that binary. The child imports this
+        module out of the directory it is handed, so there is one finder and not two.
+        """
+        if not interpreter or Path(interpreter) == Path(sys.executable):
+            return dict(probe_network(peers, budget), python=list(sys.version_info[:2]))
+        try:
+            done = run_probe([interpreter, "-c", FIND_PROBE,
+                              str(Path(__file__).resolve().parents[1]),
+                              json.dumps(list(peers)), str(budget)], budget + 5)
+            answer = json.loads(done.stdout.strip().splitlines()[-1])
+        except (OSError, ValueError, IndexError, TypeError, subprocess.SubprocessError):
+            return {"found": [], "errno": 0, "python": []}
+        if not isinstance(answer, dict) or not isinstance(answer.get("found"), list):
+            return {"found": [], "errno": 0, "python": []}
+        return {"found": [record for record in answer["found"] if isinstance(record, dict)],
+                "errno": answer["errno"] if isinstance(answer.get("errno"), int) else 0,
+                "python": answer.get("python") or []}
+
+    def find_tiinys(self, budget=FIND_BUDGET):
+        """Every Tiiny this machine can see, asked by the Python that would be doing the reaching.
+
+        macOS grants the local network per binary and refuses a detached app silently, so a search
+        that only ever ran in this process could tell somebody there is no Tiiny when what there
+        really is is a refused Python. The interpreter the farm runs apps with is the one whose
+        answer counts, and when that one is refused the farm walks the other Pythons on this
+        machine exactly as it does for a start, and keeps the first that gets through.
+
+        Returns what answered, whether the local network was refused, whose answer this is, and the
+        interpreter the farm moved to and saved, if it had to move. Finding the cable is done here
+        rather than in the child: bind reads an address this machine holds and sends no packet, so
+        no permission gates it and one scan does for every interpreter.
+        """
+        peers = usb_peers()
+        interpreter = self.app_python() or sys.executable
+        answer = self.probed(interpreter, peers, budget)
+        if answer["errno"] not in NO_ROUTE:
+            return {"found": answer["found"], "blocked": False, "python": interpreter,
+                    "moved": None}
+        # The walk shares one budget, so a refused Python, which is told no in milliseconds rather
+        # than left to time out, costs almost none of it and the one that works gets the rest.
+        deadline = time.monotonic() + budget
+        second = {}
+
+        def reaches(candidate):
+            second.update(self.probed(candidate, peers, _remaining(deadline, budget)))
+            # Found something is not the test: the TiinyOS client is loopback and answers an
+            # interpreter that has been refused the local network just as readily as one that has
+            # not. Only a candidate that was not refused has anything better than this one.
+            return (bool(second["found"]) and second["errno"] not in NO_ROUTE
+                    and tuple(second["python"] or ()) >= (3, 9))
+
+        moved = self.another_python(interpreter, reaches)
+        if moved:
+            return {"found": second["found"], "blocked": True, "python": moved, "moved": moved}
+        return {"found": answer["found"], "blocked": True, "python": interpreter, "moved": None}
+
+    def say_the_python_was_refused(self, answer):
+        """The line a refused local network gets, and the settings path that lifts it.
+
+        Never "no Tiiny found": macOS refusing this binary is not the same finding as an absent
+        box, and saying the second when it is the first sends somebody to check their cable.
+        """
+        if answer["moved"]:
+            print(f"{answer['moved']} found it. The Python the farm was using cannot reach your"
+                  " local network, so the farm will run apps with that one from now on, and has"
+                  " saved it.")
+            return
+        print(f"The farm cannot tell whether a Tiiny is there, because {answer['python']} was"
+              " refused your local network." if not answer["found"] else
+              "An app the farm starts will not reach a Tiiny on the cable or on this network,"
+              f" because {answer['python']} was refused your local network.")
+        self.local_network_hint()
+
     def find_device(self):
         """farm device --find: what is out there, before anybody has typed an address."""
-        found = find_devices()
+        answer = self.find_tiinys()
+        found = answer["found"]
         for record in found:
             print(describe_device(record))
-        if len(found) > 1:
-            print("Run farm device to save one. It offers these and asks for the key.")
-        elif found:
-            print("Run farm device to save it. It offers this address and asks for the key.")
-        else:
+        if answer["blocked"]:
+            self.say_the_python_was_refused(answer)
+        elif not found:
             print("No Tiiny answered. The farm looked on every USB cable in this machine, on this"
                   f" network, and at the TiinyOS client on {TIINYOS_BASE}.")
             print("Switch the Tiiny on, plug the cable in or put it on this network, then run:"
                   " farm device --find")
+        if found:
+            print("Run farm device to save one. It offers these and asks for the key."
+                  if len(found) > 1 else
+                  "Run farm device to save it. It offers this address and asks for the key.")
+        else:
             print("To type the address in yourself: farm device --base http://<address>/v1"
                   " --key-stdin < key-file")
-        return found
+        return answer
 
     def offer_device(self):
         """The base URL the hidden prompt offers, or nothing when there is nothing to offer.
@@ -1600,9 +1730,12 @@ class Farm:
         can save an address.
         """
         try:
-            found = find_devices()
+            answer = self.find_tiinys()
         except Exception:  # noqa: BLE001 - an offer must never be the reason a command fails.
             return ""
+        found = answer["found"]
+        if answer["blocked"]:
+            self.say_the_python_was_refused(answer)
         if not found:
             return ""
         if len(found) == 1:
@@ -1610,11 +1743,11 @@ class Farm:
             return found[0]["base"]
         for number, record in enumerate(found, 1):
             print(f"{number}. {describe_device(record)}")
-        chosen, answer = ask_which("Which one? A number, or Enter to type an address. ", len(found))
+        chosen, typed = ask_which("Which one? A number, or Enter to type an address. ", len(found))
         if chosen:
             return found[chosen[0]]["base"]
-        if answer:
-            print(f"There is no {answer} in that list.")
+        if typed:
+            print(f"There is no {typed} in that list.")
         return ""
 
     def device(self, base=None, key_stdin=False, find=False):
@@ -1624,7 +1757,7 @@ class Farm:
             if base is not None or key_stdin:
                 raise FarmError("farm device --find looks and saves nothing; drop --base and"
                                 " --key-stdin, or drop --find.")
-            return bool(self.find_device())
+            return bool(self.find_device()["found"])
         scripted = base is not None or key_stdin or any(
             name in os.environ for name in ("TIINY_BASE", "TIINY_KEY"))
         if scripted:
@@ -1663,9 +1796,8 @@ class Farm:
         device answered, the address it tried, and that interpreter's Python version."""
         if interpreter and Path(interpreter) != Path(sys.executable):
             try:
-                done = subprocess.run([interpreter, "-c", DEVICE_PROBE, host, str(DEVICE_PORT),
-                                       str(LOCAL_NETWORK_TIMEOUT)], capture_output=True, text=True,
-                                      timeout=LOCAL_NETWORK_TIMEOUT + 5)
+                done = run_probe([interpreter, "-c", DEVICE_PROBE, host, str(DEVICE_PORT),
+                                  str(LOCAL_NETWORK_TIMEOUT)], LOCAL_NETWORK_TIMEOUT + 5)
                 answer = json.loads(done.stdout.strip().splitlines()[-1])
                 version = tuple(answer.get("python") or ())
             except (OSError, ValueError, IndexError, TypeError, subprocess.SubprocessError):
@@ -1687,6 +1819,20 @@ class Farm:
             return error.errno, address, version
         return 0, address, version
 
+    def another_python(self, interpreter, reaches):
+        """The first other Python on this machine that manages what this one was refused, kept so
+        every later command takes it too.
+
+        macOS grants the local network per binary, so "it works over there" is a real answer rather
+        than a coincidence, and the farm saves it instead of asking somebody to find it again.
+        `reaches(candidate)` says whether that interpreter managed the thing in question.
+        """
+        for candidate in python_candidates(skip=[interpreter])[:MOST_PYTHONS_TRIED]:
+            if reaches(candidate):
+                self.save_setting("python", candidate)
+                return candidate
+        return None
+
     def working_python(self, interpreter, base):
         """Jason, 2026-09-14: "How is an end user going to know that's an issue when they install
         it? They may not have you sitting there to fix it." macOS Local Network privacy refuses a
@@ -1700,12 +1846,13 @@ class Farm:
         code, address, _ = self.probe_device(host, interpreter)
         if code not in NO_ROUTE or not private_address(address):
             return interpreter, None, False
-        for candidate in python_candidates(skip=[interpreter])[:MOST_PYTHONS_TRIED]:
+
+        def reaches(candidate):
             found, _, version = self.probe_device(host, candidate)
-            if found == 0 and version >= (3, 9):
-                self.save_setting("python", candidate)
-                return candidate, candidate, True
-        return interpreter, None, True
+            return found == 0 and version >= (3, 9)
+
+        moved = self.another_python(interpreter, reaches)
+        return moved or interpreter, moved, True
 
     def choose_python(self, interpreter, base, app=None):
         """Say what the farm is doing about a Python macOS will not let near the Tiiny. This is a
@@ -1949,7 +2096,7 @@ class Farm:
             command = [sys.executable, "-m", "pip", "install", "--upgrade", "tiinyapp-farm"]
             print(f"Upgrading the farm with pip, in {sys.executable}.")
         try:
-            done = subprocess.run(command, capture_output=True, text=True, timeout=600)
+            done = run_probe(command, 600)
         except FileNotFoundError:
             raise FarmError("pipx is not on this machine, so the farm cannot upgrade itself."
                             " Run: pipx upgrade tiinyapp-farm where pipx is installed.") from None
@@ -1971,9 +2118,9 @@ class Farm:
     def installed_cli():
         """Ask a fresh interpreter, because this one is still running the version it started with."""
         try:
-            done = subprocess.run([sys.executable, "-c",
-                                   "from importlib.metadata import version; print(version('tiinyapp-farm'))"],
-                                  capture_output=True, text=True, timeout=60)
+            done = run_probe([sys.executable, "-c",
+                              "from importlib.metadata import version; print(version('tiinyapp-farm'))"],
+                             60)
             found = done.stdout.strip().splitlines()[-1].strip()
         except (OSError, IndexError, subprocess.SubprocessError):
             return ""
@@ -2246,9 +2393,8 @@ class Farm:
         both can carry it."""
         if interpreter and Path(interpreter) != Path(sys.executable):
             try:
-                done = subprocess.run([interpreter, "-c", MODELS_PROBE, settings["base"], str(timeout)],
-                                      input=settings["key"] + "\n", capture_output=True, text=True,
-                                      timeout=timeout + 5)
+                done = run_probe([interpreter, "-c", MODELS_PROBE, settings["base"], str(timeout)],
+                                 timeout + 5, stdin=settings["key"] + "\n")
                 answer = json.loads(done.stdout.strip().splitlines()[-1])
             except (OSError, ValueError, IndexError, subprocess.SubprocessError):
                 return "unreachable", []
@@ -2290,26 +2436,47 @@ class Farm:
         """No settings to check, so the next best answer is whether there is a Tiiny to save.
 
         A person who has not run farm device yet is the person least able to work out what to type,
-        so doctor does the looking instead of telling them to go and look.
+        so doctor does the looking instead of telling them to go and look. Three answers, never two:
+        one it can see, nothing there, or a Python macOS will not let look.
         """
         try:
-            found = find_devices()
+            answer = self.find_tiinys()
         except Exception:  # noqa: BLE001 - a finding must never be the reason doctor falls over.
-            found = []
-        seen = [{"serial": r["serial"], "name": r["name"], "address": r["address"],
-                 "via": r["via"], "base": r["base"]} for r in found]
+            answer = {"found": [], "blocked": False, "python": sys.executable, "moved": None}
+        found = answer["found"]
+        detail = {"found": [{"serial": r["serial"], "name": r["name"], "address": r["address"],
+                             "via": r["via"], "base": r["base"]} for r in found],
+                  "blocked": answer["blocked"], "python": answer["python"],
+                  "moved": answer["moved"]}
+        if not found and answer["blocked"]:
+            return self.note("device", False, "No Tiiny is on file, and the farm cannot tell"
+                             f" whether one is there: macOS refused {answer['python']} your local"
+                             " network.",
+                             "System Settings, Privacy and Security, Local Network, turn on"
+                             " Python, then run farm doctor again.", **detail)
         if not found:
             return self.note("device", False, "No Tiiny is on file, and nothing answered on the"
                              " cable, on this network, or at the TiinyOS client.",
                              "switch the Tiiny on and plug the cable in, then run farm device"
                              " --find; or run farm device with the address and its API key.",
-                             found=seen)
+                             **detail)
         counted = describe_device(found[0]) if len(found) == 1 else \
             f"{len(found)} of them, the first " + describe_device(found[0])
-        return self.note("device", False, "No Tiiny is on file, so no app can reach one."
-                         f" The farm can see {counted}.",
-                         f"run farm device, take {found[0]['base']} when it offers it, and paste"
-                         " the key from TiinyOS, Settings, API Key.", found=seen)
+        moved = (f" It had to look with {answer['moved']}, because macOS refused the Python it was"
+                 " using, and will run apps with that one from now on." if answer["moved"] else "")
+        ok = self.note("device", False, "No Tiiny is on file, so no app can reach one."
+                       f" The farm can see {counted}.{moved}",
+                       f"run farm device, take {found[0]['base']} when it offers it, and paste"
+                       " the key from TiinyOS, Settings, API Key.", **detail)
+        if answer["blocked"] and not answer["moved"]:
+            # Something answered, but not over the local network, so saving its address would set
+            # somebody up to watch every app fail at the thing doctor already knows about.
+            self.note("python", False, f"macOS refused {answer['python']} your local network, so"
+                      " an app the farm starts will not reach a Tiiny on the cable or on this"
+                      " network.",
+                      "System Settings, Privacy and Security, Local Network, turn on Python, then"
+                      " run farm doctor again.", python=answer["python"])
+        return ok
 
     def doctor_device(self, settings, interpreter):
         """The address on file, whether this Python reaches it, and whether the key is taken."""
@@ -2549,12 +2716,14 @@ def json_command(farm, args, ident):
         if not args.find:
             raise FarmError("farm device --json answers --find only; saving a key needs the"
                             " hidden prompt or --key-stdin.")
-        found = farm.find_device()
-        return {"command": "device", "ok": bool(found),
+        answer = farm.find_device()
+        return {"command": "device", "ok": bool(answer["found"]),
+                "blocked": answer["blocked"], "python": answer["python"],
+                "moved": answer["moved"],
                 "found": [{"serial": record["serial"], "name": record["name"],
                            "address": record["address"], "via": record["via"],
                            "base": record["base"], "interfaces": record["interfaces"]}
-                          for record in found]}
+                          for record in answer["found"]]}
     if args.command == "install":
         if not args.yes:
             raise FarmError("Add --yes: with --json the farm never asks you to confirm an install.")
