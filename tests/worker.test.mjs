@@ -364,6 +364,60 @@ test('upload stores bytes at the required R2 key, serves download, and never tru
   assert.equal((await worker.fetch(new Request(ORIGIN + '/'), f.env)).status, 200);
   assert.equal((await worker.fetch(new Request(ORIGIN + '/seeds-files/nope'), f.env)).status, 404);
 });
+test('the launcher feed and its downloads come from R2, typed, cached by name and refused in words', async () => {
+  const f = fixture();
+  const feed = JSON.stringify({ version: '0.1.0', pub_date: '2026-09-14T12:00:00Z', platforms: {
+    'darwin-aarch64': { signature: 'fixture-signature', url: ORIGIN + '/launcher/Tiiny-App-Farm_0.1.0_universal.app.tar.gz' },
+  } });
+  // Before the first release the feed is simply absent, and a launcher asking for it is told so.
+  const early = await worker.fetch(new Request(ORIGIN + '/launcher/latest.json'), f.env);
+  assert.equal(early.status, 404);
+  assert.equal((await early.json()).error, 'The launcher has not been published yet.');
+  f.objects.set('launcher/latest.json', { value: feed, options: {} });
+  f.objects.set('launcher/Tiiny-App-Farm_0.1.0_universal.dmg', { value: 'fixture disk image', options: {} });
+  f.objects.set('launcher/Tiiny-App-Farm_0.1.0_x64-setup.exe', { value: 'fixture installer', options: {} });
+  f.objects.set('launcher/Tiiny-App-Farm_0.1.0_universal.app.tar.gz', { value: 'fixture update archive', options: {} });
+  f.objects.set('launcher/Tiiny-App-Farm_0.1.0_universal.app.tar.gz.sig', { value: 'fixture minisign line', options: {} });
+  f.objects.set('launcher/notes.zip', { value: 'fixture notes', options: {} });
+  const served = await worker.fetch(new Request(ORIGIN + '/launcher/latest.json'), f.env);
+  assert.equal(served.status, 200);
+  assert.equal(served.headers.get('Content-Type'), 'application/json; charset=utf-8');
+  assert.equal(served.headers.get('Cache-Control'), 'no-store');
+  assert.equal(served.headers.get('X-Content-Type-Options'), 'nosniff');
+  assert.equal(served.headers.get('Content-Disposition'), null, 'the updater reads the feed, it does not save it');
+  assert.equal((await served.json()).version, '0.1.0');
+  const types = { 'Tiiny-App-Farm_0.1.0_universal.dmg': 'application/x-apple-diskimage',
+    'Tiiny-App-Farm_0.1.0_x64-setup.exe': 'application/vnd.microsoft.portable-executable',
+    'Tiiny-App-Farm_0.1.0_universal.app.tar.gz': 'application/gzip',
+    'Tiiny-App-Farm_0.1.0_universal.app.tar.gz.sig': 'text/plain; charset=utf-8' };
+  for (const [name, type] of Object.entries(types)) {
+    const download = await worker.fetch(new Request(ORIGIN + '/launcher/' + name), f.env);
+    assert.equal(download.status, 200, name);
+    assert.equal(download.headers.get('Content-Type'), type, name);
+    assert.equal(download.headers.get('Cache-Control'), 'public, max-age=31536000, immutable', name);
+    assert.equal(download.headers.get('Content-Disposition'), `attachment; filename="${name}"`, name);
+    assert.equal(download.headers.get('ETag'), '"fixture"', name);
+    assert.equal(await download.text(), f.objects.get('launcher/' + name).value, name);
+  }
+  // A name with no version in it could hold different bytes tomorrow, so it is not cached for a year.
+  const unversioned = await worker.fetch(new Request(ORIGIN + '/launcher/notes.zip'), f.env);
+  assert.equal(unversioned.headers.get('Cache-Control'), 'public, max-age=300');
+  assert.equal(unversioned.headers.get('Content-Type'), 'application/zip');
+  const head = await worker.fetch(new Request(ORIGIN + '/launcher/Tiiny-App-Farm_0.1.0_universal.dmg', { method: 'HEAD' }), f.env);
+  assert.equal(head.status, 200);
+  assert.equal(head.headers.get('Content-Length'), String('fixture disk image'.length));
+  assert.equal(await head.text(), '');
+  // A file that is not there, a type the launcher never ships, and anything shaped like a key of
+  // its own are all one sentence and a 404 rather than a stack trace or somebody else's object.
+  for (const missing of ['Tiiny-App-Farm_9.9.9_universal.dmg', 'notes.txt', 'seeds/little-library/0.1.0/little-library.tar.gz', '.env', '', 'a..b.dmg']) {
+    const refused = await worker.fetch(new Request(ORIGIN + '/launcher/' + missing), f.env);
+    assert.equal(refused.status, 404, missing);
+    assert.match((await refused.json()).error, /^(That launcher file does not exist\.|The launcher has not been published yet\.)$/, missing);
+  }
+  const posted = await worker.fetch(new Request(ORIGIN + '/launcher/latest.json', { method: 'POST' }), f.env);
+  assert.equal(posted.status, 405);
+  assert.equal((await posted.json()).error, 'Use GET or HEAD for launcher downloads.');
+});
 test('seed gate, archive selection, unsafe URL, invalid schema and size limits stop submission', async () => {
   const f = fixture(); assert.equal((await f.call('/api/seeds', seedForm())).status, 401);
   const first = await f.email(); assert.equal((await f.call('/api/seeds', seedForm(), first.cookie)).status, 403);

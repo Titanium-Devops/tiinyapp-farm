@@ -6,6 +6,26 @@ import { seedRoutes } from './seeds.mjs';
 import { artRoutes } from './art.mjs';
 const app = createApp({ proofRoutes, releaseRoutes, seedRoutes, artRoutes });
 
+// The desktop launcher's downloads and its update feed, kept in the same R2 bucket as the app
+// archives under the key prefix launcher/, the way /seeds-files/ serves seeds/. The feed is the
+// Tauri updater's JSON and is never cached, because a launcher that reads a stale copy of it
+// misses the release it was asking about. An artifact carrying a version in its name can never
+// change under that name, so it is cached for a year.
+const LAUNCHER_TYPES = [
+  [/^latest\.json$/, 'application/json; charset=utf-8'],
+  [/\.dmg$/, 'application/x-apple-diskimage'],
+  [/\.exe$/, 'application/vnd.microsoft.portable-executable'],
+  [/\.msi$/, 'application/x-msi'],
+  [/\.tar\.gz$/, 'application/gzip'],
+  [/\.zip$/, 'application/zip'],
+  [/\.sig$/, 'text/plain; charset=utf-8'],
+];
+export function launcherType(file) {
+  // One flat filename, no slash and no pair of dots, so nothing here can name a key of its own.
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(file) || file.includes('..')) return '';
+  return LAUNCHER_TYPES.find(([pattern]) => pattern.test(file))?.[1] ?? '';
+}
+
 // A single durable coordinator prevents KV's eventual consistency from allowing
 // double code redemption, duplicate profile claims or simultaneous seed writes.
 // Durable storage is authoritative; FARM KV is a write-through mirror.
@@ -70,6 +90,23 @@ export default {
         'Content-Disposition': `attachment; filename="${path.split('/').pop()}"`,
         'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'public, max-age=300',
         ...(object.httpEtag ? { ETag: object.httpEtag } : {}),
+      } });
+    }
+    if (url.pathname.startsWith('/launcher/')) {
+      if (!['GET', 'HEAD'].includes(request.method)) return json({ error: 'Use GET or HEAD for launcher downloads.' }, 405);
+      const file = url.pathname.slice('/launcher/'.length);
+      const feed = file === 'latest.json';
+      const missing = feed ? 'The launcher has not been published yet.' : 'That launcher file does not exist.';
+      const contentType = launcherType(file);
+      if (!contentType) return json({ error: 'That launcher file does not exist.' }, 404);
+      const object = await env.SEEDS.get('launcher/' + file);
+      if (!object) return json({ error: missing }, 404);
+      const versioned = /[0-9]+\.[0-9]+\.[0-9]+/.test(file);
+      return new Response(request.method === 'HEAD' ? null : object.body, { headers: {
+        'Content-Type': contentType, 'Content-Length': String(object.size),
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': feed ? 'no-store' : versioned ? 'public, max-age=31536000, immutable' : 'public, max-age=300',
+        ...(feed ? {} : { 'Content-Disposition': `attachment; filename="${file}"`, ...(object.httpEtag ? { ETag: object.httpEtag } : {}) }),
       } });
     }
     return env.ASSETS.fetch(request);

@@ -73,6 +73,11 @@ APP = {"name": "id", "in": "path", "required": True, "description": "The app id.
 HANDLE = {"name": "handle", "in": "path", "required": True, "description": "The maker's handle.",
           "schema": {"type": "string", "pattern": r"^[a-z0-9]+(?:-[a-z0-9]+)*$"},
           "example": "sample-maker"}
+LAUNCHER = {"name": "file", "in": "path", "required": True,
+            "description": "One launcher filename. Take it from the feed rather than assembling"
+                           " it yourself, because the version is part of the name.",
+            "schema": {"type": "string", "pattern": r"^[A-Za-z0-9][A-Za-z0-9._-]*$"},
+            "example": "Tiiny-App-Farm_0.1.0_universal.dmg"}
 KEY = {"name": "key", "in": "path", "required": True,
        "description": "Your account id and the image name. Use the url the upload answered"
                       " with rather than assembling this yourself.",
@@ -476,6 +481,34 @@ def paths():
                                    media="application/gzip")},
             errors=[(404, "That app file does not exist."),
                     (405, "Use GET or HEAD for app files.")])},
+        "/launcher/latest.json": {"x-farm-source": "main.mjs", "get": op(
+            "The launcher update feed", "What the Tiiny App Farm desktop launcher reads to learn"
+            " whether a newer version of itself exists. The shape is the Tauri updater's: a"
+            " version, the day it was published, and one entry per platform holding a signed"
+            " archive url. It is never cached, and until the first launcher release it answers"
+            " 404.", tags=["Files"],
+            answers={"200": answer("The feed.", obj(
+                {"version": {"type": "string", "description": "major.minor.patch."},
+                 "notes": {"type": "string"},
+                 "pub_date": {"type": "string", "format": "date-time"},
+                 "platforms": {"type": "object", "description":
+                               "Keyed by darwin-aarch64, darwin-x86_64 and windows-x86_64.",
+                               "additionalProperties": obj(
+                                   {"signature": {"type": "string"},
+                                    "url": {"type": "string", "format": "uri"}},
+                                   ["signature", "url"])}},
+                ["version", "platforms"]))},
+            errors=[(404, "The launcher has not been published yet."),
+                    (405, "Use GET or HEAD for launcher downloads.")])},
+        "/launcher/{file}": {"x-farm-source": "main.mjs", "get": op(
+            "A launcher download", "The disk image, the installer, or the signed archive an"
+            " installed launcher updates itself from. A filename carrying a version is cached for"
+            " a year, because that name can never hold different bytes.", tags=["Files"],
+            parameters=[LAUNCHER],
+            answers={"200": answer("The file.", {"type": "string", "format": "binary"},
+                                   media="application/octet-stream")},
+            errors=[(404, "That launcher file does not exist."),
+                    (405, "Use GET or HEAD for launcher downloads.")])},
         "/plant": {"x-farm-source": "makers.mjs", "get": op(
             "An old path", "301 to /install/.", tags=["Pages the Worker serves"],
             answers={"301": REDIRECT})},
