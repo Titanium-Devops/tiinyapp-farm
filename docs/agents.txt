@@ -30,6 +30,7 @@ Everything else
     https://tiinyapp.farm/docs/api/                the API reference in prose
     https://tiinyapp.farm/docs/art/                how the farm draws an app's header and icon
     https://tiinyapp.farm/docs/troubleshooting/    the messages the farm prints and what to do
+    https://tiinyapp.farm/docs/launcher/           the desktop app, and what it does not do
 
 The catalog itself
 ------------------
