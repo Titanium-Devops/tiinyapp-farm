@@ -2458,3 +2458,80 @@ while True: time.sleep(0.1)
                               capture_output=True, timeout=60)
         self.assertEqual((done.returncode, done.stderr), (0, ""))
         self.assertEqual([row["id"] for row in json.loads(done.stdout)["installed"]], ["fake-app"])
+
+    @contextlib.contextmanager
+    def catalog_offering(self, version):
+        """A local site whose catalog.json publishes this farm version, so the update notice
+        has something to say. The live site is never asked anything by a test."""
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                raw = json.dumps({"cli": version, "apps": []}).encode()
+                self.send_response(200 if self.path == "/catalog.json" else 404)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield f"http://127.0.0.1:{server.server_port}"
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    def through_a_terminal(self, arguments, origin):
+        """One farm command whose standard output really is a terminal, and what reached it.
+
+        The other on_a_terminal above patches this test's own stdout; this one gives a child
+        process a real one, which is the only way to see what a person would see."""
+        import pty
+        primary, secondary = pty.openpty()
+        env = os.environ | {"HOME": str(self.root), "USERPROFILE": str(self.root),
+                            "FARM_CATALOG": str(self.catalog), "FARM_API_ORIGIN": origin}
+        env.pop("FARM_NO_UPDATE_CHECK", None)
+        written = []
+        def drain():
+            while True:
+                try:
+                    chunk = os.read(primary, 65536)
+                except OSError:
+                    return
+                if not chunk:
+                    return
+                written.append(chunk)
+        reader = threading.Thread(target=drain, daemon=True)
+        reader.start()
+        try:
+            done = subprocess.run([sys.executable, str(ROOT / "farm/farm.py"), *arguments],
+                                  env=env, stdout=secondary, stderr=subprocess.PIPE, timeout=60)
+        finally:
+            os.close(secondary)
+            reader.join(10)
+            os.close(primary)
+        return done, b"".join(written).decode().replace("\r\n", "\n")
+
+    @unittest.skipIf(os.name == "nt", "pseudo-terminals are POSIX")
+    def test_a_terminal_asking_for_json_is_given_json_and_no_update_notice(self):
+        """Jason's farm says when a newer farm is out. That line is for a person, so it never
+        lands in the middle of an answer meant for a machine, terminal or not."""
+        self.install()
+        stamp = self.root / ".tiinyapps/update-check.json"
+        with self.catalog_offering("99.0.0") as origin:
+            done, answered = self.through_a_terminal(["list", "--json"], origin)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertEqual([row["id"] for row in json.loads(answered)["installed"]], ["fake-app"])
+            self.assertNotIn("is out and you are on", answered)
+            # It did not even look: nothing asked the site, so nothing was remembered.
+            self.assertFalse(stamp.exists())
+            # The same command without --json is where a person gets told.
+            done, said = self.through_a_terminal(["list"], origin)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertIn(f"farm 99.0.0 is out and you are on {farm_module._version()}."
+                          " Run: farm self-update", said)
+            self.assertTrue(stamp.exists())
