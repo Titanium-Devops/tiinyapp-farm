@@ -87,6 +87,32 @@ def command(value):
     return f'<pre><code>{e(value)}</code></pre>'
 
 
+# The desktop launcher is off until site/launcher.json says otherwise. Everything the launcher
+# adds to this site hangs off that one file, so this script can sit on main for as long as it
+# takes the app to ship and build the pages exactly as it built them before.
+LAUNCHER_OFF = {"enabled": False, "version": None, "mac": None, "windows": None}
+LAUNCHER_FILE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def read_launcher(source):
+    """The launcher switch, refusing a half-filled one rather than building a broken button."""
+    path = Path(source) / "site/launcher.json"
+    if not path.exists():
+        return dict(LAUNCHER_OFF)
+    setting = json.loads(path.read_text(encoding="utf-8"))
+    if not setting.get("enabled"):
+        return dict(LAUNCHER_OFF)
+    for field in ("version", "mac", "windows"):
+        if not isinstance(setting.get(field), str) or not setting[field].strip():
+            raise ValueError(f"site/launcher.json is enabled but has no {field}")
+    for field in ("mac", "windows"):
+        # The same flat name the Worker will serve: no slash, no pair of dots, no surprises.
+        if not LAUNCHER_FILE.fullmatch(setting[field]) or ".." in setting[field]:
+            raise ValueError(f"site/launcher.json {field} must be one launcher filename")
+    return {"enabled": True, "version": setting["version"],
+            "mac": setting["mac"], "windows": setting["windows"]}
+
+
 ICONS = {
     "search": '<path d="M3 10a7 7 0 1 0 14 0a7 7 0 1 0-14 0m18 11l-6-6"/>',
     "copy": '<path d="M7 9.667A2.667 2.667 0 0 1 9.667 7h8.666A2.667 2.667 0 0 1 21 9.667v8.666A2.667 2.667 0 0 1 18.333 21H9.667A2.667 2.667 0 0 1 7 18.333z"/><path d="M4.012 16.737A2 2 0 0 1 3 15V5c0-1.1.9-2 2-2h10c.75 0 1.158.385 1.5 1"/>',
@@ -182,10 +208,7 @@ def page(title, body, path, scripts=()):
 {page_scripts}<script type="module" src="/assets/session.js"></script></body></html>'''
 
 
-def steps():
-    return '''<section class="page install-page"><h1>Install apps on your Tiiny</h1>
-<p class="sub">Apps from the catalog run on your computer and talk to your Tiiny Pocket Lab over its local API. One command-line tool installs, starts and updates them.</p>
-<div class="steps">
+INSTALL_STEPS = '''<div class="steps">
 <div class="stp"><div class="n">1</div><div><h2>Install the farm CLI</h2><p>Python 3.9 or newer. macOS, Linux and Windows.</p><pre>pip install tiinyapp-farm</pre><p class="small">If pip answers "externally managed environment" (Homebrew Python, recent Debian), use <code>pipx install tiinyapp-farm</code> instead.</p><p class="small">Check it: <code>farm --version</code></p></div></div>
 <div class="stp"><div class="n">2</div><div><h2>Connect your Tiiny</h2><p>The CLI asks for two values once and saves them in <code>~/.tiinyapps/device.json</code>, readable only by you.</p><pre>farm device</pre>
 <dl><dt>API base URL</dt><dd>On a Mac with the TiinyOS client installed: <code>http://openai.api.tiiny/v1</code><br>From any other computer on your network: <code>http://&lt;your-tiiny-ip&gt;/v1</code></dd><dt>API key</dt><dd>TiinyOS → Settings → API Key. Copy it.</dd></dl>
@@ -196,8 +219,43 @@ farm start titanium-tiiny-bot</pre>
 <p class="small">A start that worked ends with the link to open, what the app is for, and <code>Stop it with: farm stop &lt;id&gt;</code>.</p>
 <p class="small">If something already holds the app's port, the farm steps up to the next free port and says so, unless that app's port is fixed. To pick the port yourself: <code>farm start &lt;id&gt; --port 7799</code>.</p>
 <dl><dt><code>farm list</code></dt><dd>installed apps and whether they are running</dd><dt><code>farm stop &lt;id&gt;</code></dt><dd>stop one</dd><dt><code>farm update &lt;id&gt;</code></dt><dd>update to the newest release, then start it again</dd><dt><code>farm remove &lt;id&gt;</code></dt><dd>uninstall</dd></dl></div></div>
-</div>
-<p class="note" style="margin-top:18px">Apps declare the access they use (microphone, files, network, your Tiiny). The CLI shows that before installing; it does not sandbox them. Read the source if that matters to you: every app in the catalog ships it.</p></section>'''
+</div>'''
+
+INSTALL_HEAD = '''<section class="page install-page"><h1>Install apps on your Tiiny</h1>
+<p class="sub">Apps from the catalog run on your computer and talk to your Tiiny Pocket Lab over its local API. One command-line tool installs, starts and updates them.</p>'''
+
+INSTALL_NOTE = '''<p class="note" style="margin-top:18px">Apps declare the access they use (microphone, files, network, your Tiiny). The CLI shows that before installing; it does not sandbox them. Read the source if that matters to you: every app in the catalog ships it.</p>'''
+
+
+def download_block(launcher):
+    """The one big button, rendered for a Mac and corrected for Windows by launcher.js.
+
+    A person with JavaScript switched off still gets a working download and the other
+    platform beside it, which is why the Mac link is in the markup rather than written in."""
+    mac, windows = '/launcher/' + launcher['mac'], '/launcher/' + launcher['windows']
+    return (f'<div class="get" data-launcher data-mac="{e(mac)}" data-windows="{e(windows)}">'
+            f'<a class="btn hay get-now" data-launcher-primary href="{e(mac)}">Download for Mac</a>'
+            f'<p class="small">Also for <a data-launcher-other href="{e(windows)}">Windows</a>.</p>'
+            f'<p class="fine">Version {e(launcher["version"])}. One file, and it carries everything '
+            'it needs: no Python, no Docker, nothing to install first. There is no launcher for '
+            'Linux, so <a href="#command-line">use the command line</a> there.</p></div>')
+
+
+def steps(launcher=None):
+    """The install page. With the launcher on, the download leads and the CLI keeps its steps."""
+    launcher = launcher or LAUNCHER_OFF
+    if not launcher['enabled']:
+        return INSTALL_HEAD + '\n' + INSTALL_STEPS + '\n' + INSTALL_NOTE + '</section>'
+    return ('<section class="page install-page"><h1>Install apps on your Tiiny</h1>\n'
+            '<p class="sub">Apps from the catalog run on your computer and talk to your Tiiny '
+            'Pocket Lab over its local API. Tiiny App Farm is a small app for Mac and Windows '
+            'that installs, starts and updates them for you.</p>\n'
+            + download_block(launcher) + '\n'
+            + '<h2 id="command-line">Prefer the command line?</h2>\n'
+            '<p class="sub">The farm CLI does everything the app does, on every platform '
+            'including Linux, and it is the same install directory either way. Start with the '
+            'app and move to the CLI whenever you like: it finds what the app already put there.</p>\n'
+            + INSTALL_STEPS + '\n' + INSTALL_NOTE + '</section>')
 
 
 def seed_icon(app):
@@ -260,9 +318,12 @@ def ledger_row(app):
 <span class="v">v{e(app['version'])}</span><a class="btn hay" href="/apps/{e(app['id'])}/">Install</a></article>'''
 
 
-def home_page(apps):
+def home_page(apps, launcher=None):
+    launcher = launcher or LAUNCHER_OFF
     featured = [app for app in apps if app.get("featured")][:6]
-    hero = '''<section class="hero"><img src="/assets/hero.jpg" width="1600" height="1066" alt="A fantasy farm at dusk with glowing apps in rows and Titan tending the field."><div class="copy"><h1>Little apps, <em>grown for your Tiiny.</em></h1><p class="lede">Community-made apps that run beside your Pocket Lab on your own computer. Choose an app to see its requirements and install commands.</p><div class="row"><a class="btn hay" href="#all-apps">Browse apps</a><a class="btn ghost" href="/install/">Install an app</a></div></div></section>'''
+    second = ('<a class="btn ghost" href="/install/">Get the launcher</a>' if launcher['enabled']
+              else '<a class="btn ghost" href="/install/">Install an app</a>')
+    hero = '''<section class="hero"><img src="/assets/hero.jpg" width="1600" height="1066" alt="A fantasy farm at dusk with glowing apps in rows and Titan tending the field."><div class="copy"><h1>Little apps, <em>grown for your Tiiny.</em></h1><p class="lede">Community-made apps that run beside your Pocket Lab on your own computer. Choose an app to see its requirements and install commands.</p><div class="row"><a class="btn hay" href="#all-apps">Browse apps</a>''' + second + '''</div></div></section>'''
     featured_section = f'''<section class="feat wrap"><div class="sechead"><h2>Featured</h2><p>Picked by the maintainers</p></div>
 <div class="v3"><div class="list">{''.join(editorial_item(app) for app in featured)}</div></div></section>'''
     ledger = f'''<section class="ledger wrap" id="all-apps"><div class="sechead"><h2>All apps</h2><p><a href="/catalog/">Browse the catalog with filters</a></p></div>
@@ -313,7 +374,8 @@ def art_panel(app):
             'images change through the same pull request as everything else.</p></section>')
 
 
-def app_page(app, today, makers=()):
+def app_page(app, today, makers=(), launcher=None):
+    launcher = launcher or LAUNCHER_OFF
     band, visual_media = seed_media(app)
     links = app.get('links', {})
     repo = links.get('repo') or app.get('repo')
@@ -331,7 +393,12 @@ def app_page(app, today, makers=()):
     if release:
         commands = f'farm install {app["id"]} && farm start {app["id"]}'
         local = f'Then open <code>http://localhost:{e(req["ports"][0])}</code>. ' if req['ports'] and app['entry'] is not None else ''
-        install = '<h2>Install</h2>' + copy_command(commands) + f'<p class="sub install-note">{local}New here? <a href="/install/">Install the farm CLI first.</a></p>'
+        # With the launcher on, the button is the way in and the two commands stay visible
+        # underneath, because they are the answer when nothing on the machine knows the scheme.
+        opener = (f'<p class="open-in"><a class="btn hay" href="tiinyfarm://install/{e(app["id"])}">Open in Tiiny App Farm</a></p>'
+                  '<p class="small">Nothing opened? <a href="/install/">Get the launcher</a>.</p>'
+                  if launcher['enabled'] else '')
+        install = '<h2>Install</h2>' + opener + copy_command(commands) + f'<p class="sub install-note">{local}New here? <a href="/install/">Install the farm CLI first.</a></p>'
         if app['entry'] is None:
             install += '<p>This is a library. There is no app to start. Use it from your own application.</p>'
         size_mb = f'{release["size"] / 1_000_000:.1f} MB'
@@ -556,6 +623,7 @@ def build(source=ROOT, output=None, today=None):
     render_card = runpy.run_path(str(ROOT / 'scripts/share-cards.py'))['render_card']
     # The one description of the HTTP surface, served at /docs/openapi.json.
     openapi = runpy.run_path(str(ROOT / 'worker/openapi.py'))['spec']
+    launcher = read_launcher(source)
     snapshot = source / 'site/makers.json'
     makers = json.loads(snapshot.read_text()) if snapshot.exists() else []
     for maker in makers:
@@ -586,15 +654,15 @@ def build(source=ROOT, output=None, today=None):
         # /llms.txt is the plain-text index an assistant fetches first. The guide it points at is
         # a documentation page like any other, at /docs/agents/.
         guide = (source / 'docs/agents.txt').read_text(encoding='utf-8')
-        pages = {"/": ("App catalog", home_page(apps)), "/catalog/": ("Catalog", catalog_page(apps)),
-                 "/install/": ("Install an app", steps()), "/submit/": ("Submit an app", seeds()),
+        pages = {"/": ("App catalog", home_page(apps, launcher)), "/catalog/": ("Catalog", catalog_page(apps)),
+                 "/install/": ("Install an app", steps(launcher)), "/submit/": ("Submit an app", seeds()),
                  "/submit/done/": ("App submitted", seeds()), "/account/": ("Your apps", my_farm())}
         entries = doc_entries(source)
         for entry in entries:
             pages[entry['url']] = (entry['title'], doc_page(entry, entries))
         listing = '<section class="sect"><h1>App manifests</h1><p>The installer catalog at https://tiinyapp.farm/manifests/.</p><ul>'
         for path, app in manifests:
-            pages[f"/apps/{app['id']}/"] = (app["name"], app_page(app, today, makers))
+            pages[f"/apps/{app['id']}/"] = (app["name"], app_page(app, today, makers, launcher))
             owner = next((maker for maker in makers if maker.get('tiinyverse') and maker['tiinyverse'] == app['author'].get('tiinyverse')), {})
             render_card(source, dest / 'apps' / app['id'] / 'card.png', name=app['name'],
                         pitch=app['pitch'], maker=app['author']['name'], media=app.get('media'),
@@ -614,6 +682,9 @@ def build(source=ROOT, output=None, today=None):
             scripts = ('/assets/catalog.js',) if url in ('/', '/catalog/') else (
                 ('/assets/catalog.js', '/assets/share.js', '/assets/seed-media.js', '/assets/social.js', '/assets/art.js', '/assets/release.js')
                 if url.startswith('/apps/') else ())
+            # The platform swap and nothing else, so it ships only where there is a button to swap.
+            if launcher['enabled'] and (url == '/install/' or url.startswith('/apps/')):
+                scripts = scripts + ('/assets/launcher.js',)
             write(url.lstrip('/') + 'index.html', page(title, body, url, scripts))
         write('404.html', page('Page not found', '<section class="sect"><h1>Page not found</h1><p>This page does not exist. ' + link('/', 'Return to the catalog') + '.</p></section>', '/404.html'))
         write('sitemap.xml', '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + ''.join(f'<url><loc>{ORIGIN}{url}</loc></url>' for url in sorted(pages) if url not in ("/account/", "/submit/done/")) + '</urlset>\n')
@@ -629,7 +700,10 @@ def build(source=ROOT, output=None, today=None):
         shutil.copytree(source / 'brand', dest / 'brand')
         shutil.copytree(source / 'site/fonts', dest / 'fonts')
         write('robots.txt', f'User-agent: *\nAllow: /\nSitemap: {ORIGIN}/sitemap.xml\n')
-        for folder, files in {'assets': ['hero.jpg', 'site.css', 'catalog.js', 'seeds.js', 'session.js', 'farm.js', 'seed-media.js', 'social.js', 'share.js', 'art.js', 'release.js', 'titanium-icon.png', 'titanium-header.webp'], 'docs': ['manifest.schema.json', 'SUBMIT.md']}.items():
+        assets = ['hero.jpg', 'site.css', 'catalog.js', 'seeds.js', 'session.js', 'farm.js', 'seed-media.js', 'social.js', 'share.js', 'art.js', 'release.js', 'titanium-icon.png', 'titanium-header.webp']
+        if launcher['enabled']:
+            assets.append('launcher.js')
+        for folder, files in {'assets': assets, 'docs': ['manifest.schema.json', 'SUBMIT.md']}.items():
             for name in files:
                 origin = source / ('site/assets' if folder == 'assets' else folder) / name
                 (dest / folder).mkdir(exist_ok=True)

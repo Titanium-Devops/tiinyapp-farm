@@ -262,8 +262,8 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
                 parsed = urlsplit(urljoin(source_url, reference))
                 if parsed.netloc != 'tiinyapp.farm':
                     continue
-                if parsed.path == '/api/auth/github' or parsed.path.startswith(('/makers/', '/media/')) or parsed.path.startswith(('/seeds-files/', '/media/')):
-                    continue  # Worker routes (OAuth, maker pages, media), not static files.
+                if parsed.path == '/api/auth/github' or parsed.path.startswith(('/makers/', '/media/')) or parsed.path.startswith(('/seeds-files/', '/media/', '/launcher/')):
+                    continue  # Worker routes (OAuth, maker pages, media, launcher downloads), not static files.
                 target = self.output / unquote(parsed.path).lstrip('/')
                 if target.is_dir():
                     target /= 'index.html'
@@ -434,6 +434,153 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         self.assertRegex(css, r'@media\(max-width:760px\).*\.app \.two\{grid-template-columns:1fr')
         self.assertRegex(css, r'\.page\{[^}]*max-width:720px')
         self.assertRegex(css, r'\.stp \.n\{[^}]*width:32px;height:32px')
+
+    def test_launcher_is_off_and_leaves_no_trace_on_any_page(self):
+        """The switch shipped off, so nothing on the live site knows the launcher exists yet."""
+        setting = json.loads((ROOT / 'site/launcher.json').read_text())
+        self.assertEqual(setting, {'enabled': False, 'version': None, 'mac': None, 'windows': None})
+        self.assertEqual(SITE['read_launcher'](ROOT), SITE['LAUNCHER_OFF'])
+        self.assertFalse((self.output / 'assets/launcher.js').exists())
+        for path in self.output.rglob('*.html'):
+            text = path.read_text()
+            with self.subTest(page=path.relative_to(self.output).as_posix()):
+                # The documentation page for the launcher exists and says it is not released yet.
+                # Nothing else on the site links a download, opens the scheme or loads the module.
+                for absent in ('tiinyfarm://', 'href="/launcher/', 'data-launcher',
+                               '/assets/launcher.js', 'Open in Tiiny App Farm',
+                               'Download for Mac', 'Get the launcher'):
+                    self.assertNotIn(absent, text)
+        hero = re.search(r'<section class="hero">.*?</section>', (self.output / 'index.html').read_text(), re.S).group(0)
+        self.assertIn('<a class="btn ghost" href="/install/">Install an app</a>', hero)
+        install = (self.output / 'install/index.html').read_text()
+        self.assertNotIn('Prefer the command line?', install)
+        self.assertEqual(install.count('class="stp"'), 3)
+
+    def build_with_the_launcher_on(self, temp, **changes):
+        """The site as it will be the day the launcher ships, built from a copy of this tree."""
+        source = Path(temp)
+        for directory in ('manifests', 'brand', 'docs', 'site/assets', 'site/fonts'):
+            shutil.copytree(ROOT / directory, source / directory)
+        setting = {'enabled': True, 'version': '0.1.0',
+                   'mac': 'Tiiny-App-Farm_0.1.0_universal.dmg',
+                   'windows': 'Tiiny-App-Farm_0.1.0_x64-setup.exe', **changes}
+        (source / 'site/launcher.json').write_text(json.dumps(setting, indent=4) + '\n')
+        SITE['build'](source=source, today=TODAY)
+        return source / 'site/dist'
+
+    def test_launcher_on_leads_with_the_download_and_keeps_the_command_line(self):
+        with tempfile.TemporaryDirectory() as temp:
+            dist = self.build_with_the_launcher_on(temp)
+            mac = '/launcher/Tiiny-App-Farm_0.1.0_universal.dmg'
+            windows = '/launcher/Tiiny-App-Farm_0.1.0_x64-setup.exe'
+            install = (dist / 'install/index.html').read_text()
+            doc = Document(install)
+            visible = ' '.join(doc.text)
+            block = next(attrs for tag, attrs in doc.tags if 'data-launcher' in attrs)
+            self.assertEqual((block['data-mac'], block['data-windows']), (mac, windows))
+            primary = next(attrs for tag, attrs in doc.tags if 'data-launcher-primary' in attrs)
+            self.assertEqual(primary['href'], mac)
+            self.assertIn('hay', primary['class'].split())
+            other = next(attrs for tag, attrs in doc.tags if 'data-launcher-other' in attrs)
+            self.assertEqual(other['href'], windows)
+            # The download comes before the first command on the page, and the steps survive it.
+            self.assertLess(install.index('data-launcher-primary'), install.index('pip install tiinyapp-farm'))
+            self.assertIn('Version 0.1.0', visible)
+            self.assertIn('Prefer the command line?', visible)
+            self.assertIn('command-line', doc.ids)
+            self.assertEqual(install.count('class="stp"'), 3)
+            for phrase in ('pip install tiinyapp-farm', 'farm device', 'farm install titanium-tiiny-bot'):
+                self.assertIn(phrase, visible)
+            # Linux is told what to do rather than offered a download that does not exist.
+            self.assertIn('There is no launcher for Linux', visible)
+            hero = re.search(r'<section class="hero">.*?</section>', (dist / 'index.html').read_text(), re.S).group(0)
+            self.assertIn('<a class="btn ghost" href="/install/">Get the launcher</a>', hero)
+            self.assertNotIn('Install an app', hero)
+            for app in self.apps:
+                page = (dist / 'apps' / app['id'] / 'index.html').read_text()
+                with self.subTest(app=app['id']):
+                    if 'release' not in app:
+                        self.assertNotIn('tiinyfarm://', page)
+                        continue
+                    main = page.split('<aside', 1)[0]
+                    self.assertIn('href="tiinyfarm://install/' + app['id'] + '"', main)
+                    self.assertIn('Open in Tiiny App Farm', main)
+                    self.assertIn('Get the launcher', main)
+                    # The deep link is the way in; the commands stay on the page as the fallback.
+                    self.assertIn('farm install ' + app['id'], main)
+                    self.assertLess(main.index('tiinyfarm://'), main.index('farm install ' + app['id']))
+            self.assertEqual((dist / 'assets/launcher.js').read_bytes(),
+                             (ROOT / 'site/assets/launcher.js').read_bytes())
+            for path in dist.rglob('*.html'):
+                relative = path.relative_to(dist).as_posix()
+                carries = '/assets/launcher.js' in path.read_text()
+                self.assertEqual(carries, relative == 'install/index.html' or relative.startswith('apps/'), relative)
+
+    def test_launcher_on_keeps_the_site_whole(self):
+        """The same link, fragment and house rules the rest of the suite holds the site to."""
+        with tempfile.TemporaryDirectory() as temp:
+            dist = self.build_with_the_launcher_on(temp)
+            for path in dist.rglob('*.html'):
+                text = path.read_text()
+                doc = Document(text)
+                relative = path.relative_to(dist).as_posix()
+                with self.subTest(page=relative):
+                    self.assertNotIn(chr(0x2014), text)
+                    self.assertNotIn('tiny' + 'app', text.lower())
+                    if relative not in ('docs/agents/index.html', 'docs/api/index.html'):
+                        # Those two name every route literally, /api/seeds included.
+                        self.assertNotRegex(' '.join(doc.text), r'(?i)farmhand|\bsprouting\b|\bseeds?\b|My farm')
+                    source_url = 'https://tiinyapp.farm/' + path.relative_to(dist).as_posix()
+                    for reference in doc.references:
+                        parsed = urlsplit(urljoin(source_url, reference))
+                        if parsed.netloc != 'tiinyapp.farm':
+                            continue
+                        if parsed.path == '/api/auth/github' or parsed.path.startswith(
+                                ('/makers/', '/media/', '/seeds-files/', '/launcher/')):
+                            continue  # Worker routes, not static files.
+                        target = dist / unquote(parsed.path).lstrip('/')
+                        if target.is_dir():
+                            target /= 'index.html'
+                        self.assertTrue(target.is_file(), str(target))
+                        if parsed.fragment:
+                            self.assertIn(unquote(parsed.fragment), Document(target.read_text()).ids)
+
+    def test_launcher_switch_refuses_a_half_filled_setting(self):
+        for changes in ({'version': None}, {'mac': ''}, {'windows': 'launcher/../secrets'},
+                        {'mac': '../etc/passwd'}, {'windows': 'a..b.exe'},
+                        {'mac': 'Tiiny App Farm.dmg'}):
+            with self.subTest(changes=changes), tempfile.TemporaryDirectory() as temp:
+                (Path(temp) / 'site').mkdir()
+                setting = {'enabled': True, 'version': '0.1.0', 'mac': 'a_0.1.0.dmg',
+                           'windows': 'a_0.1.0.exe', **changes}
+                (Path(temp) / 'site/launcher.json').write_text(json.dumps(setting))
+                with self.assertRaises(ValueError):
+                    SITE['read_launcher'](Path(temp))
+        with tempfile.TemporaryDirectory() as temp:
+            # A tree with no switch at all builds the site the way it is built today.
+            self.assertEqual(SITE['read_launcher'](Path(temp)), SITE['LAUNCHER_OFF'])
+
+    def test_launcher_documentation_is_in_the_nav_and_the_index(self):
+        entries = SITE['doc_entries'](ROOT)
+        page = next(entry for entry in entries if entry['slug'] == 'launcher')
+        self.assertEqual(page['url'], '/docs/launcher/')
+        self.assertEqual(page['title'], 'The launcher')
+        self.assertIs(page, entries[-1])
+        built = (self.output / 'docs/launcher/index.html').read_text()
+        visible = ' '.join(Document(built).text)
+        for phrase in ('Not released yet', '~/.tiinyapps/device.json', '~/tiinyapps/',
+                       'There is no launcher', 'pip install tiinyapp-farm',
+                       'It does not sandbox anything', 'Docker', 'SmartScreen',
+                       'signed and notarised'):
+            self.assertIn(phrase, visible)
+        for other in ('docs/index.html', 'docs/cli/index.html'):
+            nav = re.search(r'<nav class="docs-nav".*?</nav>', (self.output / other).read_text(), re.S).group(0)
+            self.assertIn('/docs/launcher/', Document(nav).references)
+        self.assertIn('https://tiinyapp.farm/docs/launcher/', (self.output / 'llms.txt').read_text())
+        publish = ' '.join(Document((self.output / 'docs/publish/index.html').read_text()).text)
+        for phrase in ('icon', 'health', 'grid of icons'):
+            self.assertIn(phrase, publish)
+        self.assertIn('/docs/launcher/', Document((self.output / 'docs/publish/index.html').read_text()).references)
 
     def test_deploy_configuration(self):
         config = tomllib.loads((ROOT / 'wrangler.toml').read_text())
