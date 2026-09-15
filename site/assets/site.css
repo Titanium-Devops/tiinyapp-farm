@@ -56,14 +56,26 @@ nav a{color:var(--mute);text-decoration:none;white-space:nowrap}nav a.on{color:v
    turns the launcher on, so they cost a reader nothing while it is off. */
 .page .get{display:grid;gap:10px;justify-items:start;margin:0 0 34px;padding:20px;background:var(--soil);border:1px solid var(--fence);border-radius:14px}
 .mk{width:19px;height:19px;flex:none}
-.gets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0 0 12px}
-.get-one{display:flex;flex-direction:column;gap:8px;padding:18px 16px;background:var(--soil);border:1px solid var(--fence);border-radius:14px}
-.get-one .get-os,.ver-plat .get-os{margin:0;font:700 14px var(--body);color:var(--ink);display:flex;align-items:center;gap:8px}
-.get-one .btn.get-now{width:100%;min-height:48px;white-space:normal}
-.get-one p{margin:0}
-.get-one .small{flex:1}
-.get-one .get-old{font-size:13px;color:var(--mute)}
-.get-note{margin:0 0 34px;font-size:13px}
+.dl{margin:0 0 34px}
+.dl-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 6px}
+.page .dl-head h2{display:flex;align-items:center;gap:10px;font-size:22px;margin:0}
+.page .dl .sub{margin:0 0 14px}
+.dl-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border:1px solid var(--fence);border-radius:14px;overflow:hidden;background:var(--soil)}
+.page a.dl-row,.dl-row{display:flex;align-items:center;gap:12px;padding:15px 16px;min-height:44px;color:var(--ink);text-decoration:none;border-right:1px solid var(--fence);border-bottom:1px solid var(--fence)}
+.dl-row:nth-child(2n){border-right:0}
+.dl-row:nth-last-child(-n+2){border-bottom:0}
+.page a.dl-row:hover,.dl-row:hover{background:#151d28;color:var(--ink);text-decoration:none}
+.page a.dl-row.on,.dl-row.on{background:#141c27}
+.dl-text{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
+.dl-text b{font:700 15px var(--body)}
+.dl-sub{color:var(--mute);font-size:13px}
+.dl-rec{color:var(--cyan);font-size:12px}
+.dl-row .mk:last-child{color:var(--mute)}
+.dl-cli{margin:14px 0 0;padding:16px;border:1px solid var(--fence);border-radius:14px;background:var(--soil)}
+.dl-cli-head{display:flex;align-items:center;gap:10px;margin:0 0 10px}
+.dl-cli-head b{font:700 15px var(--body)}
+.dl-cli .fine{margin:10px 0 0;font-size:13px}
+.ver-plat .get-os{margin:0;font:700 14px var(--body);color:var(--ink);display:flex;align-items:center;gap:8px}
 .versions-page{max-width:880px}
 .ver-now{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0 0 22px}
 .ver-plat{display:flex;flex-direction:column;gap:8px;padding:16px;background:var(--soil);border:1px solid var(--fence);border-radius:14px}
@@ -73,7 +85,7 @@ nav a{color:var(--mute);text-decoration:none;white-space:nowrap}nav a.on{color:v
 .rel h2{font-size:24px;margin:0 0 2px}
 .rel .rel-when{margin:0 0 12px;color:var(--mute);font-size:14px}
 .rel td,.rel th{white-space:nowrap}
-@media(max-width:640px){.gets,.ver-now{grid-template-columns:1fr}}
+@media(max-width:640px){.ver-now{grid-template-columns:1fr}.dl-grid{grid-template-columns:1fr}.dl-row{border-right:0}.dl-row:nth-last-child(-n+2){border-bottom:1px solid var(--fence)}.dl-row:last-child{border-bottom:0}.dl-head{flex-wrap:wrap}}
 .page .get p{margin:0}
 .page .get .btn.get-now{font-size:17px;padding:14px 26px;min-height:52px}
 .page .get .fine{font-size:13px;max-width:58ch}

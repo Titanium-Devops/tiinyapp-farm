@@ -22,11 +22,18 @@ There is one file for each platform.
   the download button offers is for Apple silicon, and an Intel Mac takes the Intel one.
 - **Windows.** An installer for the x64 build. It installs for your user account only, so Windows
   never asks for an administrator password. Windows on ARM is not built yet.
-- **Linux.** Use the command line, which works everywhere and is what most Linux users already
-  have. See [Getting started](/docs/getting-started/).
+- **Linux.** An AppImage for x86_64, carrying the same bundled Python and the same engine as the
+  other two. Make it executable and run it; there is nothing to install first. Two things are
+  worth knowing before you do. It is not signed, because Linux has no notarisation and nothing a
+  stranger's machine would check a desktop signature against, so the SHA-256 published with every
+  release is what you can verify instead. And it has been built but not yet run on a Linux desktop
+  by anybody here, so the tray, the deep link and the window are untested there. The command line
+  remains the better-worn path on Linux: see [Getting started](/docs/getting-started/).
 
 Every download comes from this site, at `tiinyapp.farm/launcher/`. The app checks the same place
-for its own updates and installs them quietly when you next open it.
+for its own updates and installs them quietly when you next open it. That updater covers macOS
+only for now; a newer Windows or Linux build means downloading it from
+[Launcher versions](/launcher/versions/).
 
 ## Going back to an older version
 

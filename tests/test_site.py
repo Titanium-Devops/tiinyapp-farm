@@ -490,15 +490,32 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         SITE['build'](source=source, today=TODAY, releases_url=url)
         return source / 'site/dist'
 
-    def test_an_intel_mac_gets_its_own_small_link_when_the_switch_names_one(self):
+    def rows(self, html):
+        """The download grid as it is read: platform, title, subtitle, where it goes."""
+        doc = Document(html)
+        found = []
+        for chunk in re.findall(r'<a class="dl-row".*?</a>', html, re.S):
+            attrs = dict(re.findall(r'(data-platform|href)="([^"]*)"', chunk))
+            title = re.search(r'<b>(.*?)</b>', chunk).group(1)
+            subtitle = re.search(r'<span class="dl-sub">(.*?)</span>', chunk).group(1)
+            found.append((attrs['data-platform'], title, subtitle, attrs['href'],
+                          'data-launcher-recommended' in chunk))
+        self.assertTrue(found, 'no download rows on the page')
+        return found, doc
+
+    def test_an_intel_mac_gets_a_row_of_its_own_when_the_switch_names_one(self):
         with tempfile.TemporaryDirectory() as temp:
             dist = self.build_with_the_launcher_on(temp, macIntel='Tiiny-App-Farm-Intel.dmg')
             page = (dist / 'install/index.html').read_text()
-            self.assertIn('data-launcher-intel href="/launcher/Tiiny-App-Farm-Intel.dmg"', page)
-            self.assertIn('Apple silicon', page)
+            rows, _ = self.rows(page)
+            self.assertIn(('mac-intel', 'macOS Intel', 'Intel DMG',
+                           '/launcher/Tiiny-App-Farm-Intel.dmg', True), rows)
+            self.assertIn('data-launcher-intel', page)
         with tempfile.TemporaryDirectory() as temp:
             dist = self.build_with_the_launcher_on(temp)
-            self.assertNotIn('data-launcher-intel', (dist / 'install/index.html').read_text())
+            page = (dist / 'install/index.html').read_text()
+            self.assertNotIn('data-launcher-intel', page)
+            self.assertEqual([row[0] for row in self.rows(page)[0]], ['mac', 'windows', 'linux'])
 
     def test_launcher_on_leads_with_the_download_and_keeps_the_command_line(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -506,36 +523,33 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
             mac = '/launcher/Tiiny-App-Farm_0.1.0_universal.dmg'
             windows = '/launcher/Tiiny-App-Farm_0.1.0_x64-setup.exe'
             install = (dist / 'install/index.html').read_text()
-            doc = Document(install)
+            rows, doc = self.rows(install)
             visible = ' '.join(doc.text)
-            buttons = [attrs for tag, attrs in doc.tags if 'data-launcher-get' in attrs]
-            self.assertEqual([attrs['data-launcher-get'] for attrs in buttons], ['mac', 'windows', 'linux'])
-            self.assertEqual(buttons[0]['href'], mac)
-            self.assertEqual(buttons[1]['href'], windows)
-            # The visitor's platform is filled; launcher.js moves whichever one that is to the front.
-            self.assertIn('hay', buttons[0]['class'].split())
-            for other in buttons[1:]:
-                self.assertIn('ghost', other['class'].split())
-            self.assertEqual(sum('class="mk"' in install[i:i + 40]
-                                 for i in range(len(install)) if install.startswith('<svg', i)), 3)
-            # The downloads come before the first command on the page, and the steps survive them.
-            self.assertLess(install.index('data-launcher-get'), install.index('pip install tiinyapp-farm'))
+            self.assertEqual(rows[0][:4], ('mac', 'macOS', 'Apple Silicon DMG', mac))
+            self.assertEqual(rows[1][:4], ('windows', 'Windows', 'Windows 10/11 x64 installer', windows))
+            # Every row is the link, so the target is the row and not a word inside it.
+            self.assertEqual(install.count('<a class="dl-row"'), len(rows))
+            # Nothing is recommended until launcher.js has read the platform.
+            self.assertNotIn('data-launcher-recommended>', install)
+            self.assertEqual(install.count('data-launcher-recommended hidden'),
+                             sum(row[4] for row in rows))
+            # The section, its way to the history, and the command line box beside it.
+            self.assertIn('Desktop', visible)
+            self.assertIn('Download the latest desktop build, or browse every release.', visible)
+            self.assertIn('All releases', visible)
+            self.assertIn('/launcher/versions/', doc.references)
+            self.assertIn('pip install tiinyapp-farm', visible)
+            self.assertIn('data-copy', install)
             self.assertIn('Version 0.1.0', visible)
+            # The downloads come before the first step, and the steps survive them.
+            self.assertLess(install.index('dl-grid'), install.index('class="stp"'))
             self.assertIn('Prefer the command line?', visible)
             self.assertIn('command-line', doc.ids)
             self.assertEqual(install.count('class="stp"'), 3)
-            for phrase in ('pip install tiinyapp-farm', 'farm device', 'farm install titanium-tiiny-bot'):
+            for phrase in ('farm device', 'farm install titanium-tiiny-bot'):
                 self.assertIn(phrase, visible)
-            # Older versions sits under each platform that has any.
-            self.assertEqual(install.count('Older versions'), 2)
-            self.assertIn('/launcher/versions/#mac', doc.references)
-            self.assertIn('/launcher/versions/#windows', doc.references)
-            # No AppImage in the switch, so Linux is told what to do rather than offered nothing.
-            self.assertIn('No launcher for Linux yet', visible)
-            self.assertNotIn('/launcher/versions/#linux', doc.references)
             hero = re.search(r'<section class="hero">.*?</section>', (dist / 'index.html').read_text(), re.S).group(0)
             self.assertIn('<a class="btn ghost" href="/install/">Get the launcher</a>', hero)
-            self.assertNotIn('Install an app', hero)
             for app in self.apps:
                 page = (dist / 'apps' / app['id'] / 'index.html').read_text()
                 with self.subTest(app=app['id']):
@@ -544,9 +558,6 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
                         continue
                     main = page.split('<aside', 1)[0]
                     self.assertIn('href="tiinyfarm://install/' + app['id'] + '"', main)
-                    self.assertIn('Open in Tiiny App Farm', main)
-                    self.assertIn('Get the launcher', main)
-                    # The deep link is the way in; the commands stay on the page as the fallback.
                     self.assertIn('farm install ' + app['id'], main)
                     self.assertLess(main.index('tiinyfarm://'), main.index('farm install ' + app['id']))
             self.assertEqual((dist / 'assets/launcher.js').read_bytes(),
@@ -555,6 +566,32 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
                 relative = path.relative_to(dist).as_posix()
                 carries = '/assets/launcher.js' in path.read_text()
                 self.assertEqual(carries, relative == 'install/index.html' or relative.startswith('apps/'), relative)
+
+    def test_the_grid_is_four_rows_with_a_mark_and_an_arrow_on_each(self):
+        with tempfile.TemporaryDirectory() as temp:
+            dist = self.build_with_the_launcher_on(temp, macIntel='Tiiny-App-Farm-Intel.dmg',
+                                                   linux='Tiiny-App-Farm.AppImage')
+            install = (dist / 'install/index.html').read_text()
+            rows, doc = self.rows(install)
+            self.assertEqual([row[0] for row in rows], ['mac', 'mac-intel', 'windows', 'linux'])
+            self.assertEqual([row[1] for row in rows], ['macOS', 'macOS Intel', 'Windows', 'Linux'])
+            self.assertEqual(rows[3][2], 'AppImage')
+            self.assertEqual(rows[3][3], '/launcher/Tiiny-App-Farm.AppImage')
+            # Two marks a row: the platform it is for, and the arrow saying it downloads.
+            for chunk in re.findall(r'<a class="dl-row".*?</a>', install, re.S):
+                self.assertEqual(chunk.count('class="mk"'), 2)
+                self.assertLess(chunk.index('<b>'), chunk.rindex('class="mk"'))
+            self.assertIn('Mac, Windows and Linux', ' '.join(doc.text))
+            # No image request anywhere in the section: every mark is a path in the page.
+            section = install[install.index('<section class="dl"'):install.index('</section>')]
+            self.assertNotIn('<img', section)
+            # Two marks on each of four rows, the monitor, the terminal, and the copy button.
+            self.assertEqual(section.count('<svg'), 4 * 2 + 3)
+        # With no AppImage the fourth row is still there and points at the command line.
+        with tempfile.TemporaryDirectory() as temp:
+            dist = self.build_with_the_launcher_on(temp)
+            rows, _ = self.rows((dist / 'install/index.html').read_text())
+            self.assertEqual(rows[-1][:4], ('linux', 'Linux', 'Use the command line', '#command-line'))
 
     def test_launcher_on_keeps_the_site_whole(self):
         """The same link, fragment and house rules the rest of the suite holds the site to."""
@@ -636,25 +673,15 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
                     # The documentation may still describe the launcher in words; what it must
                     # not do is link or offer anything that the switch has stopped building.
                     for absent in ('tiinyfarm://', 'href="/launcher/', 'data-launcher',
-                                   '/assets/launcher.js', 'Download now', 'Older versions'):
+                                   '/assets/launcher.js', 'dl-row', 'dl-grid', 'All releases',
+                                   'Recommended for this computer'):
                         self.assertNotIn(absent, built)
                     self.assertNotIn('/launcher/versions/', Document(built).references)
             install = (dist / 'install/index.html').read_text()
             self.assertNotIn('Prefer the command line?', install)
             self.assertEqual(install.count('class="stp"'), 3)
 
-    def test_the_switch_takes_a_linux_build_and_draws_a_third_download(self):
-        with tempfile.TemporaryDirectory() as temp:
-            dist = self.build_with_the_launcher_on(temp, linux='Tiiny-App-Farm-0.1.0.AppImage')
-            install = (dist / 'install/index.html').read_text()
-            doc = Document(install)
-            buttons = [attrs for tag, attrs in doc.tags if 'data-launcher-get' in attrs]
-            self.assertEqual([attrs['data-launcher-get'] for attrs in buttons], ['mac', 'windows', 'linux'])
-            self.assertEqual(buttons[2]['href'], '/launcher/Tiiny-App-Farm-0.1.0.AppImage')
-            self.assertEqual(install.count('Older versions'), 3)
-            self.assertIn('/launcher/versions/#linux', doc.references)
-            self.assertIn('Mac, Windows and Linux', ' '.join(doc.text))
-        # The switch checks a Linux filename the way it checks the other two.
+    def test_the_switch_checks_a_linux_filename_the_way_it_checks_the_others(self):
         for bad in ('a b.AppImage', '../x.AppImage', 'a..b.AppImage', ''):
             with self.subTest(linux=bad), tempfile.TemporaryDirectory() as temp:
                 (Path(temp) / 'site').mkdir()
@@ -743,6 +770,35 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
                 with self.assertRaises(ValueError):
                     SITE['check_releases']([{**live[0], 'files': {bad: [{'name': 'a.dmg'}]}}])
 
+    def test_the_history_reads_one_file_per_platform_as_the_launcher_writes_it(self):
+        """The launcher writes a platform's file as the object itself, not a list of one."""
+        one = [{'version': '0.1.1', 'date': '2026-09-15', 'commit': 'f9273e1', 'files': {
+            'mac-arm64': {'name': 'Tiiny-App-Farm_0.1.1_aarch64.dmg', 'size': 25287943,
+                          'sha256': 'de' + '0' * 62, 'signed': True, 'notarised': True},
+            'linux-x64': {'name': 'Tiiny-App-Farm_0.1.1_amd64.AppImage', 'size': 100809208,
+                          'sha256': '60' + '1' * 62, 'signed': False, 'notarised': False}}}]
+        releases = SITE['check_releases'](one)
+        self.assertEqual([item['name'] for item in releases[0]['files']['mac']],
+                         ['Tiiny-App-Farm_0.1.1_aarch64.dmg'])
+        self.assertEqual(releases[0]['files']['linux'][0]['arch'], 'x64')
+        # A list of one reads the same, for a platform that ever ships two files at once.
+        as_list = [{**one[0], 'files': {key: [value] for key, value in one[0]['files'].items()}}]
+        self.assertEqual(SITE['check_releases'](as_list), releases)
+        # A top level list is the shape the launcher publishes; an object with releases also reads.
+        self.assertEqual(SITE['check_releases']({'releases': one}), releases)
+        for bad in (7, 'a file', [1, 2]):
+            with self.subTest(files=bad):
+                with self.assertRaises(ValueError):
+                    SITE['check_releases']([{**one[0], 'files': {'mac-arm64': bad}}])
+        with tempfile.TemporaryDirectory() as temp:
+            dist = self.build_with_the_launcher_on(temp, releases=one,
+                                                   linux='Tiiny-App-Farm_0.1.1_amd64.AppImage')
+            page = (dist / 'launcher/versions/index.html').read_text()
+            visible = ' '.join(Document(page).text)
+            self.assertIn('100.8 MB', visible)
+            self.assertIn('unsigned', visible)
+            self.assertIn('/launcher/Tiiny-App-Farm_0.1.1_amd64.AppImage', Document(page).references)
+
     def test_the_checked_in_history_describes_the_files_the_site_actually_serves(self):
         """The fallback is what a build uses when the live history is unreachable, so it has to
         name files that exist at the names it gives, with the switch's own version."""
@@ -751,10 +807,12 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
             return
         releases = SITE['read_releases'](ROOT)
         self.assertEqual(releases[0]['version'], switch['version'])
-        served = {item['name'] for files in releases[0]['files'].values() for item in files}
-        for named in (switch['mac'], switch['windows'], switch['macIntel'], switch['linux']):
-            if named:
-                self.assertIn(named, served)
+        # The history names a file by its version, the switch names the stable download. Both
+        # are real files in the bucket; what has to agree is which version is newest.
+        for files in releases[0]['files'].values():
+            for item in files:
+                self.assertRegex(item['name'], r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
+                self.assertIn(switch['version'], item['name'])
         for files in releases[0]['files'].values():
             for item in files:
                 with self.subTest(file=item['name']):

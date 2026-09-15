@@ -131,6 +131,10 @@ ICONS = {
 MARKS = {
     "apple": '<path d="M16.6 12.3c0-2 1.1-3.3 2.4-4.1-.9-1.3-2.3-2-4-2.1-1.6-.2-3.2.9-4 .9-.8 0-2.2-.9-3.5-.9C5.6 6.2 3.6 7.7 3.6 11c0 1.1.2 2.2.6 3.4.5 1.6 2.4 5.5 4.3 5.4 1-.1 1.7-.7 3-.7 1.3 0 1.9.7 3 .7 2-.1 3.7-3.6 4.2-5.2-2.5-1.2-2.1-3.4-2.1-3.4Z"/><path d="M14.3 4.6c1-1.1 1-2.3.9-2.9-.9.1-2 .6-2.6 1.3-.7.8-1.1 1.8-1 2.8 1 .1 2-.4 2.7-1.2Z"/>',
     "windows": '<path d="M3 5.6 10.2 4.6v6.8H3Zm8.4-1.15L21 3v8.4h-9.6ZM3 12.6h7.2v6.8L3 18.4Zm8.4 0H21V21l-9.6-1.4Z"/>',
+    "microsoft": '<path d="M3 3h8.4v8.4H3Zm9.6 0H21v8.4h-8.4ZM3 12.6h8.4V21H3Zm9.6 0H21V21h-8.4Z"/>',
+    "monitor": '<path d="M3.2 4.8c0-.66.54-1.2 1.2-1.2h15.2c.66 0 1.2.54 1.2 1.2v9.6c0 .66-.54 1.2-1.2 1.2H4.4c-.66 0-1.2-.54-1.2-1.2Zm2 .8v8h13.6v-8Zm3.3 12.8h7a1 1 0 0 1 0 2h-7a1 1 0 0 1 0-2Z"/>',
+    "terminal": '<path d="M3.2 4.8c0-.66.54-1.2 1.2-1.2h15.2c.66 0 1.2.54 1.2 1.2v14.4c0 .66-.54 1.2-1.2 1.2H4.4c-.66 0-1.2-.54-1.2-1.2Zm2 .8v12.8h13.6V5.6Zm1.9 2.5 1.3-1.3 3.1 3.1-3.1 3.1-1.3-1.3 1.8-1.8Zm5.5 4.9h4.6v1.8h-4.6Z"/>',
+    "download": '<path d="M12 3a1 1 0 0 1 1 1v8.6l2.5-2.5 1.4 1.4-4.9 4.9-4.9-4.9 1.4-1.4 2.5 2.5V4a1 1 0 0 1 1-1Zm-7 14h14a1 1 0 0 1 0 2H5a1 1 0 0 1 0-2Z"/>',
     "linux": '<path d="M12 1.8c-2.3 0-3.9 1.8-3.9 4.2 0 1 0 1.6-.5 2.4C6.3 10.4 5.2 12.6 5.2 15c0 1.8.6 3.3 1.6 4.3-.4.4-.8.9-1 1.4-.2.6.1 1.1.7 1.2 1 .2 2.1.1 3-.3.8.2 1.6.3 2.5.3s1.7-.1 2.5-.3c.9.4 2 .5 3 .3.6-.1.9-.6.7-1.2-.2-.5-.6-1-1-1.4 1-1 1.6-2.5 1.6-4.3 0-2.4-1.1-4.6-2.4-6.6-.5-.8-.5-1.4-.5-2.4 0-2.4-1.6-4.2-3.9-4.2Zm-1.9 4.5a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9Zm3.8 0a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9ZM12 8.6l1.7 1.1-1.7 1.1-1.7-1.1Z"/>',
 }
 
@@ -249,46 +253,52 @@ INSTALL_HEAD = '''<section class="page install-page"><h1>Install apps on your Ti
 INSTALL_NOTE = '''<p class="note" style="margin-top:18px">Apps declare the access they use (microphone, files, network, your Tiiny). The CLI shows that before installing; it does not sandbox them. Read the source if that matters to you: every app in the catalog ships it.</p>'''
 
 
-def download_cell(platform, symbol, title, href, filled, under, older=True):
-    """One platform's column: what it is, the button, the small print, and the way back."""
-    style = 'hay' if filled else 'ghost'
-    history = (f'<p class="get-old"><a href="/launcher/versions/#{platform}">Older versions</a></p>'
-               if older else '<p class="get-old">No Linux build yet</p>')
-    return (f'<div class="get-one" data-platform="{platform}">'
-            f'<p class="get-os">{e(title)}</p>'
-            f'<a class="btn {style} get-now" data-launcher-get="{platform}" href="{e(href)}" '
-            f'aria-label="Download Tiiny App Farm for {e(title)}">{mark(symbol)}Download now</a>'
-            f'{under}{history}</div>')
+def download_row(platform, symbol, title, subtitle, href, recommend=True, hook=''):
+    """One row of the desktop grid: the mark, what it is, which file it gives you, and an arrow.
+
+    The whole row is the link, so the target is the row rather than a word inside it. The
+    recommendation is in the markup but hidden, because nothing on the server knows which
+    computer is reading; launcher.js reveals the one row that matches."""
+    note = ('<span class="dl-rec" data-launcher-recommended hidden>'
+            'Recommended for this computer</span>' if recommend else '')
+    return (f'<a class="dl-row" data-platform="{platform}" data-launcher-get="{platform}"{hook} '
+            f'href="{e(href)}" aria-label="Download Tiiny App Farm for {e(title)}, {e(subtitle)}">'
+            f'{mark(symbol)}<span class="dl-text"><b>{e(title)}</b>'
+            f'<span class="dl-sub">{e(subtitle)}</span>{note}</span>{mark("download")}</a>')
 
 
 def download_block(launcher):
-    """Three downloads in a row, the visitor's own first once launcher.js has read the platform.
+    """The desktop downloads: one panel, four rows, and the command line in its own box.
 
-    Every button works with JavaScript switched off, because all three are in the markup with
-    real links; the script only moves the visitor's platform to the front and fills its button."""
-    intel = ''
+    Every row is a real link in the markup, so the panel works with JavaScript switched off."""
+    rows = [download_row('mac', 'apple', 'macOS', 'Apple Silicon DMG',
+                         '/launcher/' + launcher['mac'])]
     if launcher.get('macIntel'):
-        intel = (' Intel Mac? <a data-launcher-intel '
-                 f'href="{e("/launcher/" + launcher["macIntel"])}">Take this one</a>.')
-    cells = [download_cell('mac', 'apple', 'macOS', '/launcher/' + launcher['mac'], True,
-                           f'<p class="small">Apple silicon.{intel}</p>'),
-             download_cell('windows', 'windows', 'Windows', '/launcher/' + launcher['windows'],
-                           False, '<p class="small">Windows 10 and 11, x64.</p>')]
+        # An Intel Mac is a row of its own rather than a footnote, because it is a different file.
+        # It is recommended only where the browser actually reports an Intel Mac. Safari says
+        # MacIntel on every Mac and cannot be asked, so there the Apple silicon row keeps it.
+        rows.append(download_row('mac-intel', 'apple', 'macOS Intel', 'Intel DMG',
+                                 '/launcher/' + launcher['macIntel'],
+                                 hook=' data-launcher-intel'))
+    rows.append(download_row('windows', 'microsoft', 'Windows', 'Windows 10/11 x64 installer',
+                             '/launcher/' + launcher['windows']))
     if launcher.get('linux'):
-        cells.append(download_cell('linux', 'linux', 'Linux', '/launcher/' + launcher['linux'],
-                                   False, '<p class="small">An AppImage. Make it executable and run it.</p>'))
+        rows.append(download_row('linux', 'linux', 'Linux', 'AppImage',
+                                 '/launcher/' + launcher['linux']))
     else:
-        # No AppImage yet, so the third column says what a Linux visitor should do instead
-        # rather than offering a download that does not exist.
-        cells.append('<div class="get-one" data-platform="linux">'
-                     '<p class="get-os">Linux</p>'
-                     f'<a class="btn ghost get-now" data-launcher-get="linux" href="#command-line">'
-                     f'{mark("linux")}Set up on Linux</a>'
-                     '<p class="small">No launcher for Linux yet. The CLI does everything it does.</p>'
-                     '<p class="get-old">No Linux build yet</p></div>')
-    return (f'<div class="gets" data-launcher>{"".join(cells)}</div>\n'
-            f'<p class="fine get-note">Version {e(launcher["version"])}. One file, and it carries '
-            'everything it needs: no Python, no Docker, nothing to install first.</p>')
+        rows.append(download_row('linux', 'linux', 'Linux', 'Use the command line',
+                                 '#command-line'))
+    return ('<section class="dl" aria-labelledby="desktop">'
+            '<div class="dl-head"><h2 id="desktop">' + mark('monitor') + 'Desktop</h2>'
+            '<a class="btn ghost" href="/launcher/versions/">All releases</a></div>'
+            '<p class="sub">Download the latest desktop build, or browse every release.</p>'
+            '<div class="dl-grid" data-launcher>' + ''.join(rows) + '</div>'
+            '<div class="dl-cli"><p class="dl-cli-head">' + mark('terminal')
+            + '<b>CLI</b><span class="dl-sub">Linux</span></p>'
+            + copy_command('pip install tiinyapp-farm')
+            + f'<p class="fine">Version {e(launcher["version"])} on the desktop. The command line '
+            'carries everything it needs too: no Docker, nothing to install first.</p>'
+            '</div></section>')
 
 
 def steps(launcher=None):
@@ -365,8 +375,14 @@ def check_releases(data):
             if platform not in known or (dash and not ARCH.fullmatch(arch)):
                 raise ValueError(f"Launcher release {version} names a platform the site does not"
                                  f" know: {key}")
+            # One platform usually ships one file, and the launcher writes that as the object
+            # itself rather than a list of one. Both are read; a list is what a platform that
+            # ever ships two files at once would need.
+            if isinstance(entries, dict):
+                entries = [entries]
             if not isinstance(entries, list):
-                raise ValueError(f"Launcher release {version} {key} is not a list of files.")
+                raise ValueError(f"Launcher release {version} {key} is not a file or a list"
+                                 f" of files.")
             for item in entries:
                 name = item.get("name") if isinstance(item, dict) else None
                 if not isinstance(name, str) or not LAUNCHER_FILE.fullmatch(name) or ".." in name:
