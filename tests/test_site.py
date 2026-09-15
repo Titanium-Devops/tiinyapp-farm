@@ -474,7 +474,7 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         self.assertNotIn('Prefer the command line?', install)
         self.assertEqual(install.count('class="stp"'), 3)
 
-    def build_with_the_launcher_on(self, temp, releases=None, url=None, **changes):
+    def build_with_the_launcher_on(self, temp, releases=None, url=None, stale=False, **changes):
         """The site as it is with the launcher shipped, built from a copy of this tree."""
         source = Path(temp)
         for directory in ('manifests', 'brand', 'docs', 'site/assets', 'site/fonts'):
@@ -487,7 +487,7 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
             shutil.copyfile(ROOT / 'site/launcher-releases.json', source / 'site/launcher-releases.json')
         elif releases is not False:
             (source / 'site/launcher-releases.json').write_text(json.dumps(releases, indent=4) + '\n')
-        SITE['build'](source=source, today=TODAY, releases_url=url)
+        SITE['build'](source=source, today=TODAY, releases_url=url, allow_stale=stale)
         return source / 'site/dist'
 
     def rows(self, html):
@@ -807,31 +807,70 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
             return
         releases = SITE['read_releases'](ROOT)
         self.assertEqual(releases[0]['version'], switch['version'])
-        # The history names a file by its version, the switch names the stable download. Both
-        # are real files in the bucket; what has to agree is which version is newest.
-        for files in releases[0]['files'].values():
-            for item in files:
-                self.assertRegex(item['name'], r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
-                self.assertIn(switch['version'], item['name'])
-        for files in releases[0]['files'].values():
-            for item in files:
-                with self.subTest(file=item['name']):
-                    # A checksum that is recorded must be a real one, never a placeholder.
-                    if item['sha256']:
-                        self.assertRegex(item['sha256'], r'^[0-9a-f]{64}$')
-                        self.assertGreater(len(set(item['sha256'])), 4)
-                        self.assertGreater(item['size'], 1_000_000)
+        stable = {name for name in (switch['mac'], switch['macIntel'], switch['windows'],
+                                    switch['linux']) if name}
+        for release in releases:
+            for files in release['files'].values():
+                for item in files:
+                    with self.subTest(version=release['version'], file=item['name']):
+                        self.assertRegex(item['name'], r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
+                        # Every build in the history is linked by the name that carries its own
+                        # version. A stable name always serves the newest bytes, so using one
+                        # here would hand somebody the current build under an older heading.
+                        self.assertIn(release['version'], item['name'])
+                        self.assertNotIn(item['name'], stable)
+                        # A checksum that is recorded must be a real one, never a placeholder.
+                        if item['sha256']:
+                            self.assertRegex(item['sha256'], r'^[0-9a-f]{64}$')
+                            self.assertGreater(len(set(item['sha256'])), 4)
+                            self.assertGreater(item['size'], 1_000_000)
+        # Older releases stay on the page; a history of one is a history that lost something.
+        self.assertGreaterEqual(len(releases), 2)
+
+    def test_the_versions_page_links_every_build_by_its_own_versioned_name(self):
+        """A stable name always serves the newest bytes, so the history must never use one."""
+        switch = SITE['read_launcher'](ROOT)
+        if not switch['enabled']:
+            return
+        page = (self.output / 'launcher/versions/index.html').read_text()
+        linked = set(re.findall(r'href="/launcher/([^"]+)"', page))
+        self.assertTrue(linked)
+        expected = {item['name'] for release in SITE['read_releases'](ROOT)
+                    for files in release['files'].values() for item in files}
+        self.assertEqual(linked, expected)
+        for name in (switch['mac'], switch['macIntel'], switch['windows'], switch['linux']):
+            if name:
+                self.assertNotIn(name, linked)
+        # The install page is the opposite: every download on it points at the newest bytes.
+        # Its one other launcher link is the way to this page, which is not a download.
+        install = set(re.findall(r'href="/launcher/([^"]+)"', (self.output / 'install/index.html').read_text()))
+        self.assertIn('versions/', install)
+        self.assertEqual(install - {'versions/'},
+                         {name for name in (switch['mac'], switch['macIntel'], switch['windows'],
+                                            switch['linux']) if name})
 
     def test_the_release_history_falls_back_and_refuses_what_it_cannot_read(self):
         dead = 'http://127.0.0.1:1/releases.json'  # Refused at once; no timeout to wait out.
         with tempfile.TemporaryDirectory() as temp:
-            # A history that cannot be fetched is the checked-in copy, and the build carries on.
-            dist = self.build_with_the_launcher_on(temp, releases=self.HISTORY, url=dead)
+            # A build that asked for the live history and did not get it stops, and says which
+            # flag takes the copy on purpose. Falling back quietly is how a version history
+            # shipped once that was missing a release, its notes and its real filenames.
+            with self.assertRaises(ValueError) as refused:
+                self.build_with_the_launcher_on(temp, releases=self.HISTORY, url=dead)
+            self.assertIn(dead, str(refused.exception))
+            self.assertIn('--allow-stale-history', str(refused.exception))
+        with tempfile.TemporaryDirectory() as temp:
+            # Asked for on purpose, the copy builds the page and the run says so on stderr.
+            dist = self.build_with_the_launcher_on(temp, releases=self.HISTORY, url=dead, stale=True)
+            self.assertIn('Tiiny-App-Farm-0.2.0.AppImage', (dist / 'launcher/versions/index.html').read_text())
+        with tempfile.TemporaryDirectory() as temp:
+            # No fetch asked for at all is the offline path every other test takes, and is quiet.
+            dist = self.build_with_the_launcher_on(temp, releases=self.HISTORY)
             self.assertIn('Tiiny-App-Farm-0.2.0.AppImage', (dist / 'launcher/versions/index.html').read_text())
         with tempfile.TemporaryDirectory() as temp:
             # Nothing live and nothing checked in: the build stops rather than publish an empty page.
             with self.assertRaises(ValueError) as refused:
-                self.build_with_the_launcher_on(temp, releases=False, url=dead)
+                self.build_with_the_launcher_on(temp, releases=False, url=dead, stale=True)
             self.assertIn('site/launcher-releases.json', str(refused.exception))
         good = self.HISTORY['releases'][0]
         for changes in ({'version': '1'}, {'version': None}, {'date': 'yesterday'}, {'date': None},
@@ -1158,8 +1197,12 @@ assert.equal(element.className, 'pitch');
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_cli_works_outside_repository(self):
+        # The default path, which fetches the live launcher history, because that is what a deploy
+        # runs and it is how a shape the site could not read was caught. The stale flag keeps a
+        # runner with no network from failing here: a fetch that succeeds is still parsed, so a
+        # live history the site cannot read still fails this test.
         with tempfile.TemporaryDirectory() as temp:
-            result = subprocess.run([sys.executable, str(ROOT / 'scripts/build-site.py'), '--output', str(Path(temp) / 'dist'), '--today', TODAY.isoformat()], cwd=temp, capture_output=True, text=True)
+            result = subprocess.run([sys.executable, str(ROOT / 'scripts/build-site.py'), '--output', str(Path(temp) / 'dist'), '--today', TODAY.isoformat(), '--allow-stale-history'], cwd=temp, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn(f'Built {len(self.apps)} app pages', result.stdout)
 
