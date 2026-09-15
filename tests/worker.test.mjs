@@ -418,6 +418,38 @@ test('the launcher feed and its downloads come from R2, typed, cached by name an
   assert.equal(posted.status, 405);
   assert.equal((await posted.json()).error, 'Use GET or HEAD for launcher downloads.');
 });
+test('the release history is a feed from R2 and the version history is a page of the site', async () => {
+  const f = fixture();
+  const history = JSON.stringify({ releases: [{ version: '0.1.0', date: '2026-09-15', files: {} }] });
+  // The page lives under /launcher/, where the Worker runs first, and is handed to the site.
+  for (const where of ['/launcher/versions/', '/launcher/versions/index.html']) {
+    const page = await worker.fetch(new Request(ORIGIN + where), f.env);
+    assert.equal(page.status, 200, where);
+    assert.equal(await page.text(), 'static farm', where);
+  }
+  const early = await worker.fetch(new Request(ORIGIN + '/launcher/releases.json'), f.env);
+  assert.equal(early.status, 404);
+  assert.equal((await early.json()).error, 'The launcher release history has not been published yet.');
+  f.objects.set('launcher/releases.json', { value: history, options: {} });
+  f.objects.set('launcher/Tiiny-App-Farm-0.1.0.AppImage', { value: 'fixture linux build', options: {} });
+  const served = await worker.fetch(new Request(ORIGIN + '/launcher/releases.json'), f.env);
+  assert.equal(served.status, 200);
+  assert.equal(served.headers.get('Content-Type'), 'application/json; charset=utf-8');
+  // A history read from a cache would hide the release the page was built to show.
+  assert.equal(served.headers.get('Cache-Control'), 'no-store');
+  assert.equal(served.headers.get('Content-Disposition'), null);
+  assert.equal((await served.json()).releases[0].version, '0.1.0');
+  const linux = await worker.fetch(new Request(ORIGIN + '/launcher/Tiiny-App-Farm-0.1.0.AppImage'), f.env);
+  assert.equal(linux.status, 200);
+  assert.equal(linux.headers.get('Content-Type'), 'application/octet-stream');
+  assert.equal(linux.headers.get('Cache-Control'), 'public, max-age=31536000, immutable');
+  assert.equal(linux.headers.get('Content-Disposition'), 'attachment; filename="Tiiny-App-Farm-0.1.0.AppImage"');
+  assert.equal(await linux.text(), 'fixture linux build');
+  // The page is the only thing under /launcher/ that is not a file, so nothing else falls through.
+  const nested = await worker.fetch(new Request(ORIGIN + '/launcher/versions/0.1.0/'), f.env);
+  assert.equal(nested.status, 404);
+  assert.equal((await nested.json()).error, 'That launcher file does not exist.');
+});
 test('seed gate, archive selection, unsafe URL, invalid schema and size limits stop submission', async () => {
   const f = fixture(); assert.equal((await f.call('/api/seeds', seedForm())).status, 401);
   const first = await f.email(); assert.equal((await f.call('/api/seeds', seedForm(), first.cookie)).status, 403);

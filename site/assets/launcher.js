@@ -1,20 +1,20 @@
-// The download button already points at the Mac file when the page arrives, so a person with
-// JavaScript switched off still gets a working download. This only turns it around on Windows.
-// Linux is not detected on purpose: there is no launcher for it, and the note under the button
-// says so and points at the command line.
-const block = document.querySelector('[data-launcher]');
-if (block) {
+// All three downloads are in the markup with real links, so the page works with JavaScript
+// switched off. This only moves the visitor's own platform to the front of the row and fills
+// its button, which is the one piece a static page cannot know on its own.
+const row = document.querySelector('[data-launcher]');
+if (row) {
   const platform = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '';
-  if (/windows|win32|win64/i.test(platform)) {
-    const primary = block.querySelector('[data-launcher-primary]');
-    const other = block.querySelector('[data-launcher-other]');
-    if (primary) {
-      primary.href = block.dataset.windows;
-      primary.textContent = 'Download for Windows';
-    }
-    if (other) {
-      other.href = block.dataset.mac;
-      other.textContent = 'Mac';
+  const here = /windows|win32|win64/i.test(platform) ? 'windows'
+    : /android/i.test(platform) ? ''
+      : /linux|x11|ubuntu|fedora|cros/i.test(platform) ? 'linux'
+        : /mac|iphone|ipad|ipod/i.test(platform) ? 'mac' : '';
+  const cell = here && row.querySelector(`[data-platform="${here}"]`);
+  if (cell) {
+    row.prepend(cell);
+    for (const button of row.querySelectorAll('.get-now')) {
+      const mine = button.closest('[data-platform]') === cell;
+      button.classList.toggle('hay', mine);
+      button.classList.toggle('ghost', !mine);
     }
   }
 }

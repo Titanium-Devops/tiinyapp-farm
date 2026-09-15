@@ -1,0 +1,42 @@
+{
+    "releases": [
+        {
+            "version": "0.1.1",
+            "date": "2026-09-15",
+            "files": {
+                "mac-arm64": [
+                    {
+                        "name": "Tiiny-App-Farm.dmg",
+                        "size": 25287943,
+                        "sha256": "de7651acd7a1ff5b39083b27046b714c0c3f33365166605222c42a0c0d822085",
+                        "signed": true,
+                        "notarised": true
+                    }
+                ],
+                "mac-x64": [
+                    {
+                        "name": "Tiiny-App-Farm-Intel.dmg",
+                        "size": 25966101,
+                        "sha256": "d45011121031008fd628f7ec7c752928595afd6d77b4f92ef95327cc59ea3d1b",
+                        "signed": true,
+                        "notarised": true
+                    }
+                ],
+                "windows-x64": [
+                    {
+                        "name": "Tiiny-App-Farm-Setup.exe",
+                        "size": 27723416,
+                        "sha256": "1a00e450ebc7fe6ec079b65727970535ea67ed3b66cc1b5ff930d39a5ae29a51",
+                        "signed": true,
+                        "notarised": false
+                    }
+                ],
+                "linux-x64": [
+                    {
+                        "name": "Tiiny-App-Farm.AppImage"
+                    }
+                ]
+            }
+        }
+    ]
+}

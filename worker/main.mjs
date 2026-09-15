@@ -12,8 +12,9 @@ const app = createApp({ proofRoutes, releaseRoutes, seedRoutes, artRoutes });
 // misses the release it was asking about. An artifact carrying a version in its name can never
 // change under that name, so it is cached for a year.
 const LAUNCHER_TYPES = [
-  [/^latest\.json$/, 'application/json; charset=utf-8'],
+  [/^(?:latest|releases)\.json$/, 'application/json; charset=utf-8'],
   [/\.dmg$/, 'application/x-apple-diskimage'],
+  [/\.appimage$/i, 'application/octet-stream'],
   [/\.exe$/, 'application/vnd.microsoft.portable-executable'],
   [/\.msi$/, 'application/x-msi'],
   [/\.tar\.gz$/, 'application/gzip'],
@@ -92,11 +93,17 @@ export default {
         ...(object.httpEtag ? { ETag: object.httpEtag } : {}),
       } });
     }
-    if (url.pathname.startsWith('/launcher/')) {
+    // The version history is a page of the static site rather than a file in the bucket, and it
+    // lives under /launcher/, where run_worker_first sends every request here first.
+    const history = url.pathname === '/launcher/versions/' || url.pathname === '/launcher/versions/index.html';
+    if (url.pathname.startsWith('/launcher/') && !history) {
       if (!['GET', 'HEAD'].includes(request.method)) return json({ error: 'Use GET or HEAD for launcher downloads.' }, 405);
       const file = url.pathname.slice('/launcher/'.length);
-      const feed = file === 'latest.json';
-      const missing = feed ? 'The launcher has not been published yet.' : 'That launcher file does not exist.';
+      // Both feeds change whenever a version ships, so neither is ever cached.
+      const feed = file === 'latest.json' || file === 'releases.json';
+      const missing = file === 'latest.json' ? 'The launcher has not been published yet.'
+        : file === 'releases.json' ? 'The launcher release history has not been published yet.'
+        : 'That launcher file does not exist.';
       const contentType = launcherType(file);
       if (!contentType) return json({ error: 'That launcher file does not exist.' }, 404);
       const object = await env.SEEDS.get('launcher/' + file);

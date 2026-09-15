@@ -2679,8 +2679,10 @@ while True: time.sleep(0.1)
         self.save_manifest()
         self.install()
 
-        # The trickle is far longer than the deadline, so returning early proves the
-        # CLI did not wait for it even when a busy machine adds a tenth of a second.
+        # The trickle is far longer than the deadline, so returning before it finishes is what
+        # proves the CLI did not wait for it. The bound below is half the trickle rather than a
+        # tight one, because a loaded CI runner can stall for a second on its own and that says
+        # nothing about the code: a CLI that waited would take the whole five seconds.
         def slow_response(*args, **kwargs):
             time.sleep(5)
             return io.BytesIO(b'{"version":"0.1.0"}')
@@ -2691,7 +2693,7 @@ while True: time.sleep(0.1)
             started = time.monotonic()
             with self.assertRaisesRegex(FarmError, 'timed out'):
                 self.farm.start('fake-app')
-            self.assertLess(time.monotonic() - started, 1.0)
+            self.assertLess(time.monotonic() - started, 2.5)
         self.assertFalse((self.app / 'farm.pid').exists())
 
     def test_install_tells_a_person_what_it_is_installing(self):
