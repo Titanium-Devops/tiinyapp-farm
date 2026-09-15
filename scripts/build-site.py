@@ -105,12 +105,15 @@ def read_launcher(source):
     for field in ("version", "mac", "windows"):
         if not isinstance(setting.get(field), str) or not setting[field].strip():
             raise ValueError(f"site/launcher.json is enabled but has no {field}")
-    for field in ("mac", "windows"):
+    # macIntel is optional: the button is Apple silicon, an Intel Mac gets a small link.
+    fields = ("mac", "windows") + (("macIntel",) if setting.get("macIntel") else ())
+    for field in fields:
         # The same flat name the Worker will serve: no slash, no pair of dots, no surprises.
-        if not LAUNCHER_FILE.fullmatch(setting[field]) or ".." in setting[field]:
+        if not isinstance(setting[field], str) or not LAUNCHER_FILE.fullmatch(setting[field]) \
+                or ".." in setting[field]:
             raise ValueError(f"site/launcher.json {field} must be one launcher filename")
-    return {"enabled": True, "version": setting["version"],
-            "mac": setting["mac"], "windows": setting["windows"]}
+    return {"enabled": True, "version": setting["version"], "mac": setting["mac"],
+            "windows": setting["windows"], "macIntel": setting.get("macIntel") or None}
 
 
 ICONS = {
@@ -233,9 +236,13 @@ def download_block(launcher):
     A person with JavaScript switched off still gets a working download and the other
     platform beside it, which is why the Mac link is in the markup rather than written in."""
     mac, windows = '/launcher/' + launcher['mac'], '/launcher/' + launcher['windows']
+    intel = ''
+    if launcher.get('macIntel'):
+        intel = (f' The Mac download is for Apple silicon; an Intel Mac takes '
+                 f'<a data-launcher-intel href="{e("/launcher/" + launcher["macIntel"])}">this one</a>.')
     return (f'<div class="get" data-launcher data-mac="{e(mac)}" data-windows="{e(windows)}">'
             f'<a class="btn hay get-now" data-launcher-primary href="{e(mac)}">Download for Mac</a>'
-            f'<p class="small">Also for <a data-launcher-other href="{e(windows)}">Windows</a>.</p>'
+            f'<p class="small">Also for <a data-launcher-other href="{e(windows)}">Windows</a>.{intel}</p>'
             f'<p class="fine">Version {e(launcher["version"])}. One file, and it carries everything '
             'it needs: no Python, no Docker, nothing to install first. There is no launcher for '
             'Linux, so <a href="#command-line">use the command line</a> there.</p></div>')

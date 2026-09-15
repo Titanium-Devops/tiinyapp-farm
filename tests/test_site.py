@@ -468,6 +468,16 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         SITE['build'](source=source, today=TODAY)
         return source / 'site/dist'
 
+    def test_an_intel_mac_gets_its_own_small_link_when_the_switch_names_one(self):
+        with tempfile.TemporaryDirectory() as temp:
+            dist = self.build_with_the_launcher_on(temp, macIntel='Tiiny-App-Farm-Intel.dmg')
+            page = (dist / 'install/index.html').read_text()
+            self.assertIn('data-launcher-intel href="/launcher/Tiiny-App-Farm-Intel.dmg"', page)
+            self.assertIn('Apple silicon', page)
+        with tempfile.TemporaryDirectory() as temp:
+            dist = self.build_with_the_launcher_on(temp)
+            self.assertNotIn('data-launcher-intel', (dist / 'install/index.html').read_text())
+
     def test_launcher_on_leads_with_the_download_and_keeps_the_command_line(self):
         with tempfile.TemporaryDirectory() as temp:
             dist = self.build_with_the_launcher_on(temp)
