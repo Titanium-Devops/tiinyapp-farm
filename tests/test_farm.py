@@ -27,7 +27,7 @@ from urllib.parse import urlsplit
 
 import farm.farm as farm_module
 from farm.farm import (DEVICE_PORT, DEVICE_PROBE, Farm, FarmError, MODEL_KINDS, MODELS_PROBE,
-                       describe_size, main, python_candidates)
+                       atomic_write, describe_size, main, python_candidates)
 
 # The three ways the finder reaches the network, held before any test patches them, so a test about
 # the finder itself can put the real one back and fake only the socket under it.
@@ -1414,6 +1414,118 @@ while True: time.sleep(0.1)
         self.assertIn('Port 43210 was busy, so it started on 43211.', self.output.getvalue())
         self.assertIn('Open http://localhost:43211', self.output.getvalue())
         self.wait_for(lambda: 'port=43211' in (self.app / 'farm.log').read_text())
+
+    def a_movable_app_on(self, port=43210):
+        """The fixture app, declaring one port it can be moved off."""
+        self.manifest["requires"]["ports"] = [port]
+        self.save_manifest()
+        self.make_release(code='import os\nprint("port=" + os.environ["TIINYAPP_PORT"], flush=True)\n'
+                          + FAKE_APP)
+        self.install()
+
+    def ports_where(self, *busy):
+        """A create_connection that answers the two different questions the farm asks.
+
+        The farm asks the same thing twice for two reasons: is this port free, and has the app
+        come up on it yet. Counting the asks per port is what tells them apart, so a port nobody
+        else holds is free the first time it is asked about and open every time after.
+        """
+        asked = {}
+
+        def answer(address, *rest, **named):
+            port = address[1]
+            asked[port] = asked.get(port, 0) + 1
+            if port in busy or asked[port] > 1:
+                return contextlib.nullcontext()
+            raise ConnectionRefusedError()
+        return answer
+
+    def test_a_first_start_remembers_the_port_it_got(self):
+        """An app's origin is its port, so a browser knows it by the port it last saw."""
+        self.a_movable_app_on()
+        self.assertIsNone(self.farm.remembered_port("fake-app"))
+        with patch("farm.farm.socket.create_connection", side_effect=self.ports_where()):
+            self.farm.start("fake-app")
+        self.assertEqual(self.farm.remembered_port("fake-app"), 43210)
+        self.assertEqual(json.loads((self.app / "port.json").read_text()), {"port": 43210})
+        self.assertNotIn("which is where it was last time", self.output.getvalue())
+
+    def test_a_start_that_was_moved_remembers_where_it_landed(self):
+        self.a_movable_app_on()
+        with patch("farm.farm.socket.create_connection", side_effect=self.ports_where(43210)):
+            self.farm.start("fake-app")
+        self.assertIn("Port 43210 was busy, so it started on 43211.", self.output.getvalue())
+        self.assertEqual(self.farm.remembered_port("fake-app"), 43211)
+
+    def test_the_next_start_takes_the_port_it_had_last_time(self):
+        """The whole point: the app comes back where the browser left it, not where the manifest
+        says, so nobody loses a login to a port that was busy one morning."""
+        self.a_movable_app_on()
+        atomic_write(self.app / "port.json", json.dumps({"port": 43219}))
+        with patch("farm.farm.socket.create_connection", side_effect=self.ports_where()) as looked:
+            self.farm.start("fake-app")
+        printed = self.output.getvalue()
+        self.assertIn("It is on 43219 again, which is where it was last time.", printed)
+        self.assertIn("Open http://localhost:43219", printed)
+        self.wait_for(lambda: "port=43219" in (self.app / "farm.log").read_text())
+        self.assertEqual(self.farm.remembered_port("fake-app"), 43219)
+        # It asked about the remembered port before it asked about the declared one.
+        self.assertEqual(looked.call_args_list[0].args[0][1], 43219)
+
+    def test_a_remembered_port_that_is_busy_falls_back_to_the_declared_one(self):
+        self.a_movable_app_on()
+        atomic_write(self.app / "port.json", json.dumps({"port": 43219}))
+        with patch("farm.farm.socket.create_connection", side_effect=self.ports_where(43219)):
+            self.farm.start("fake-app")
+        printed = self.output.getvalue()
+        self.assertIn("Open http://localhost:43210", printed)
+        self.assertNotIn("which is where it was last time", printed)
+        self.assertNotIn("was busy, so it started on", printed)
+        self.assertEqual(self.farm.remembered_port("fake-app"), 43210)
+
+    def test_port_beats_the_memory_and_becomes_the_memory(self):
+        self.a_movable_app_on()
+        atomic_write(self.app / "port.json", json.dumps({"port": 43219}))
+        with patch("farm.farm.socket.create_connection", side_effect=self.ports_where()):
+            self.farm.start("fake-app", port=43222)
+        printed = self.output.getvalue()
+        self.assertIn("Open http://localhost:43222", printed)
+        self.assertNotIn("which is where it was last time", printed)
+        self.assertEqual(self.farm.remembered_port("fake-app"), 43222)
+
+    def test_an_app_that_cannot_be_moved_is_never_put_somewhere_it_remembers(self):
+        """A fixed port is the app's own rule, and a memory does not get to break it."""
+        self.manifest["port"] = None
+        self.manifest["requires"]["ports"] = [43210]
+        self.save_manifest()
+        self.make_release(code='import os\nprint("port=" + os.environ["TIINYAPP_PORT"], flush=True)\n'
+                          + FAKE_APP)
+        self.install()
+        atomic_write(self.app / "port.json", json.dumps({"port": 43219}))
+        with patch("farm.farm.socket.create_connection", side_effect=self.ports_where()):
+            self.farm.start("fake-app")
+        self.assertIn("Open http://localhost:43210", self.output.getvalue())
+        self.assertEqual(self.farm.remembered_port("fake-app"), 43210)
+
+    def test_a_port_memory_that_makes_no_sense_is_ignored(self):
+        self.a_movable_app_on()
+        for nonsense in ({"port": "43219"}, {"port": 0}, {"port": 70000}, {"port": True}, {}):
+            atomic_write(self.app / "port.json", json.dumps(nonsense))
+            self.assertIsNone(self.farm.remembered_port("fake-app"), nonsense)
+        (self.app / "port.json").write_text("not json")
+        self.assertIsNone(self.farm.remembered_port("fake-app"))
+
+    def test_status_says_which_port_an_app_is_usually_on(self):
+        self.a_movable_app_on()
+        atomic_write(self.app / "port.json", json.dumps({"port": 43219}))
+        with patch("farm.farm.socket.create_connection", side_effect=self.ports_where()):
+            self.farm.start("fake-app")
+        row = next(iter(self.farm.status_rows()))
+        self.assertEqual((row["port"], row["usualPort"]), (43219, 43219))
+        answer = io.StringIO()
+        with patch("farm.farm.Farm", return_value=self.farm), contextlib.redirect_stdout(answer):
+            self.assertEqual(main(["status", "--json", "--no-update-check"]), 0)
+        self.assertEqual(json.loads(answer.getvalue())["running"][0]["usualPort"], 43219)
 
     def test_busy_port_never_launches_or_claims_started(self):
         self.manifest['requires']['ports'] = [43210]

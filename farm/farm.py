@@ -2415,6 +2415,32 @@ class Farm:
                         f" run farm device and start it again.")
         return self.startup_error(app, message)
 
+    def remembered_port(self, ident):
+        """The port this app last started on, or None.
+
+        An app's origin is its port, so a browser keeps its logins, its local storage and its
+        permissions per port. Moving an app off 8421 because something else had it that morning
+        throws all of that away and looks to the person like the app forgot them. So the port it
+        last ran on is tried before the one its manifest asks for.
+
+        It lives beside process.json in the app's own directory rather than in the manifest,
+        because it is this machine's history of this app and not something the app declares.
+        """
+        try:
+            port = read_json(self.app_dir(ident) / "port.json").get("port")
+        except (FarmError, OSError, ValueError):
+            return None
+        return port if type(port) is int and 1 <= port <= 65535 else None  # noqa: E721
+
+    def remember_port(self, ident, port):
+        """Keep the port an app really started on, for the next start to try first."""
+        if type(port) is not int:  # noqa: E721 - JSON integers exclude booleans.
+            return
+        try:
+            atomic_write(self.app_dir(ident) / "port.json", json.dumps({"port": port}) + "\n")
+        except OSError:
+            pass  # A port worth remembering is never worth failing a start over.
+
     def free_port_above(self, ident, busy, span=50):
         """The first free port above a busy one, so a movable app can start without being asked."""
         for candidate in range(busy + 1, min(busy + 1 + span, 65536)):
@@ -2478,18 +2504,37 @@ class Farm:
                                 if ports else f"{ident} has no port to move, so start it without --port.")
             if port is not None:
                 ports = [port, *ports[1:]]
-            moved = None
-            for index, candidate in enumerate(ports):
-                if self.tcp_ready(candidate):
-                    if index == 0 and port is None and takes is not None:
+            declared = ports[0] if ports else None
+            # The port it last ran on, because a browser knows an app by its port and the app it
+            # knows is the one it last saw. Only a movable app, and never over an explicit --port.
+            remembered = (self.remembered_port(ident)
+                          if ports and port is None and takes is not None else None)
+            if remembered == declared:
+                remembered = None
+            moved = kept = None
+            if ports:
+                # Three candidates for the first port, each asked about once: the one it had last
+                # time, the one it asks for, and the first free one above that.
+                for candidate in ([remembered, declared] if remembered else [declared]):
+                    if not self.tcp_ready(candidate):
+                        ports[0] = candidate
+                        kept = candidate if candidate == remembered else None
+                        break
+                else:
+                    if port is None and takes is not None:
                         # Jason, 2026-09-14: "It should have checked to see if a port was in use and
                         # then put it on a different one." A movable app steps up to the next free
                         # port on its own; an explicit --port is the person's choice and is never moved.
-                        chosen = self.free_port_above(ident, candidate)
-                        moved = (candidate, chosen)
-                        ports[0] = chosen
-                        continue
-                    # Nothing launched this time, so quoting farm.log would show a stale run.
+                        ports[0] = self.free_port_above(ident, declared)
+                        moved = (declared, ports[0])
+                    else:
+                        # Nothing launched this time, so quoting farm.log would show a stale run.
+                        raise FarmError(f"Port {declared} is already in use; use farm start {ident} --port N."
+                                        if takes is not None else
+                                        f"Port {declared} is already in use, and {ident} cannot be moved off it.")
+            for candidate in ports[1:]:
+                # A second declared port is the app's own and is never moved.
+                if self.tcp_ready(candidate):
                     raise FarmError(f"Port {candidate} is already in use; use farm start {ident} --port N."
                                     if takes is not None else
                                     f"Port {candidate} is already in use, and {ident} cannot be moved off it.")
@@ -2564,9 +2609,13 @@ class Farm:
                     (app / "process.json").unlink(missing_ok=True)
                     raise
             threading.Thread(target=process.wait, daemon=True).start()
+            if ports:
+                self.remember_port(ident, ports[0])
             print(f"{manifest['name']} is running.")
             if moved:
                 print(f"Port {moved[0]} was busy, so it started on {moved[1]}.")
+            elif kept:
+                print(f"It is on {kept} again, which is where it was last time.")
             if ports:
                 print("Open " + app_link(ports[0], manifest))
             available = self.newer_version(ident, manifest)
@@ -2649,6 +2698,7 @@ class Farm:
                        "version": version, "installed": manifest["version"],
                        "restartToUpdate": version != manifest["version"], "health": state,
                        "updateAvailable": self.newer_version(ident, manifest) or None,
+                       "usualPort": self.remembered_port(ident),
                        "models": self.app_models(ident, manifest, info)}
 
     def status(self):
@@ -3462,6 +3512,7 @@ def running_json(farm, ident):
     ports = list(info.get("ports") or []) if pid else []
     return {"version": manifest["version"], "running": pid is not None, "pid": pid, "ports": ports,
             "port": ports[0] if ports else None,
+            "usualPort": farm.remembered_port(ident),
             "url": app_link(ports[0], manifest) if ports else None,
             "models": farm.app_models(ident, manifest, info) if pid else None}
 

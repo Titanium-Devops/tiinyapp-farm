@@ -193,10 +193,30 @@ farm start <id> --port 7799
 
 | Flag | Meaning |
 | --- | --- |
-| `--port N` | Replace the app's first declared port. Must be 1 to 65535. Refused by an app whose manifest says its port is fixed |
+| `--port N` | Replace the app's first declared port. Must be 1 to 65535. Refused by an app whose manifest says its port is fixed. Remembered for next time |
 | `--python PATH` | Run this app with this Python, and keep it for later starts on this machine |
 | `--load` | Load whatever model the app needs without asking first |
 | `--no-model-check` | Start even if the models the app needs are not loaded (or set `FARM_NO_MODEL_CHECK=1`) |
+
+### The port it had last time
+
+An app's origin is its port, so a browser keeps its logins, its local storage and its permissions
+per port. An app moved off 8421 one morning because something else had taken it would come back on
+another port and look, to the person using it, like it had forgotten them.
+
+So the farm writes down the port each app really started on, beside `process.json` in that app's own
+directory, and tries it first next time: the remembered port, then the one the manifest declares,
+then the first free port above the declared one. `--port` beats all three and is what gets
+remembered. An app whose manifest says its port is fixed is never moved and never remembered onto
+another one.
+
+```
+Fake app is running.
+It is on 8421 again, which is where it was last time.
+```
+
+`farm status --json` carries it as `usualPort` beside the port the app really has, so something
+watching can say which one it is usually on.
 
 ### The models an app needs
 
