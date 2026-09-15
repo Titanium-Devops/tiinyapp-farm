@@ -500,6 +500,36 @@ def paths():
                 ["version", "platforms"]))},
             errors=[(404, "The launcher has not been published yet."),
                     (405, "Use GET or HEAD for launcher downloads.")])},
+        "/launcher/releases.json": {"x-farm-source": "main.mjs", "get": op(
+            "The launcher release history", "Every launcher version that has shipped, newest"
+            " first, with its date, its notes and its files. The site's version history page is"
+            " built from this at deploy time, and it is never cached. Until the first release"
+            " publishes it, it answers 404.", tags=["Files"],
+            answers={"200": answer("The history.", obj(
+                {"releases": {"type": "array", "items": obj(
+                    {"version": {"type": "string"},
+                     "date": {"type": "string", "format": "date"},
+                     "commit": {"type": "string"},
+                     "notes": {"type": "string", "description": "Markdown."},
+                     "files": {"type": "object", "description":
+                               "Keyed by mac, windows and linux; each a list of files.",
+                               "additionalProperties": {"type": "array", "items": obj(
+                                   {"name": {"type": "string"},
+                                    "size": {"type": "integer"},
+                                    "sha256": {"type": "string"},
+                                    "signed": {"type": "boolean"},
+                                    "notarised": {"type": "boolean"}},
+                                   ["name", "size", "sha256"])}}},
+                    ["version", "date", "files"])}},
+                ["releases"]))},
+            errors=[(404, "The launcher release history has not been published yet."),
+                    (405, "Use GET or HEAD for launcher downloads.")])},
+        "/launcher/versions/": {"x-farm-source": "assets", "get": op(
+            "The version history page", "Every launcher version, what changed in it, and a link to"
+            " each file with its size, its checksum and whether it is signed. A page of the static"
+            " site rather than a file in the bucket, so the Worker hands it to the site.",
+            tags=["Pages the Worker serves"],
+            answers={"200": answer("The page.", {"type": "string"}, media="text/html")})},
         "/launcher/{file}": {"x-farm-source": "main.mjs", "get": op(
             "A launcher download", "The disk image, the installer, or the signed archive an"
             " installed launcher updates itself from. A filename carrying a version is cached for"
