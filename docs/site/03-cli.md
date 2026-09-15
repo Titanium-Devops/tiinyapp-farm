@@ -224,8 +224,10 @@ when nothing of that kind is downloaded or nothing fits. Loading waits for your 
 model is running before the app starts, for as long as the device's own estimate for that model
 suggests.
 
-`--load` says yes to all of it without asking. `--json` never asks and answers with what is
-missing instead:
+`--load` says yes to all of it without asking, and works the same for a machine: `--json --load`
+loads what is missing and then starts the app, and the answer carries `loaded` with the model ids
+it had to load. `--json` on its own never asks and never loads, and answers with what is missing
+instead:
 
 ```json
 {"command": "start", "id": "titanium-tiiny-bot", "ok": false, "started": false,
@@ -369,14 +371,50 @@ free figure is what says whether another one fits.
 
 | Flag | Meaning |
 | --- | --- |
+| `--load ID` | Load one model on your Tiiny, by name |
+| `--unload ID` | Unload one model on your Tiiny, by name |
+| `--force` | Unload one a running app needs |
 | `--watch` | Keep looking, and print a line whenever a model changes state. Ctrl-C to stop |
 | `--interval N` | Seconds between looks with `--watch`. Default 3 |
 | `--json` | One JSON object of the lot, or with `--watch` one object per change |
+
+### Loading and unloading one model
+
+```
+farm models --load Qwen/Qwen3-8B
+farm models --unload Qwen/Qwen3-8B
+```
+
+A load that will not fit what the NPU has free is refused with the number, and nothing is asked of
+the device:
+
+```
+Qwen/Qwen3-30B-A3B-Instruct needs 55 units and your Tiiny has 32 units free, 23 short. Unload something first: farm models --unload <id>
+```
+
+A load waits for your Tiiny to say the model is running before it answers, for as long as the
+device's own estimate for that model suggests. A model that is already loaded, or an unload of one
+that is not, says so and asks the device for nothing.
+
+An unload is held back when a running installed app declares it needs that model and nothing else
+loaded would meet the need:
+
+```
+titanium-tiiny-bot is running and needs Qwen/Qwen3-8B. Stop it first, or unload anyway with: farm models --unload Qwen/Qwen3-8B --force
+```
+
+A second model of the same kind being loaded means the need is met either way, so nothing is held
+back. With `--json`, both flags answer with the state they left, in the same shape as `farm models
+--json`.
 
 ```
 16:33:55 Qwen/Qwen3-TTS-12Hz-1.7B-Base is loaded for tts, 5 units, 73 of 100 NPU units in use.
 16:33:59 Qwen/Qwen3-TTS-12Hz-1.7B-Base for tts is not loaded any more, 68 of 100 NPU units in use.
 ```
+
+A watch stops on its own when whatever was reading it goes away, so a launcher that is killed
+rather than quit does not leave one polling for ever. On POSIX the pipe says so as soon as the
+reader closes; on Windows the watch stops at its next write instead.
 
 `--watch --json` writes one object per change to standard output as it happens, which is what a
 launcher reads:
