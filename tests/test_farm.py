@@ -27,7 +27,7 @@ from urllib.parse import urlsplit
 
 import farm.farm as farm_module
 from farm.farm import (DEVICE_PORT, DEVICE_PROBE, Farm, FarmError, MODEL_KINDS, MODELS_PROBE,
-                       atomic_write, describe_size, main, python_candidates)
+                       atomic_write, describe_size, installed_json, main, python_candidates)
 
 # The three ways the finder reaches the network, held before any test patches them, so a test about
 # the finder itself can put the real one back and fake only the socket under it.
@@ -3922,12 +3922,39 @@ while True: time.sleep(0.1)
         self.assertEqual((code, payload["command"]), (0, "list"))
         self.assertEqual(payload["installed"], [{"id": "fake-app", "name": "Fake app",
                                                  "version": "0.1.0", "pitch": self.manifest["pitch"],
-                                                 "running": False, "updateAvailable": None}])
+                                                 "running": False, "usualPort": None,
+                                                 "updateAvailable": None}])
         catalog = {row["id"]: row for row in payload["catalog"]}
         self.assertEqual(sorted(catalog), ["fake-app", "other-app"])
         self.assertEqual(catalog["fake-app"]["installed"], "0.1.0")
         self.assertEqual(catalog["other-app"]["installed"], None)
         self.assertEqual(catalog["other-app"]["release"], "ready")
+
+    def test_a_stopped_app_still_says_which_port_it_comes_back_on(self):
+        """A stopped app is only ever on the list, and a stopped app is exactly when somebody
+        wants to know the port it would come back on."""
+        self.a_movable_app_on()
+        with patch("farm.farm.socket.create_connection", side_effect=self.ports_where()):
+            self.farm.start("fake-app")
+        self.farm.stop("fake-app")
+        row = next(iter(self.farm.installed_rows({})))
+        self.assertEqual((row["running"], row["usualPort"]), (False, 43210))
+        payload = self.json_cli("list")[1]
+        self.assertEqual([(r["id"], r["running"], r["usualPort"]) for r in payload["installed"]],
+                         [("fake-app", False, 43210)])
+
+    def test_an_installed_app_that_never_started_has_no_usual_port(self):
+        self.install()
+        self.assertIsNone(next(iter(self.farm.installed_rows({})))["usualPort"])
+        self.assertIsNone(self.json_cli("list")[1]["installed"][0]["usualPort"])
+        self.assertIsNone(installed_json(self.farm, "fake-app")["usualPort"])
+
+    def test_an_install_answer_carries_the_port_the_app_comes_back_on(self):
+        self.a_movable_app_on()
+        with patch("farm.farm.socket.create_connection", side_effect=self.ports_where()):
+            self.farm.start("fake-app")
+        self.farm.stop("fake-app")
+        self.assertEqual(installed_json(self.farm, "fake-app")["usualPort"], 43210)
 
     def test_json_list_says_which_release_a_catalog_entry_has(self):
         del self.manifest["release"]

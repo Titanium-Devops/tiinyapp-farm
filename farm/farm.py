@@ -1522,6 +1522,9 @@ class Farm:
                 known[ident] = None
             yield {"id": manifest["id"], "name": manifest["name"], "version": manifest["version"],
                    "pitch": manifest["pitch"], "running": running,
+                   # The port it would come back on. A stopped app is exactly when somebody wants
+                   # to know that, and a stopped app is only ever on this list.
+                   "usualPort": self.remembered_port(ident),
                    "updateAvailable": update_available(manifest, known[ident]) or None}
 
     def catalog_rows(self, known, here):
@@ -3500,6 +3503,7 @@ def installed_json(farm, ident):
     return {"id": ident, "name": manifest["name"], "version": manifest["version"],
             "path": str(root), "library": manifest["entry"] is None,
             "ports": list(manifest["requires"]["ports"]),
+            "usualPort": farm.remembered_port(ident),
             "permissions": list(manifest["permissions"])}
 
 

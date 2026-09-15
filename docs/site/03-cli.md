@@ -215,8 +215,11 @@ Fake app is running.
 It is on 8421 again, which is where it was last time.
 ```
 
-`farm status --json` carries it as `usualPort` beside the port the app really has, so something
-watching can say which one it is usually on.
+`usualPort` carries it wherever the farm describes an installed app: on each row of
+`farm list --json`, on each running row of `farm status --json` beside the port the app really has,
+and on the `farm install --json` and `farm update --json` answers. It is null for an app that has
+never started. A stopped app appears only on the list, which is where somebody most wants to know
+the port it would come back on.
 
 ### The models an app needs
 
