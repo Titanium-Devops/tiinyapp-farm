@@ -1,42 +1,67 @@
-{
-    "releases": [
-        {
-            "version": "0.1.1",
-            "date": "2026-09-15",
-            "files": {
-                "mac-arm64": [
-                    {
-                        "name": "Tiiny-App-Farm.dmg",
-                        "size": 25287943,
-                        "sha256": "de7651acd7a1ff5b39083b27046b714c0c3f33365166605222c42a0c0d822085",
-                        "signed": true,
-                        "notarised": true
-                    }
-                ],
-                "mac-x64": [
-                    {
-                        "name": "Tiiny-App-Farm-Intel.dmg",
-                        "size": 25966101,
-                        "sha256": "d45011121031008fd628f7ec7c752928595afd6d77b4f92ef95327cc59ea3d1b",
-                        "signed": true,
-                        "notarised": true
-                    }
-                ],
-                "windows-x64": [
-                    {
-                        "name": "Tiiny-App-Farm-Setup.exe",
-                        "size": 27723416,
-                        "sha256": "1a00e450ebc7fe6ec079b65727970535ea67ed3b66cc1b5ff930d39a5ae29a51",
-                        "signed": true,
-                        "notarised": false
-                    }
-                ],
-                "linux-x64": [
-                    {
-                        "name": "Tiiny-App-Farm.AppImage"
-                    }
-                ]
-            }
-        }
-    ]
-}
+[
+  {
+    "version": "0.1.1",
+    "date": "2026-09-15",
+    "commit": "f9273e1e8fe94a4f14dc54f845622b7842fb7f1e",
+    "notes": "### Added\n\n- **Linux.** An AppImage for x86_64, carrying the same bundled Python and the\n  same `tiinyapp-farm` engine as the other two. One file, made executable and\n  run; nothing to install first.\n- **A release history.** Every release, its notes and every file it shipped are\n  published as `launcher/releases.json`, so older versions stay reachable rather\n  than being replaced by the newest one.\n\n### Changed\n\n- The card for an app says which port it will really come up on when that is\n  not the port its manifest asks for, whether the app is running or stopped.\n- The engine inside is `tiinyapp-farm` 0.1.17, which remembers the port an app\n  last used and tries it again before the one the manifest names.\n\n### Known limits\n\n- The AppImage is **not signed**. Linux has no notarisation and nothing a\n  stranger's machine would check a desktop signature against. The SHA-256 of\n  every file is published with the release and is what can be verified.\n- The AppImage has been built but **never run on a Linux desktop** by anybody on\n  this team. The tray, the deep link and the window are untested there.\n- The updater covers macOS only. A Linux update means downloading the new\n  AppImage.",
+    "files": {
+      "mac-arm64": {
+        "name": "Tiiny-App-Farm_0.1.1_aarch64.dmg",
+        "size": 25287943,
+        "sha256": "de7651acd7a1ff5b39083b27046b714c0c3f33365166605222c42a0c0d822085",
+        "signed": true,
+        "notarised": true
+      },
+      "mac-x64": {
+        "name": "Tiiny-App-Farm_0.1.1_x64.dmg",
+        "size": 25966101,
+        "sha256": "d45011121031008fd628f7ec7c752928595afd6d77b4f92ef95327cc59ea3d1b",
+        "signed": true,
+        "notarised": true
+      },
+      "windows-x64": {
+        "name": "Tiiny-App-Farm_0.1.1_x64-setup.exe",
+        "size": 27723416,
+        "sha256": "1a00e450ebc7fe6ec079b65727970535ea67ed3b66cc1b5ff930d39a5ae29a51",
+        "signed": true,
+        "notarised": false
+      },
+      "linux-x64": {
+        "name": "Tiiny-App-Farm_0.1.1_amd64.AppImage",
+        "size": 100809208,
+        "sha256": "605b7e2025d58a506dda493174eaea469dd029689757f826e186f2b31c6a7743",
+        "signed": false,
+        "notarised": false
+      }
+    }
+  },
+  {
+    "version": "0.1.0",
+    "date": "2026-09-14",
+    "commit": "238c9a86c71fc1f495fd88564be7cd7b3c22adf7",
+    "files": {
+      "mac-arm64": {
+        "name": "Tiiny-App-Farm_0.1.0_aarch64.dmg",
+        "size": 25288602,
+        "sha256": "b339e69746eb103b6e7d1005e40a287a144709869e22a41df6d7ecc218cd1b42",
+        "signed": true,
+        "notarised": true
+      },
+      "mac-x64": {
+        "name": "Tiiny-App-Farm_0.1.0_x64.dmg",
+        "size": 25964260,
+        "sha256": "62301dbbe5ccd4eb60378e9c908867c5105ab1c0895a9c0410dd27040d776c97",
+        "signed": true,
+        "notarised": true
+      },
+      "windows-x64": {
+        "name": "Tiiny-App-Farm_0.1.0_x64-setup.exe",
+        "size": 27720608,
+        "sha256": "d8a02af90819f9b8d00dcf57215fa6d26ca8ed0f8aa500d055e24b38bfa7375f",
+        "signed": true,
+        "notarised": false
+      }
+    },
+    "notes": "The first release.\n\n### Added\n\n- **A window for the farm.** Browse the catalog on tiinyapp.farm, see what an\n  app needs and what it can reach before anything downloads, and install, start,\n  stop, update and remove it without opening a terminal.\n- **It carries its own Python.** CPython 3.11.16 and the `tiinyapp-farm` engine\n  are inside the app, so there is nothing to install first: no Python, no Node,\n  no package manager.\n- **A Models pane.** What your Tiiny has loaded right now, what is on its disk,\n  and what the NPU budget is. A model that fits can be loaded from the window; a\n  model that does not says how much more it needs.\n- **What each app needs, in words.** Every app card says which kinds of model it\n  needs and whether your Tiiny has them, and an app that cannot run says why\n  instead of failing after it starts. Load and start loads the model it needs\n  and then starts the app, and says which one it loaded.\n- **A running app that loses its model says so**, on its row and in the menu\n  bar, within a few seconds of the model going away.\n- **Each app opens in its own window**, with its own name on it, rather than\n  taking a tab in whatever browser happens to be open.\n- **The menu bar** keeps the list of what is running when the window is closed.\n\n### Known limits\n\n- macOS and Windows only.\n- The Windows installer in this release is **not signed**, so Windows warns\n  about it. The macOS disk images are signed, notarised and stapled.\n- One Tiiny at a time."
+  }
+]
