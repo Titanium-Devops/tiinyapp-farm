@@ -705,6 +705,65 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
             nav = re.search(r'<nav class="docs-nav".*?</nav>', (dist / 'docs/cli/index.html').read_text(), re.S).group(0)
             self.assertIn('/launcher/versions/', Document(nav).references)
 
+    def test_the_history_reads_the_platform_keys_the_launcher_actually_writes(self):
+        """The launcher names a build by platform and architecture: mac-arm64, not mac."""
+        live = [{'version': '0.1.1', 'date': '2026-09-15', 'notes': 'Linux joins.', 'files': {
+            'mac-arm64': [{'name': 'Tiiny-App-Farm-0.1.1.dmg', 'size': 25287943,
+                           'sha256': 'de' + '0' * 62, 'signed': True, 'notarised': True}],
+            'mac-x64': [{'name': 'Tiiny-App-Farm-0.1.1-Intel.dmg', 'size': 25966101,
+                         'sha256': 'd4' + '1' * 62, 'signed': True, 'notarised': True}],
+            'windows-x64': [{'name': 'Tiiny-App-Farm-0.1.1-Setup.exe', 'size': 27723416,
+                             'sha256': '1a' + '2' * 62, 'signed': True, 'notarised': False}],
+            'linux-x64': [{'name': 'Tiiny-App-Farm-0.1.1.AppImage', 'size': 61402112,
+                           'sha256': 'e7' + '3' * 62, 'signed': False, 'notarised': False}]}}]
+        releases = SITE['check_releases'](live)
+        # Four keys, three platforms: the architecture groups under the platform it belongs to.
+        self.assertEqual(sorted(releases[0]['files']), ['linux', 'mac', 'windows'])
+        # Apple silicon comes first, because it is the build most people opening the page want.
+        self.assertEqual([item['arch'] for item in releases[0]['files']['mac']], ['arm64', 'x64'])
+        with tempfile.TemporaryDirectory() as temp:
+            dist = self.build_with_the_launcher_on(temp, releases={'releases': live},
+                                                   linux='Tiiny-App-Farm-0.1.1.AppImage')
+            page = (dist / 'launcher/versions/index.html').read_text()
+            visible = ' '.join(Document(page).text)
+            for named in ('macOS, Apple silicon', 'macOS, Intel', 'Windows, x64', 'Linux, x64'):
+                self.assertIn(named, visible)
+            # The card at the top offers Apple silicon and says which build that is.
+            top = page.split('<h2 id="history"')[0]
+            self.assertIn('/launcher/Tiiny-App-Farm-0.1.1.dmg', Document(top).references)
+            self.assertNotIn('/launcher/Tiiny-App-Farm-0.1.1-Intel.dmg', Document(top).references)
+            self.assertIn('signed and notarised, Apple silicon', ' '.join(Document(top).text))
+        # An architecture nobody has shipped yet is a label, not a reason to stop a build.
+        odd = SITE['check_releases']([{**live[0], 'files': {'linux-riscv64': [{'name': 'a.AppImage'}]}}])
+        self.assertEqual(odd[0]['files']['linux'][0]['arch'], 'riscv64')
+        self.assertEqual(SITE['arch_label']('linux', 'riscv64'), 'riscv64')
+        # A platform is not, because it decides the anchor and the mark.
+        for bad in ('plan9-x64', 'macos-arm64', 'mac-ARM64', 'mac-'):
+            with self.subTest(key=bad):
+                with self.assertRaises(ValueError):
+                    SITE['check_releases']([{**live[0], 'files': {bad: [{'name': 'a.dmg'}]}}])
+
+    def test_the_checked_in_history_describes_the_files_the_site_actually_serves(self):
+        """The fallback is what a build uses when the live history is unreachable, so it has to
+        name files that exist at the names it gives, with the switch's own version."""
+        switch = SITE['read_launcher'](ROOT)
+        if not switch['enabled']:
+            return
+        releases = SITE['read_releases'](ROOT)
+        self.assertEqual(releases[0]['version'], switch['version'])
+        served = {item['name'] for files in releases[0]['files'].values() for item in files}
+        for named in (switch['mac'], switch['windows'], switch['macIntel'], switch['linux']):
+            if named:
+                self.assertIn(named, served)
+        for files in releases[0]['files'].values():
+            for item in files:
+                with self.subTest(file=item['name']):
+                    # A checksum that is recorded must be a real one, never a placeholder.
+                    if item['sha256']:
+                        self.assertRegex(item['sha256'], r'^[0-9a-f]{64}$')
+                        self.assertGreater(len(set(item['sha256'])), 4)
+                        self.assertGreater(item['size'], 1_000_000)
+
     def test_the_release_history_falls_back_and_refuses_what_it_cannot_read(self):
         dead = 'http://127.0.0.1:1/releases.json'  # Refused at once; no timeout to wait out.
         with tempfile.TemporaryDirectory() as temp:
@@ -732,7 +791,7 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         # Size and checksum are the only optional facts, because an older entry may predate them.
         thin = SITE['check_releases']([{**good, 'files': {'mac': [{'name': 'a.dmg'}]}}])
         self.assertEqual(thin[0]['files']['mac'][0], {'name': 'a.dmg', 'size': None, 'sha256': None,
-                                                      'signed': False, 'notarised': False})
+                                                      'arch': '', 'signed': False, 'notarised': False})
         self.assertEqual(SITE['signing_words'](thin[0]['files']['mac'][0]), 'unsigned')
 
     def test_launcher_documentation_is_in_the_nav_and_the_index(self):

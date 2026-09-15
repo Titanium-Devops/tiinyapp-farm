@@ -311,8 +311,26 @@ def steps(launcher=None):
 
 PLATFORMS = [("mac", "apple", "macOS"), ("windows", "windows", "Windows"),
              ("linux", "linux", "Linux")]
+# A files key in the release history is a platform, optionally with the architecture it was built
+# for: mac, or mac-arm64. The platform decides the mark and the anchor and is a closed set the
+# site owns. The architecture is only a label, so an architecture nobody has shipped yet prints
+# its own name rather than stopping a build.
+ARCH_NAMES = {("mac", "arm64"): "Apple silicon", ("mac", "aarch64"): "Apple silicon",
+              ("mac", "x64"): "Intel", ("mac", "x86_64"): "Intel",
+              ("mac", "universal"): "Apple silicon and Intel"}
+ARCH_ORDER = {"mac": ["arm64", "aarch64", "universal", "", "x64", "x86_64"],
+              "windows": ["x64", "x86_64", "", "arm64", "aarch64"],
+              "linux": ["x64", "x86_64", "", "arm64", "aarch64"]}
+ARCH = re.compile(r"[a-z0-9_]+")
 RELEASES_URL = ORIGIN + "/launcher/releases.json"
 SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
+def arch_label(platform, arch):
+    """What to call this build beside the platform, for a person choosing between two files."""
+    if not arch:
+        return ""
+    return ARCH_NAMES.get((platform, arch), arch)
 
 
 def check_releases(data):
@@ -339,14 +357,16 @@ def check_releases(data):
         files = entry.get("files")
         if not isinstance(files, dict) or not any(files.values()):
             raise ValueError(f"Launcher release {version} lists no files.")
-        unknown = set(files) - {name for name, _, _ in PLATFORMS}
-        if unknown:
-            raise ValueError(f"Launcher release {version} names a platform the site does not know:"
-                             f" {', '.join(sorted(unknown))}")
+        known = {name for name, _, _ in PLATFORMS}
         kept = {}
-        for platform, entries in files.items():
+        for key, entries in files.items():
+            platform, dash, arch = str(key).partition("-")
+            # A trailing dash names no architecture at all, which is a typo rather than a build.
+            if platform not in known or (dash and not ARCH.fullmatch(arch)):
+                raise ValueError(f"Launcher release {version} names a platform the site does not"
+                                 f" know: {key}")
             if not isinstance(entries, list):
-                raise ValueError(f"Launcher release {version} {platform} is not a list of files.")
+                raise ValueError(f"Launcher release {version} {key} is not a list of files.")
             for item in entries:
                 name = item.get("name") if isinstance(item, dict) else None
                 if not isinstance(name, str) or not LAUNCHER_FILE.fullmatch(name) or ".." in name:
@@ -360,7 +380,13 @@ def check_releases(data):
                     raise ValueError(f"{name} has a sha256 that is not 64 hexadecimal characters.")
                 kept.setdefault(platform, []).append({
                     "name": name, "size": size, "sha256": checksum and str(checksum),
-                    "signed": bool(item.get("signed")), "notarised": bool(item.get("notarised"))})
+                    "arch": arch, "signed": bool(item.get("signed")),
+                    "notarised": bool(item.get("notarised"))})
+        for platform, entries in kept.items():
+            # The build most people want comes first, so the card at the top offers that one.
+            order = ARCH_ORDER.get(platform, [])
+            entries.sort(key=lambda item: order.index(item["arch"])
+                         if item["arch"] in order else len(order))
         releases.append({"version": version, "date": day, "commit": entry.get("commit") or "",
                          "notes": entry.get("notes") or "", "files": kept})
     releases.sort(key=lambda release: [int(part) for part in release["version"].split(".")],
@@ -405,13 +431,14 @@ def release_files(release):
     rows = []
     for platform, _, title in PLATFORMS:
         for item in release["files"].get(platform, []):
+            named = f'{title}, {arch_label(platform, item["arch"])}' if item["arch"] else title
             size = f'{item["size"] / 1_000_000:.1f} MB' if item["size"] else "not recorded"
             if item["sha256"]:
                 checksum = (f'<span class="mono" title="{e(item["sha256"])}">'
                             f'{e(item["sha256"][:12])}\u2026</span>')
             else:
                 checksum = '<span class="fine">not recorded</span>'
-            rows.append(f'<tr><td>{e(title)}</td>'
+            rows.append(f'<tr><td>{e(named)}</td>'
                         f'<td><a href="/launcher/{e(item["name"])}">{e(item["name"])}</a></td>'
                         f'<td>{e(size)}</td><td>{checksum}</td>'
                         f'<td>{e(signing_words(item))}</td></tr>')
@@ -428,9 +455,11 @@ def versions_page(releases):
     for platform, symbol, title in PLATFORMS:
         files = newest["files"].get(platform, [])
         if files:
+            which = arch_label(platform, files[0]["arch"])
             link = (f'<a class="btn ghost" href="/launcher/{e(files[0]["name"])}">'
                     f'{mark(symbol)}Download {e(newest["version"])}</a>')
-            note = f'<p class="fine">{e(signing_words(files[0]))}.</p>'
+            note = (f'<p class="fine">{e(signing_words(files[0]))}'
+                    + (f', {e(which)}' if which else '') + '.</p>')
         else:
             link = f'<p class="get-os">{mark(symbol)}Not built yet</p>'
             note = '<p class="fine">There is no build for this platform.</p>'

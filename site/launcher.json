@@ -1,7 +1,8 @@
 {
     "enabled": true,
-    "version": "0.1.0",
+    "version": "0.1.1",
     "mac": "Tiiny-App-Farm.dmg",
     "macIntel": "Tiiny-App-Farm-Intel.dmg",
-    "windows": "Tiiny-App-Farm-Setup.exe"
+    "windows": "Tiiny-App-Farm-Setup.exe",
+    "linux": "Tiiny-App-Farm.AppImage"
 }

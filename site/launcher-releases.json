@@ -1,33 +1,39 @@
 {
     "releases": [
         {
-            "version": "0.1.0",
+            "version": "0.1.1",
             "date": "2026-09-15",
-            "notes": "The first release. Find your Tiiny, paste its key once, pick an app from the catalog and run it, with a menu bar or tray icon for what is running.\n\n- Installs, starts, stops and updates apps through the same engine the `farm` command uses, so both find the same apps in the same place.\n- The catalog grid is the live one from this site.\n- Closing the window leaves your apps running.",
             "files": {
-                "mac": [
+                "mac-arm64": [
                     {
                         "name": "Tiiny-App-Farm.dmg",
-                        "size": 25288602,
-                        "sha256": "b339e69746eb103b6e7d1005e40a287a144709869e22a41df6d7ecc218cd1b42",
-                        "signed": true,
-                        "notarised": true
-                    },
-                    {
-                        "name": "Tiiny-App-Farm-Intel.dmg",
-                        "size": 25964260,
-                        "sha256": "62301dbbe5ccd4eb60378e9c908867c5105ab1c0895a9c0410dd27040d776c97",
+                        "size": 25287943,
+                        "sha256": "de7651acd7a1ff5b39083b27046b714c0c3f33365166605222c42a0c0d822085",
                         "signed": true,
                         "notarised": true
                     }
                 ],
-                "windows": [
+                "mac-x64": [
+                    {
+                        "name": "Tiiny-App-Farm-Intel.dmg",
+                        "size": 25966101,
+                        "sha256": "d45011121031008fd628f7ec7c752928595afd6d77b4f92ef95327cc59ea3d1b",
+                        "signed": true,
+                        "notarised": true
+                    }
+                ],
+                "windows-x64": [
                     {
                         "name": "Tiiny-App-Farm-Setup.exe",
-                        "size": 27720608,
-                        "sha256": "d8a02af90819f9b8d00dcf57215fa6d26ca8ed0f8aa500d055e24b38bfa7375f",
+                        "size": 27723416,
+                        "sha256": "1a00e450ebc7fe6ec079b65727970535ea67ed3b66cc1b5ff930d39a5ae29a51",
                         "signed": true,
                         "notarised": false
+                    }
+                ],
+                "linux-x64": [
+                    {
+                        "name": "Tiiny-App-Farm.AppImage"
                     }
                 ]
             }
