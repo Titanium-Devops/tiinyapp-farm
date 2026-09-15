@@ -1954,6 +1954,7 @@ while True: time.sleep(0.1)
         self.assertEqual([(row["event"], row["id"]) for row in lines],
                          [("loaded", "Qwen/Qwen3-8B")])
 
+    @unittest.skipIf(os.name == "nt", "Windows has no poll for a pipe; it stops at its next write")
     def test_a_watch_stops_when_nobody_is_reading_it_any_more(self):
         """A watch writes only when something changes, so a launcher that was killed rather than
         quit could leave one polling for ever without ever meeting a broken pipe."""
@@ -1967,15 +1968,18 @@ while True: time.sleep(0.1)
         never.assert_not_called()
         slept.assert_not_called()
 
-    def test_a_watch_somebody_is_reading_is_left_alone(self):
-        from farm.farm import reader_gone
+    def test_a_departed_reader_is_seen_where_the_pipe_can_say_so(self):
+        """POSIX answers POLLHUP the moment the read end closes. Windows has no poll for a pipe,
+        so there this stays quiet by design and the watch stops at its next write instead, which
+        is the branch the mid-write test covers."""
+        from farm.farm import WINDOWS, reader_gone
         read_fd, write_fd = os.pipe()
         try:
             with os.fdopen(write_fd, "w") as live:
                 self.assertFalse(reader_gone(live))
                 os.close(read_fd)
                 read_fd = None
-                self.assertTrue(reader_gone(live))
+                self.assertEqual(reader_gone(live), not WINDOWS)
         finally:
             if read_fd is not None:
                 os.close(read_fd)
