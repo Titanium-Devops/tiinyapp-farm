@@ -1954,10 +1954,24 @@ while True: time.sleep(0.1)
         self.assertEqual([(row["event"], row["id"]) for row in lines],
                          [("loaded", "Qwen/Qwen3-8B")])
 
-    @unittest.skipIf(os.name == "nt", "Windows has no poll for a pipe; it stops at its next write")
-    def test_a_watch_stops_when_nobody_is_reading_it_any_more(self):
-        """A watch writes only when something changes, so a launcher that was killed rather than
-        quit could leave one polling for ever without ever meeting a broken pipe."""
+    def test_a_watch_stops_when_it_is_told_nobody_is_reading(self):
+        """What the loop does about a departed reader, on every platform the farm runs on. How a
+        departed reader is noticed is the platform's business, and the two tests below."""
+        self.configure_device()
+        with patch("farm.farm.reader_gone", return_value=True) as asked, \
+                patch.object(self.farm, "model_state") as never, \
+                patch("farm.farm.time.sleep") as slept:
+            self.farm.watch_models(as_json=True, rounds=50)
+        asked.assert_called_once_with()
+        never.assert_not_called()
+        slept.assert_not_called()
+
+    @unittest.skipIf(os.name == "nt", "Windows has no poll for a pipe; it stops at its next write,"
+                                      " which test_a_reader_that_goes_mid_write covers")
+    def test_a_real_closed_pipe_stops_a_watch(self):
+        """The same thing end to end with a real pipe rather than a patched answer: a watch writes
+        only when something changes, so a launcher that was killed rather than quit could leave one
+        polling for ever without ever meeting the broken pipe that would have stopped it."""
         self.configure_device()
         read_fd, write_fd = os.pipe()
         os.close(read_fd)
