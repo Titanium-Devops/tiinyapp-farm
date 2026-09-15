@@ -5,10 +5,6 @@ order: 12
 summary: Tiiny App Farm, the desktop app that installs and runs farm apps without a terminal.
 ---
 
-> Not released yet. This page describes the app that is being built, so that you know what is
-> coming and what it will and will not do. Until it ships, everything here is done with the
-> command line, which is covered in [Getting started](/docs/getting-started/).
-
 Tiiny App Farm is a small app for macOS and Windows. It installs farm apps, starts them, stops
 them and updates them, and it does all of that with buttons rather than commands. It is the same
 farm underneath: the same catalog, the same archives, the same checksums and the same folder on
@@ -22,14 +18,26 @@ inside itself and uses it to run the apps you install.
 There is one file for each platform.
 
 - **macOS.** A disk image. Open it and drag Tiiny App Farm to your Applications folder. It is
-  signed and notarised by Apple, so it opens without an argument.
+  signed and notarised by Apple, so it opens without an argument. There are two builds: the one
+  the download button offers is for Apple silicon, and an Intel Mac takes the Intel one.
 - **Windows.** An installer for the x64 build. It installs for your user account only, so Windows
   never asks for an administrator password. Windows on ARM is not built yet.
-- **Linux.** There is no launcher. Use the command line, which works everywhere and is what most
-  Linux users already have. See [Getting started](/docs/getting-started/).
+- **Linux.** Use the command line, which works everywhere and is what most Linux users already
+  have. See [Getting started](/docs/getting-started/).
 
-Both downloads come from this site, at `tiinyapp.farm/launcher/`. The app checks the same place for
-its own updates and installs them quietly when you next open it.
+Every download comes from this site, at `tiinyapp.farm/launcher/`. The app checks the same place
+for its own updates and installs them quietly when you next open it.
+
+## Going back to an older version
+
+[Launcher versions](/launcher/versions/) lists every version that has shipped, newest first, with
+what changed in it and a link to each file. Every build stays where it was published, so a version
+that worked for you is always still there.
+
+Two things are worth knowing before you take one. The newest version is the one the app updates
+itself to, so an older build you install stops being offered updates and is offered none of the
+fixes in the versions above it. And every file on that page carries its size, its SHA-256 and
+whether it is signed, so you can check what you downloaded is what the page describes.
 
 ## The first time you open it
 
