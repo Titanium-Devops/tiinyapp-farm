@@ -414,6 +414,8 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         tree = ET.parse(self.output / 'sitemap.xml')
         urls = {element.text for element in tree.iter('{http://www.sitemaps.org/schemas/sitemap/0.9}loc')}
         expected = {'https://tiinyapp.farm' + path for path in ('/', '/catalog/', '/install/', '/submit/', '/docs/agents/', '/manifests/')}
+        if SITE['read_launcher'](ROOT)['enabled']:
+            expected.add('https://tiinyapp.farm/launcher/versions/')
         expected.update('https://tiinyapp.farm/apps/' + app['id'] + '/' for app in self.apps)
         documentation = {'https://tiinyapp.farm' + entry['url'] for entry in SITE['doc_entries'](ROOT)}
         self.assertIn('https://tiinyapp.farm/docs/', documentation)
@@ -446,10 +448,11 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         setting = json.loads((ROOT / 'site/launcher.json').read_text())
         if setting.get('enabled'):
             install = (self.output / 'install/index.html').read_text()
-            self.assertIn('data-launcher-primary href="/launcher/' + setting['mac'] + '"', install)
-            self.assertIn('href="/launcher/' + setting['windows'] + '"', install)
+            self.assertIn('data-launcher-get="mac" href="/launcher/' + setting['mac'] + '"', install)
+            self.assertIn('data-launcher-get="windows" href="/launcher/' + setting['windows'] + '"', install)
             self.assertIn('Prefer the command line?', install)
             self.assertTrue((self.output / 'assets/launcher.js').exists())
+            self.assertTrue((self.output / 'launcher/versions/index.html').is_file())
             hero = re.search(r'<section class="hero">.*?</section>', (self.output / 'index.html').read_text(), re.S).group(0)
             self.assertIn('Get the launcher', hero)
             return
@@ -471,8 +474,8 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         self.assertNotIn('Prefer the command line?', install)
         self.assertEqual(install.count('class="stp"'), 3)
 
-    def build_with_the_launcher_on(self, temp, **changes):
-        """The site as it will be the day the launcher ships, built from a copy of this tree."""
+    def build_with_the_launcher_on(self, temp, releases=None, url=None, **changes):
+        """The site as it is with the launcher shipped, built from a copy of this tree."""
         source = Path(temp)
         for directory in ('manifests', 'brand', 'docs', 'site/assets', 'site/fonts'):
             shutil.copytree(ROOT / directory, source / directory)
@@ -480,7 +483,11 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
                    'mac': 'Tiiny-App-Farm_0.1.0_universal.dmg',
                    'windows': 'Tiiny-App-Farm_0.1.0_x64-setup.exe', **changes}
         (source / 'site/launcher.json').write_text(json.dumps(setting, indent=4) + '\n')
-        SITE['build'](source=source, today=TODAY)
+        if releases is None:
+            shutil.copyfile(ROOT / 'site/launcher-releases.json', source / 'site/launcher-releases.json')
+        elif releases is not False:
+            (source / 'site/launcher-releases.json').write_text(json.dumps(releases, indent=4) + '\n')
+        SITE['build'](source=source, today=TODAY, releases_url=url)
         return source / 'site/dist'
 
     def test_an_intel_mac_gets_its_own_small_link_when_the_switch_names_one(self):
@@ -501,23 +508,31 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
             install = (dist / 'install/index.html').read_text()
             doc = Document(install)
             visible = ' '.join(doc.text)
-            block = next(attrs for tag, attrs in doc.tags if 'data-launcher' in attrs)
-            self.assertEqual((block['data-mac'], block['data-windows']), (mac, windows))
-            primary = next(attrs for tag, attrs in doc.tags if 'data-launcher-primary' in attrs)
-            self.assertEqual(primary['href'], mac)
-            self.assertIn('hay', primary['class'].split())
-            other = next(attrs for tag, attrs in doc.tags if 'data-launcher-other' in attrs)
-            self.assertEqual(other['href'], windows)
-            # The download comes before the first command on the page, and the steps survive it.
-            self.assertLess(install.index('data-launcher-primary'), install.index('pip install tiinyapp-farm'))
+            buttons = [attrs for tag, attrs in doc.tags if 'data-launcher-get' in attrs]
+            self.assertEqual([attrs['data-launcher-get'] for attrs in buttons], ['mac', 'windows', 'linux'])
+            self.assertEqual(buttons[0]['href'], mac)
+            self.assertEqual(buttons[1]['href'], windows)
+            # The visitor's platform is filled; launcher.js moves whichever one that is to the front.
+            self.assertIn('hay', buttons[0]['class'].split())
+            for other in buttons[1:]:
+                self.assertIn('ghost', other['class'].split())
+            self.assertEqual(sum('class="mk"' in install[i:i + 40]
+                                 for i in range(len(install)) if install.startswith('<svg', i)), 3)
+            # The downloads come before the first command on the page, and the steps survive them.
+            self.assertLess(install.index('data-launcher-get'), install.index('pip install tiinyapp-farm'))
             self.assertIn('Version 0.1.0', visible)
             self.assertIn('Prefer the command line?', visible)
             self.assertIn('command-line', doc.ids)
             self.assertEqual(install.count('class="stp"'), 3)
             for phrase in ('pip install tiinyapp-farm', 'farm device', 'farm install titanium-tiiny-bot'):
                 self.assertIn(phrase, visible)
-            # Linux is told what to do rather than offered a download that does not exist.
-            self.assertIn('There is no launcher for Linux', visible)
+            # Older versions sits under each platform that has any.
+            self.assertEqual(install.count('Older versions'), 2)
+            self.assertIn('/launcher/versions/#mac', doc.references)
+            self.assertIn('/launcher/versions/#windows', doc.references)
+            # No AppImage in the switch, so Linux is told what to do rather than offered nothing.
+            self.assertIn('No launcher for Linux yet', visible)
+            self.assertNotIn('/launcher/versions/#linux', doc.references)
             hero = re.search(r'<section class="hero">.*?</section>', (dist / 'index.html').read_text(), re.S).group(0)
             self.assertIn('<a class="btn ghost" href="/install/">Get the launcher</a>', hero)
             self.assertNotIn('Install an app', hero)
@@ -561,8 +576,10 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
                         if parsed.netloc != 'tiinyapp.farm':
                             continue
                         if parsed.path == '/api/auth/github' or parsed.path.startswith(
-                                ('/makers/', '/media/', '/seeds-files/', '/launcher/')):
-                            continue  # Worker routes, not static files.
+                                ('/makers/', '/media/', '/seeds-files/')) or (
+                                parsed.path.startswith('/launcher/')
+                                and parsed.path != '/launcher/versions/'):
+                            continue  # Worker routes and bucket files, not static pages.
                         target = dist / unquote(parsed.path).lstrip('/')
                         if target.is_dir():
                             target /= 'index.html'
@@ -585,6 +602,139 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
             # A tree with no switch at all builds the site the way it is built today.
             self.assertEqual(SITE['read_launcher'](Path(temp)), SITE['LAUNCHER_OFF'])
 
+    HISTORY = {'releases': [
+        {'version': '0.1.0', 'date': '2026-09-15', 'commit': 'abc1234',
+         'notes': 'The first release.\n\n- It installs apps.',
+         'files': {'mac': [{'name': 'Tiiny-App-Farm-0.1.0.dmg', 'size': 25288602,
+                            'sha256': 'b3' + '0' * 62, 'signed': True, 'notarised': True}],
+                   'windows': [{'name': 'Tiiny-App-Farm-0.1.0-Setup.exe', 'size': 27720608,
+                                'sha256': 'd8' + '1' * 62, 'signed': True, 'notarised': False}]}},
+        {'version': '0.2.0', 'date': '2026-09-20', 'notes': 'Linux joins.',
+         'files': {'mac': [{'name': 'Tiiny-App-Farm-0.2.0.dmg', 'size': 25300000,
+                            'sha256': 'aa' + '2' * 62, 'signed': True, 'notarised': True}],
+                   'linux': [{'name': 'Tiiny-App-Farm-0.2.0.AppImage', 'size': 61000000,
+                              'sha256': 'cc' + '3' * 62, 'signed': False, 'notarised': False}]}},
+    ]}
+
+    def test_turning_the_switch_off_removes_the_downloads_and_the_history(self):
+        """The switch still turns everything off, history page included."""
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp)
+            for directory in ('manifests', 'brand', 'docs', 'site/assets', 'site/fonts'):
+                shutil.copytree(ROOT / directory, source / directory)
+            shutil.copyfile(ROOT / 'site/launcher-releases.json', source / 'site/launcher-releases.json')
+            (source / 'site/launcher.json').write_text(json.dumps(
+                {'enabled': False, 'version': None, 'mac': None, 'windows': None}, indent=4) + '\n')
+            SITE['build'](source=source, today=TODAY)
+            dist = source / 'site/dist'
+            self.assertFalse((dist / 'launcher').exists())
+            self.assertFalse((dist / 'assets/launcher.js').exists())
+            self.assertNotIn('/launcher/versions/', (dist / 'sitemap.xml').read_text())
+            for page in dist.rglob('*.html'):
+                built = page.read_text()
+                with self.subTest(page=page.relative_to(dist).as_posix()):
+                    # The documentation may still describe the launcher in words; what it must
+                    # not do is link or offer anything that the switch has stopped building.
+                    for absent in ('tiinyfarm://', 'href="/launcher/', 'data-launcher',
+                                   '/assets/launcher.js', 'Download now', 'Older versions'):
+                        self.assertNotIn(absent, built)
+                    self.assertNotIn('/launcher/versions/', Document(built).references)
+            install = (dist / 'install/index.html').read_text()
+            self.assertNotIn('Prefer the command line?', install)
+            self.assertEqual(install.count('class="stp"'), 3)
+
+    def test_the_switch_takes_a_linux_build_and_draws_a_third_download(self):
+        with tempfile.TemporaryDirectory() as temp:
+            dist = self.build_with_the_launcher_on(temp, linux='Tiiny-App-Farm-0.1.0.AppImage')
+            install = (dist / 'install/index.html').read_text()
+            doc = Document(install)
+            buttons = [attrs for tag, attrs in doc.tags if 'data-launcher-get' in attrs]
+            self.assertEqual([attrs['data-launcher-get'] for attrs in buttons], ['mac', 'windows', 'linux'])
+            self.assertEqual(buttons[2]['href'], '/launcher/Tiiny-App-Farm-0.1.0.AppImage')
+            self.assertEqual(install.count('Older versions'), 3)
+            self.assertIn('/launcher/versions/#linux', doc.references)
+            self.assertIn('Mac, Windows and Linux', ' '.join(doc.text))
+        # The switch checks a Linux filename the way it checks the other two.
+        for bad in ('a b.AppImage', '../x.AppImage', 'a..b.AppImage', ''):
+            with self.subTest(linux=bad), tempfile.TemporaryDirectory() as temp:
+                (Path(temp) / 'site').mkdir()
+                (Path(temp) / 'site/launcher.json').write_text(json.dumps(
+                    {'enabled': True, 'version': '0.1.0', 'mac': 'a.dmg', 'windows': 'a.exe',
+                     'linux': bad}))
+                if bad == '':
+                    # An empty string is the same as not naming one at all.
+                    self.assertIsNone(SITE['read_launcher'](Path(temp))['linux'])
+                else:
+                    with self.assertRaises(ValueError):
+                        SITE['read_launcher'](Path(temp))
+
+    def test_the_versions_page_lists_every_release_newest_first_with_its_files(self):
+        with tempfile.TemporaryDirectory() as temp:
+            dist = self.build_with_the_launcher_on(temp, releases=self.HISTORY)
+            page = (dist / 'launcher/versions/index.html').read_text()
+            doc = Document(page)
+            visible = ' '.join(doc.text)
+            # Newest first, whatever order the launcher wrote them in.
+            self.assertLess(page.index('>0.2.0<'), page.index('>0.1.0<'))
+            self.assertEqual({'mac', 'windows', 'linux', 'history', 'v0-2-0', 'v0-1-0'} - doc.ids, set())
+            for name in ('Tiiny-App-Farm-0.1.0.dmg', 'Tiiny-App-Farm-0.1.0-Setup.exe',
+                         'Tiiny-App-Farm-0.2.0.dmg', 'Tiiny-App-Farm-0.2.0.AppImage'):
+                self.assertIn('/launcher/' + name, doc.references)
+            # The signing state is words, not flags, and the unsigned one says so.
+            self.assertIn('signed and notarised', visible)
+            self.assertIn('unsigned', visible)
+            self.assertIn('25.3 MB', visible)
+            self.assertIn('61.0 MB', visible)
+            # A checksum is shortened on the page and whole in the title, so it can still be copied.
+            checksums = [attrs['title'] for tag, attrs in doc.tags if tag == 'span' and 'title' in attrs]
+            self.assertIn('cc' + '3' * 62, checksums)
+            self.assertNotIn('cc' + '3' * 62, visible)
+            self.assertIn('20 September 2026', visible)
+            self.assertIn('commit abc1234', visible)
+            self.assertIn('The first release.', visible)
+            self.assertIn('Linux joins.', visible)
+            # The newest of each platform is offered at the top, and rolling back is explained.
+            top = page.split('<h2 id="history"')[0]
+            self.assertIn('/launcher/Tiiny-App-Farm-0.2.0.dmg', Document(top).references)
+            self.assertIn('/launcher/Tiiny-App-Farm-0.2.0.AppImage', Document(top).references)
+            self.assertNotIn('/launcher/Tiiny-App-Farm-0.1.0.dmg', Document(top).references)
+            self.assertIn('Not built yet', ' '.join(Document(top).text))  # no 0.2.0 Windows build
+            self.assertIn('stops being offered updates', visible)
+            self.assertIn('the one the app updates itself to', visible)
+            # It is reachable from the documentation as well as from the download buttons.
+            nav = re.search(r'<nav class="docs-nav".*?</nav>', (dist / 'docs/cli/index.html').read_text(), re.S).group(0)
+            self.assertIn('/launcher/versions/', Document(nav).references)
+
+    def test_the_release_history_falls_back_and_refuses_what_it_cannot_read(self):
+        dead = 'http://127.0.0.1:1/releases.json'  # Refused at once; no timeout to wait out.
+        with tempfile.TemporaryDirectory() as temp:
+            # A history that cannot be fetched is the checked-in copy, and the build carries on.
+            dist = self.build_with_the_launcher_on(temp, releases=self.HISTORY, url=dead)
+            self.assertIn('Tiiny-App-Farm-0.2.0.AppImage', (dist / 'launcher/versions/index.html').read_text())
+        with tempfile.TemporaryDirectory() as temp:
+            # Nothing live and nothing checked in: the build stops rather than publish an empty page.
+            with self.assertRaises(ValueError) as refused:
+                self.build_with_the_launcher_on(temp, releases=False, url=dead)
+            self.assertIn('site/launcher-releases.json', str(refused.exception))
+        good = self.HISTORY['releases'][0]
+        for changes in ({'version': '1'}, {'version': None}, {'date': 'yesterday'}, {'date': None},
+                        {'files': {}}, {'files': {'plan9': [dict(good['files']['mac'][0])]}},
+                        {'files': {'mac': [{'name': '../escape.dmg'}]}},
+                        {'files': {'mac': [{'name': 'a.dmg', 'size': -1}]}},
+                        {'files': {'mac': [{'name': 'a.dmg', 'sha256': 'not-a-checksum'}]}}):
+            with self.subTest(changes=changes):
+                with self.assertRaises(ValueError):
+                    SITE['check_releases']([{**good, **changes}])
+        for empty in ([], {}, {'releases': []}, 'a string', None):
+            with self.subTest(empty=empty):
+                with self.assertRaises(ValueError):
+                    SITE['check_releases'](empty)
+        # Size and checksum are the only optional facts, because an older entry may predate them.
+        thin = SITE['check_releases']([{**good, 'files': {'mac': [{'name': 'a.dmg'}]}}])
+        self.assertEqual(thin[0]['files']['mac'][0], {'name': 'a.dmg', 'size': None, 'sha256': None,
+                                                      'signed': False, 'notarised': False})
+        self.assertEqual(SITE['signing_words'](thin[0]['files']['mac'][0]), 'unsigned')
+
     def test_launcher_documentation_is_in_the_nav_and_the_index(self):
         entries = SITE['doc_entries'](ROOT)
         page = next(entry for entry in entries if entry['slug'] == 'launcher')
@@ -593,11 +743,13 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         self.assertIs(page, entries[-1])
         built = (self.output / 'docs/launcher/index.html').read_text()
         visible = ' '.join(Document(built).text)
-        for phrase in ('Not released yet', '~/.tiinyapps/device.json', '~/tiinyapps/',
-                       'There is no launcher', 'pip install tiinyapp-farm',
+        for phrase in ('~/.tiinyapps/device.json', '~/tiinyapps/', 'pip install tiinyapp-farm',
                        'It does not sandbox anything', 'Docker', 'SmartScreen',
-                       'signed and notarised'):
+                       'signed and notarised', 'Going back to an older version'):
             self.assertIn(phrase, visible)
+        # It shipped, so the page no longer says it has not.
+        self.assertNotIn('Not released yet', visible)
+        self.assertIn('/launcher/versions/', Document(built).references)
         for other in ('docs/index.html', 'docs/cli/index.html'):
             nav = re.search(r'<nav class="docs-nav".*?</nav>', (self.output / other).read_text(), re.S).group(0)
             self.assertIn('/docs/launcher/', Document(nav).references)

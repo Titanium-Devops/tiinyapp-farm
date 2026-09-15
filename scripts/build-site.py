@@ -7,6 +7,7 @@ from html import escape, unescape
 import json
 import re
 from urllib.parse import parse_qs, urlsplit
+from urllib.request import Request, urlopen
 from pathlib import Path
 import runpy
 import shutil
@@ -90,7 +91,8 @@ def command(value):
 # The desktop launcher is off until site/launcher.json says otherwise. Everything the launcher
 # adds to this site hangs off that one file, so this script can sit on main for as long as it
 # takes the app to ship and build the pages exactly as it built them before.
-LAUNCHER_OFF = {"enabled": False, "version": None, "mac": None, "windows": None}
+LAUNCHER_OFF = {"enabled": False, "version": None, "mac": None, "windows": None,
+                "macIntel": None, "linux": None}
 LAUNCHER_FILE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
@@ -105,21 +107,38 @@ def read_launcher(source):
     for field in ("version", "mac", "windows"):
         if not isinstance(setting.get(field), str) or not setting[field].strip():
             raise ValueError(f"site/launcher.json is enabled but has no {field}")
-    # macIntel is optional: the button is Apple silicon, an Intel Mac gets a small link.
-    fields = ("mac", "windows") + (("macIntel",) if setting.get("macIntel") else ())
+    # macIntel and linux are optional: an Intel Mac gets a small link beside the Mac button,
+    # and the Linux button appears only once there is an AppImage to point it at.
+    fields = ("mac", "windows") + tuple(f for f in ("macIntel", "linux") if setting.get(f))
     for field in fields:
         # The same flat name the Worker will serve: no slash, no pair of dots, no surprises.
         if not isinstance(setting[field], str) or not LAUNCHER_FILE.fullmatch(setting[field]) \
                 or ".." in setting[field]:
             raise ValueError(f"site/launcher.json {field} must be one launcher filename")
     return {"enabled": True, "version": setting["version"], "mac": setting["mac"],
-            "windows": setting["windows"], "macIntel": setting.get("macIntel") or None}
+            "windows": setting["windows"], "macIntel": setting.get("macIntel") or None,
+            "linux": setting.get("linux") or None}
 
 
 ICONS = {
     "search": '<path d="M3 10a7 7 0 1 0 14 0a7 7 0 1 0-14 0m18 11l-6-6"/>',
     "copy": '<path d="M7 9.667A2.667 2.667 0 0 1 9.667 7h8.666A2.667 2.667 0 0 1 21 9.667v8.666A2.667 2.667 0 0 1 18.333 21H9.667A2.667 2.667 0 0 1 7 18.333z"/><path d="M4.012 16.737A2 2 0 0 1 3 15V5c0-1.1.9-2 2-2h10c.75 0 1.158.385 1.5 1"/>',
 }
+
+
+# The three platform marks, drawn as one filled path each so a download button costs no image
+# request and inherits the colour of the button it sits in. Holes are cut with the even-odd rule.
+MARKS = {
+    "apple": '<path d="M16.6 12.3c0-2 1.1-3.3 2.4-4.1-.9-1.3-2.3-2-4-2.1-1.6-.2-3.2.9-4 .9-.8 0-2.2-.9-3.5-.9C5.6 6.2 3.6 7.7 3.6 11c0 1.1.2 2.2.6 3.4.5 1.6 2.4 5.5 4.3 5.4 1-.1 1.7-.7 3-.7 1.3 0 1.9.7 3 .7 2-.1 3.7-3.6 4.2-5.2-2.5-1.2-2.1-3.4-2.1-3.4Z"/><path d="M14.3 4.6c1-1.1 1-2.3.9-2.9-.9.1-2 .6-2.6 1.3-.7.8-1.1 1.8-1 2.8 1 .1 2-.4 2.7-1.2Z"/>',
+    "windows": '<path d="M3 5.6 10.2 4.6v6.8H3Zm8.4-1.15L21 3v8.4h-9.6ZM3 12.6h7.2v6.8L3 18.4Zm8.4 0H21V21l-9.6-1.4Z"/>',
+    "linux": '<path d="M12 1.8c-2.3 0-3.9 1.8-3.9 4.2 0 1 0 1.6-.5 2.4C6.3 10.4 5.2 12.6 5.2 15c0 1.8.6 3.3 1.6 4.3-.4.4-.8.9-1 1.4-.2.6.1 1.1.7 1.2 1 .2 2.1.1 3-.3.8.2 1.6.3 2.5.3s1.7-.1 2.5-.3c.9.4 2 .5 3 .3.6-.1.9-.6.7-1.2-.2-.5-.6-1-1-1.4 1-1 1.6-2.5 1.6-4.3 0-2.4-1.1-4.6-2.4-6.6-.5-.8-.5-1.4-.5-2.4 0-2.4-1.6-4.2-3.9-4.2Zm-1.9 4.5a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9Zm3.8 0a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9ZM12 8.6l1.7 1.1-1.7 1.1-1.7-1.1Z"/>',
+}
+
+
+def mark(name):
+    """One platform mark, filled with the colour of whatever it sits in."""
+    return (f'<svg class="mk" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor" '
+            f'fill-rule="evenodd">{MARKS[name]}</svg>')
 
 
 def icon(name):
@@ -230,22 +249,46 @@ INSTALL_HEAD = '''<section class="page install-page"><h1>Install apps on your Ti
 INSTALL_NOTE = '''<p class="note" style="margin-top:18px">Apps declare the access they use (microphone, files, network, your Tiiny). The CLI shows that before installing; it does not sandbox them. Read the source if that matters to you: every app in the catalog ships it.</p>'''
 
 
-def download_block(launcher):
-    """The one big button, rendered for a Mac and corrected for Windows by launcher.js.
+def download_cell(platform, symbol, title, href, filled, under, older=True):
+    """One platform's column: what it is, the button, the small print, and the way back."""
+    style = 'hay' if filled else 'ghost'
+    history = (f'<p class="get-old"><a href="/launcher/versions/#{platform}">Older versions</a></p>'
+               if older else '<p class="get-old">No Linux build yet</p>')
+    return (f'<div class="get-one" data-platform="{platform}">'
+            f'<p class="get-os">{e(title)}</p>'
+            f'<a class="btn {style} get-now" data-launcher-get="{platform}" href="{e(href)}" '
+            f'aria-label="Download Tiiny App Farm for {e(title)}">{mark(symbol)}Download now</a>'
+            f'{under}{history}</div>')
 
-    A person with JavaScript switched off still gets a working download and the other
-    platform beside it, which is why the Mac link is in the markup rather than written in."""
-    mac, windows = '/launcher/' + launcher['mac'], '/launcher/' + launcher['windows']
+
+def download_block(launcher):
+    """Three downloads in a row, the visitor's own first once launcher.js has read the platform.
+
+    Every button works with JavaScript switched off, because all three are in the markup with
+    real links; the script only moves the visitor's platform to the front and fills its button."""
     intel = ''
     if launcher.get('macIntel'):
-        intel = (f' The Mac download is for Apple silicon; an Intel Mac takes '
-                 f'<a data-launcher-intel href="{e("/launcher/" + launcher["macIntel"])}">this one</a>.')
-    return (f'<div class="get" data-launcher data-mac="{e(mac)}" data-windows="{e(windows)}">'
-            f'<a class="btn hay get-now" data-launcher-primary href="{e(mac)}">Download for Mac</a>'
-            f'<p class="small">Also for <a data-launcher-other href="{e(windows)}">Windows</a>.{intel}</p>'
-            f'<p class="fine">Version {e(launcher["version"])}. One file, and it carries everything '
-            'it needs: no Python, no Docker, nothing to install first. There is no launcher for '
-            'Linux, so <a href="#command-line">use the command line</a> there.</p></div>')
+        intel = (' Intel Mac? <a data-launcher-intel '
+                 f'href="{e("/launcher/" + launcher["macIntel"])}">Take this one</a>.')
+    cells = [download_cell('mac', 'apple', 'macOS', '/launcher/' + launcher['mac'], True,
+                           f'<p class="small">Apple silicon.{intel}</p>'),
+             download_cell('windows', 'windows', 'Windows', '/launcher/' + launcher['windows'],
+                           False, '<p class="small">Windows 10 and 11, x64.</p>')]
+    if launcher.get('linux'):
+        cells.append(download_cell('linux', 'linux', 'Linux', '/launcher/' + launcher['linux'],
+                                   False, '<p class="small">An AppImage. Make it executable and run it.</p>'))
+    else:
+        # No AppImage yet, so the third column says what a Linux visitor should do instead
+        # rather than offering a download that does not exist.
+        cells.append('<div class="get-one" data-platform="linux">'
+                     '<p class="get-os">Linux</p>'
+                     f'<a class="btn ghost get-now" data-launcher-get="linux" href="#command-line">'
+                     f'{mark("linux")}Set up on Linux</a>'
+                     '<p class="small">No launcher for Linux yet. The CLI does everything it does.</p>'
+                     '<p class="get-old">No Linux build yet</p></div>')
+    return (f'<div class="gets" data-launcher>{"".join(cells)}</div>\n'
+            f'<p class="fine get-note">Version {e(launcher["version"])}. One file, and it carries '
+            'everything it needs: no Python, no Docker, nothing to install first.</p>')
 
 
 def steps(launcher=None):
@@ -253,9 +296,10 @@ def steps(launcher=None):
     launcher = launcher or LAUNCHER_OFF
     if not launcher['enabled']:
         return INSTALL_HEAD + '\n' + INSTALL_STEPS + '\n' + INSTALL_NOTE + '</section>'
+    where = 'Mac, Windows and Linux' if launcher.get('linux') else 'Mac and Windows'
     return ('<section class="page install-page"><h1>Install apps on your Tiiny</h1>\n'
             '<p class="sub">Apps from the catalog run on your computer and talk to your Tiiny '
-            'Pocket Lab over its local API. Tiiny App Farm is a small app for Mac and Windows '
+            f'Pocket Lab over its local API. Tiiny App Farm is a small app for {where} '
             'that installs, starts and updates them for you.</p>\n'
             + download_block(launcher) + '\n'
             + '<h2 id="command-line">Prefer the command line?</h2>\n'
@@ -263,6 +307,157 @@ def steps(launcher=None):
             'including Linux, and it is the same install directory either way. Start with the '
             'app and move to the CLI whenever you like: it finds what the app already put there.</p>\n'
             + INSTALL_STEPS + '\n' + INSTALL_NOTE + '</section>')
+
+
+PLATFORMS = [("mac", "apple", "macOS"), ("windows", "windows", "Windows"),
+             ("linux", "linux", "Linux")]
+RELEASES_URL = ORIGIN + "/launcher/releases.json"
+SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
+def check_releases(data):
+    """The release history, refused rather than half-drawn when it is not the shape it promised.
+
+    The launcher writes this file; the site only reads it. A page built from a history it did not
+    understand would tell somebody a build is unsigned when nobody said so, so anything unexpected
+    stops the build instead."""
+    if isinstance(data, dict):
+        data = data.get("releases")
+    if not isinstance(data, list) or not data:
+        raise ValueError("The launcher release history is empty or not a list of releases.")
+    releases = []
+    for entry in data:
+        if not isinstance(entry, dict):
+            raise ValueError("A launcher release is not an object.")
+        version = entry.get("version")
+        if not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", version):
+            raise ValueError(f"A launcher release has no major.minor.patch version: {version!r}")
+        try:
+            day = date.fromisoformat(entry["date"])
+        except (KeyError, TypeError, ValueError):
+            raise ValueError(f"Launcher release {version} has no YYYY-MM-DD date.")
+        files = entry.get("files")
+        if not isinstance(files, dict) or not any(files.values()):
+            raise ValueError(f"Launcher release {version} lists no files.")
+        unknown = set(files) - {name for name, _, _ in PLATFORMS}
+        if unknown:
+            raise ValueError(f"Launcher release {version} names a platform the site does not know:"
+                             f" {', '.join(sorted(unknown))}")
+        kept = {}
+        for platform, entries in files.items():
+            if not isinstance(entries, list):
+                raise ValueError(f"Launcher release {version} {platform} is not a list of files.")
+            for item in entries:
+                name = item.get("name") if isinstance(item, dict) else None
+                if not isinstance(name, str) or not LAUNCHER_FILE.fullmatch(name) or ".." in name:
+                    raise ValueError(f"Launcher release {version} {platform} has no usable"
+                                     f" filename: {name!r}")
+                size = item.get("size")
+                if size is not None and (not isinstance(size, int) or size < 0):
+                    raise ValueError(f"{name} has a size that is not a count of bytes.")
+                checksum = item.get("sha256")
+                if checksum is not None and not SHA256.fullmatch(str(checksum)):
+                    raise ValueError(f"{name} has a sha256 that is not 64 hexadecimal characters.")
+                kept.setdefault(platform, []).append({
+                    "name": name, "size": size, "sha256": checksum and str(checksum),
+                    "signed": bool(item.get("signed")), "notarised": bool(item.get("notarised"))})
+        releases.append({"version": version, "date": day, "commit": entry.get("commit") or "",
+                         "notes": entry.get("notes") or "", "files": kept})
+    releases.sort(key=lambda release: [int(part) for part in release["version"].split(".")],
+                  reverse=True)
+    return releases
+
+
+def read_releases(source, url=None, timeout=6.0):
+    """The launcher's own release history: the live file when it answers, else the copy here.
+
+    The live file is the one the launcher just wrote, so a deploy publishes the release it is
+    deploying. The checked-in copy is what keeps a build working offline and in every test."""
+    data = None
+    if url:
+        try:
+            request = Request(url, headers={"User-Agent": "tiinyapp-farm-site/1.0"})
+            with urlopen(request, timeout=timeout) as answer:
+                data = json.loads(answer.read(2_000_000).decode("utf-8"))
+        except Exception:
+            data = None  # An unreachable or unreadable history falls back; it never fails a build.
+    if data is None:
+        fallback = Path(source) / "site/launcher-releases.json"
+        if not fallback.exists():
+            raise ValueError("The launcher is switched on but there is no release history:"
+                             " site/launcher-releases.json is missing and the live file did not"
+                             " answer.")
+        data = json.loads(fallback.read_text(encoding="utf-8"))
+    return check_releases(data)
+
+
+def signing_words(item):
+    """What a person needs to know about a file before they run it, in words rather than flags."""
+    if item["signed"] and item["notarised"]:
+        return "signed and notarised"
+    if item["signed"]:
+        return "signed"
+    return "unsigned"
+
+
+def release_files(release):
+    """One release's files as a table: what to download, how big, and what it is checked by."""
+    rows = []
+    for platform, _, title in PLATFORMS:
+        for item in release["files"].get(platform, []):
+            size = f'{item["size"] / 1_000_000:.1f} MB' if item["size"] else "not recorded"
+            if item["sha256"]:
+                checksum = (f'<span class="mono" title="{e(item["sha256"])}">'
+                            f'{e(item["sha256"][:12])}\u2026</span>')
+            else:
+                checksum = '<span class="fine">not recorded</span>'
+            rows.append(f'<tr><td>{e(title)}</td>'
+                        f'<td><a href="/launcher/{e(item["name"])}">{e(item["name"])}</a></td>'
+                        f'<td>{e(size)}</td><td>{checksum}</td>'
+                        f'<td>{e(signing_words(item))}</td></tr>')
+    head = ''.join(f'<th scope="col">{label}</th>'
+                   for label in ('Platform', 'File', 'Size', 'SHA-256', 'Signing'))
+    return ('<div class="docs-table"><table><thead><tr>' + head + '</tr></thead><tbody>'
+            + ''.join(rows) + '</tbody></table></div>')
+
+
+def versions_page(releases):
+    """Every launcher version, newest first, with a way back to any of them."""
+    newest = releases[0]
+    current = []
+    for platform, symbol, title in PLATFORMS:
+        files = newest["files"].get(platform, [])
+        if files:
+            link = (f'<a class="btn ghost" href="/launcher/{e(files[0]["name"])}">'
+                    f'{mark(symbol)}Download {e(newest["version"])}</a>')
+            note = f'<p class="fine">{e(signing_words(files[0]))}.</p>'
+        else:
+            link = f'<p class="get-os">{mark(symbol)}Not built yet</p>'
+            note = '<p class="fine">There is no build for this platform.</p>'
+        current.append(f'<div class="ver-plat" id="{platform}"><p class="get-os">{e(title)}</p>'
+                       f'{link}{note}</div>')
+    history = []
+    for release in releases:
+        day = release["date"]
+        stamp = f'{day.day} {day:%B %Y}'
+        commit = (f' <span class="fine">commit {e(release["commit"])}</span>'
+                  if release["commit"] else '')
+        notes = markdown(release["notes"]) if release["notes"] else '<p>No notes for this one.</p>'
+        history.append(f'<section class="rel"><h2 id="v{e(release["version"].replace(".", "-"))}">'
+                       f'{e(release["version"])}</h2>'
+                       f'<p class="rel-when">{e(stamp)}{commit}</p>{notes}'
+                       + release_files(release) + '</section>')
+    return ('<section class="page versions-page"><h1>Launcher versions</h1>'
+            '<p class="sub">Every version of Tiiny App Farm that has shipped, what changed in it, '
+            'and a link to each file. Newest first.</p>'
+            '<div class="ver-now">' + ''.join(current) + '</div>'
+            '<p class="note">The newest version is the one the app updates itself to. An older '
+            'build installs and runs, and it stays where it is: it stops being offered updates, '
+            'and it is offered none of the fixes in the versions above it. Take one to get back '
+            'to a working day, then move forward again when the reason is fixed.</p>'
+            '<h2 id="history">History</h2>' + ''.join(history)
+            + '<p class="docs-foot"><a href="/install/">Install an app</a> '
+            '<a href="/docs/launcher/">About the launcher</a></p></section>')
 
 
 def seed_icon(app):
@@ -602,12 +797,21 @@ def doc_entries(source):
     return entries
 
 
-def doc_page(entry, entries):
+def doc_page(entry, entries, launcher=None):
     """One documentation page: the section list, the page, and its own contents."""
+    launcher = launcher or LAUNCHER_OFF
     links = ''.join(
         f'<li><a href="{item["url"]}"' + (' aria-current="page"' if item is entry else '') + f'>{e(item["title"])}</a></li>'
         for item in entries)
+    # The version history is a page of the site rather than a documentation file, and somebody
+    # reading about the launcher is exactly the person looking for it.
+    if launcher['enabled']:
+        links += '<li><a href="/launcher/versions/">Launcher versions</a></li>'
     body = markdown(entry['body'])
+    if not launcher['enabled']:
+        # With the downloads switched off the history page is not built at all, so the prose
+        # keeps its words and loses the link rather than pointing at a page that is not there.
+        body = re.sub(r'<a href="/launcher/versions/"[^>]*>(.*?)</a>', r'\1', body)
     sections = re.findall(r'<h2 id="([^"]+)">(.*?)</h2>', body)
     contents = ''
     if entry['slug'] and len(sections) > 2:
@@ -623,7 +827,8 @@ def doc_page(entry, entries):
 <p class="docs-foot"><a href="/docs/">All documentation</a> <a href="/install/">Install an app</a> <a href="/submit/">Submit an app</a></p></section></div>'''
 
 
-def build(source=ROOT, output=None, today=None):
+def build(source=ROOT, output=None, today=None, releases_url=None):
+    """Build the site. releases_url fetches the launcher history live; None reads the copy here."""
     source = Path(source)
     output = Path(output) if output else source / "site" / "dist"
     today = today or datetime.now(timezone.utc).date()
@@ -664,9 +869,14 @@ def build(source=ROOT, output=None, today=None):
         pages = {"/": ("App catalog", home_page(apps, launcher)), "/catalog/": ("Catalog", catalog_page(apps)),
                  "/install/": ("Install an app", steps(launcher)), "/submit/": ("Submit an app", seeds()),
                  "/submit/done/": ("App submitted", seeds()), "/account/": ("Your apps", my_farm())}
+        if launcher['enabled']:
+            # The history is a page of the site rather than a file in the bucket, and the Worker
+            # knows to hand this one path back to the static site.
+            pages['/launcher/versions/'] = ('Launcher versions',
+                                            versions_page(read_releases(source, releases_url)))
         entries = doc_entries(source)
         for entry in entries:
-            pages[entry['url']] = (entry['title'], doc_page(entry, entries))
+            pages[entry['url']] = (entry['title'], doc_page(entry, entries, launcher))
         listing = '<section class="sect"><h1>App manifests</h1><p>The installer catalog at https://tiinyapp.farm/manifests/.</p><ul>'
         for path, app in manifests:
             pages[f"/apps/{app['id']}/"] = (app["name"], app_page(app, today, makers, launcher))
@@ -726,8 +936,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, help='Destination (default: site/dist)')
     parser.add_argument('--today', type=date.fromisoformat, help='UTC date override for reproducible badges')
+    parser.add_argument('--no-fetch', action='store_true',
+                        help='Read the launcher history from site/launcher-releases.json only')
     args = parser.parse_args()
-    count = build(output=args.output, today=args.today)
+    count = build(output=args.output, today=args.today,
+                  releases_url=None if args.no_fetch else RELEASES_URL)
     print(f'Built {count} app pages in {args.output or ROOT / "site/dist"}')
 
 
