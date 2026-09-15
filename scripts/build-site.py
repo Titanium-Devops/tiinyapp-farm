@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 from pathlib import Path
 import runpy
 import shutil
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 ORIGIN = "https://tiinyapp.farm"
@@ -410,21 +411,38 @@ def check_releases(data):
     return releases
 
 
-def read_releases(source, url=None, timeout=6.0):
+def read_releases(source, url=None, timeout=6.0, allow_stale=False):
     """The launcher's own release history: the live file when it answers, else the copy here.
 
     The live file is the one the launcher just wrote, so a deploy publishes the release it is
-    deploying. The checked-in copy is what keeps a build working offline and in every test."""
-    data = None
+    deploying. The checked-in copy is what keeps a build working offline and in every test.
+
+    A build that asked for the live file and did not get it stops. Quietly falling back to the
+    copy is how a deploy once published a version history that was missing a release, its notes
+    and its real filenames, and nothing in the log said so. Pass allow_stale to build from the
+    copy on purpose."""
+    fallback = Path(source) / "site/launcher-releases.json"
+    data, refused = None, ""
     if url:
         try:
             request = Request(url, headers={"User-Agent": "tiinyapp-farm-site/1.0"})
             with urlopen(request, timeout=timeout) as answer:
                 data = json.loads(answer.read(2_000_000).decode("utf-8"))
-        except Exception:
-            data = None  # An unreachable or unreadable history falls back; it never fails a build.
+            print(f"launcher history: read {len(data if isinstance(data, list) else data.get('releases', []))}"
+                  f" releases from {url}")
+        except Exception as problem:
+            refused = f"{type(problem).__name__}: {problem}"
+    if refused:
+        print(f"launcher history: {url} could not be read ({refused})", file=sys.stderr)
+        if not allow_stale:
+            raise ValueError(
+                f"The launcher release history at {url} could not be read ({refused}). Building"
+                " from site/launcher-releases.json would publish a copy that may be older than"
+                " what is live, which is what a person reads when they go back a version. Fix the"
+                " fetch, or pass --allow-stale-history to build from the copy on purpose.")
+        print("launcher history: building from site/launcher-releases.json instead, as asked",
+              file=sys.stderr)
     if data is None:
-        fallback = Path(source) / "site/launcher-releases.json"
         if not fallback.exists():
             raise ValueError("The launcher is switched on but there is no release history:"
                              " site/launcher-releases.json is missing and the live file did not"
@@ -872,7 +890,7 @@ def doc_page(entry, entries, launcher=None):
 <p class="docs-foot"><a href="/docs/">All documentation</a> <a href="/install/">Install an app</a> <a href="/submit/">Submit an app</a></p></section></div>'''
 
 
-def build(source=ROOT, output=None, today=None, releases_url=None):
+def build(source=ROOT, output=None, today=None, releases_url=None, allow_stale=False):
     """Build the site. releases_url fetches the launcher history live; None reads the copy here."""
     source = Path(source)
     output = Path(output) if output else source / "site" / "dist"
@@ -918,7 +936,8 @@ def build(source=ROOT, output=None, today=None, releases_url=None):
             # The history is a page of the site rather than a file in the bucket, and the Worker
             # knows to hand this one path back to the static site.
             pages['/launcher/versions/'] = ('Launcher versions',
-                                            versions_page(read_releases(source, releases_url)))
+                                            versions_page(read_releases(
+                                                source, releases_url, allow_stale=allow_stale)))
         entries = doc_entries(source)
         for entry in entries:
             pages[entry['url']] = (entry['title'], doc_page(entry, entries, launcher))
@@ -983,9 +1002,15 @@ def main():
     parser.add_argument('--today', type=date.fromisoformat, help='UTC date override for reproducible badges')
     parser.add_argument('--no-fetch', action='store_true',
                         help='Read the launcher history from site/launcher-releases.json only')
+    parser.add_argument('--allow-stale-history', action='store_true',
+                        help='Build from the checked-in launcher history when the live one '
+                             'cannot be read, instead of stopping')
     args = parser.parse_args()
+    if args.no_fetch:
+        print('launcher history: reading site/launcher-releases.json, no live fetch asked')
     count = build(output=args.output, today=args.today,
-                  releases_url=None if args.no_fetch else RELEASES_URL)
+                  releases_url=None if args.no_fetch else RELEASES_URL,
+                  allow_stale=args.allow_stale_history)
     print(f'Built {count} app pages in {args.output or ROOT / "site/dist"}')
 
 
