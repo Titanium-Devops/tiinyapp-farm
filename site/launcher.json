@@ -1,6 +1,7 @@
 {
-    "enabled": false,
-    "version": null,
-    "mac": null,
-    "windows": null
+    "enabled": true,
+    "version": "0.1.0",
+    "mac": "Tiiny-App-Farm.dmg",
+    "macIntel": "Tiiny-App-Farm-Intel.dmg",
+    "windows": "Tiiny-App-Farm-Setup.exe"
 }
