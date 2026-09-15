@@ -297,6 +297,12 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
             elif relative == 'account/index.html':
                 expected.append({'type': 'module', 'src': '/assets/farm.js'})
             expected.append({'type': 'module', 'src': '/assets/session.js'})
+            launcher_js = {'type': 'module', 'src': '/assets/launcher.js'}
+            if SITE['read_launcher'](ROOT)['enabled'] and launcher_js in scripts:
+                # With the switch on, a page that draws a download button also loads the
+                # module that corrects it for the visitor's platform, and no other page does.
+                self.assertTrue('data-launcher' in text or 'tiinyfarm://' in text)
+                scripts = [script for script in scripts if script != launcher_js]
             self.assertEqual(scripts, expected)
             self.assertIn('data-farm-nav', text)
             for reference in ('/brand/tiiny-logo.svg', '/brand/titanium-bot-logo.svg', 'https://titanium.bot', 'https://tiiny.ai'):
@@ -435,9 +441,18 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         self.assertRegex(css, r'\.page\{[^}]*max-width:720px')
         self.assertRegex(css, r'\.stp \.n\{[^}]*width:32px;height:32px')
 
-    def test_launcher_is_off_and_leaves_no_trace_on_any_page(self):
-        """The switch shipped off, so nothing on the live site knows the launcher exists yet."""
+    def test_the_live_site_follows_the_launcher_switch(self):
+        """Off: nothing on the site knows the launcher exists. On: the download leads on /install/."""
         setting = json.loads((ROOT / 'site/launcher.json').read_text())
+        if setting.get('enabled'):
+            install = (self.output / 'install/index.html').read_text()
+            self.assertIn('data-launcher-primary href="/launcher/' + setting['mac'] + '"', install)
+            self.assertIn('href="/launcher/' + setting['windows'] + '"', install)
+            self.assertIn('Prefer the command line?', install)
+            self.assertTrue((self.output / 'assets/launcher.js').exists())
+            hero = re.search(r'<section class="hero">.*?</section>', (self.output / 'index.html').read_text(), re.S).group(0)
+            self.assertIn('Get the launcher', hero)
+            return
         self.assertEqual(setting, {'enabled': False, 'version': None, 'mac': None, 'windows': None})
         self.assertEqual(SITE['read_launcher'](ROOT), SITE['LAUNCHER_OFF'])
         self.assertFalse((self.output / 'assets/launcher.js').exists())
