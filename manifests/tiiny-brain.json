@@ -3,7 +3,7 @@
   "name": "Tiiny Brain",
   "pitch": "Your own notes, held by the machine on your desk.",
   "description": "Point it at a folder of markdown and it reads every note, works out which names keep turning up, and draws the ones that keep turning up together. Click a name and its neighbourhood pulls forward; click a note and read it, copy it as markdown or ask about that note alone. Ask anything and the answer cites the notes it came from, or says plainly that nothing it retrieved covers the question rather than inventing one. Two ways of answering sit behind that box: a question about a topic goes to nearest-neighbour search, and a question about a name the archive knows reads every passage that names it, which is a different and much better set. Write a new note from inside it and the note lands in your own vault as markdown, then gets chunked, embedded and becomes answerable a few seconds later. Your notes stay plain files in your own folder the whole time and nothing is uploaded anywhere. The embedding and the answering happen on your Tiiny. Python standard library only.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "author": {
     "name": "Jason Brashear",
     "url": "https://github.com/webdevtodayjason",
@@ -14,9 +14,9 @@
   "repo": "https://github.com/webdevtodayjason/archiver",
   "screenshots": [],
   "release": {
-    "url": "https://github.com/webdevtodayjason/archiver/releases/download/v0.1.2/tiiny-brain-0.1.2.tar.gz",
-    "sha256": "3d57dab43b028df0c66ed2408037bf8e5e97f8c09a7f889d56b59226c96eaf01",
-    "size": 86445
+    "url": "https://github.com/webdevtodayjason/archiver/releases/download/v0.1.3/tiiny-brain-0.1.3.tar.gz",
+    "sha256": "9daf358ec50bdec04878c352f29b763a10635221807ff06f9816e7bd76886ac8",
+    "size": 98136
   },
   "entry": {
     "command": "python3 cockpit.py"
@@ -51,7 +51,7 @@
   ],
   "verified": false,
   "addedAt": "2026-09-13",
-  "updatedAt": "2026-09-16",
+  "updatedAt": "2026-09-17",
   "links": {
     "repo": "https://github.com/webdevtodayjason/archiver",
     "homepage": "https://github.com/webdevtodayjason/archiver"
