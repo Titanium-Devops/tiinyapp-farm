@@ -1,5 +1,41 @@
 [
   {
+    "version": "0.1.3",
+    "date": "2026-09-18",
+    "commit": "3bd684f8e9471a850eaeb4bba50fc31b2b908db2",
+    "notes": "### Changed\n\n- **This release exists to prove the updater.** 0.1.2 added the mechanism that\n  looks for a newer version and offers to update and restart, but the newest\n  version its feed could offer was itself. 0.1.3 is the first version a 0.1.2\n  launcher can see, download, verify and install on its own. Nothing else has\n  changed. If your launcher put up \"Tiiny App Farm 0.1.3 is ready\" and came back\n  as 0.1.3, the updater works.",
+    "files": {
+      "mac-arm64": {
+        "name": "Tiiny-App-Farm_0.1.3_aarch64.dmg",
+        "size": 25361569,
+        "sha256": "ba413a4abddd8279acdd827f8232c5be0171477b8cef12fb52a0eedbb859624f",
+        "signed": true,
+        "notarised": true
+      },
+      "mac-x64": {
+        "name": "Tiiny-App-Farm_0.1.3_x64.dmg",
+        "size": 26039638,
+        "sha256": "ef470488d6df4ec3c0e6263d4f52c80f6982e3a310cf54b34a579c15998872e5",
+        "signed": true,
+        "notarised": true
+      },
+      "windows-x64": {
+        "name": "Tiiny-App-Farm_0.1.3_x64-setup.exe",
+        "size": 27775120,
+        "sha256": "72ca562a8fa49c9ae9c9492d58dfcbd77060621cb9b843a71470c2e083306c3d",
+        "signed": true,
+        "notarised": false
+      },
+      "linux-x64": {
+        "name": "Tiiny-App-Farm_0.1.3_amd64.AppImage",
+        "size": 100887032,
+        "sha256": "1274928283bde2966153baa97cfab43d80d06cb3b7a4f5d7fd54b5bc323ba7b4",
+        "signed": false,
+        "notarised": false
+      }
+    }
+  },
+  {
     "version": "0.1.2",
     "date": "2026-09-18",
     "commit": "5bc5ece22db7e6f50fa10a94cb1377a82a0fedb9",
