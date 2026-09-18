@@ -549,28 +549,33 @@ def seed_rows(count):
 
 
 def seed_words(count):
-    """What the pile says in its label and its tooltip."""
+    """What the pile says out loud, in its label and its tooltip. The launcher says the same."""
     seeds = max(0, int(count or 0))
     return "No seeds yet" if seeds == 0 else "1 seed" if seeds == 1 else f"{seeds} seeds"
 
 
-def seed_stack(count, app_id=None):
-    """A small pile of seeds that grows with the count. No button, just the tally.
+def seed_caption(count):
+    """What the pile prints beside itself.
 
-    The pile reads as a picture, so the words travel in the label and the tooltip rather than
-    beside every count. Only a heap shows a numeral, because nine seeds cannot be counted to 57.
-    """
+    The site is where a person can act on a count today, so the words are the invitation and
+    every count carries them, rather than leaving one to nine seeds to be counted by eye."""
+    seeds = max(0, int(count or 0))
+    return "No seeds yet" if seeds == 0 else f"Seeds \u00b7 {seeds}"
+
+
+def seed_stack(count, app_id=None):
+    """A small pile of seeds that grows with the count. No button, just the tally."""
     seeds = max(0, int(count or 0))
     kind = seed_kind(seeds)
     pile = ('<i class="seed seed-husk"></i>' if kind == "none" else
             "".join('<span class="seed-row">' + '<i class="seed"></i>' * row + "</span>"
                     for row in seed_rows(seeds)))
     words = seed_words(seeds)
-    tally = f'<span class="seed-count">{seeds}</span>' if kind == "heap" else ""
     marker = f' data-seed-stack="{e(app_id)}"' if app_id else ""
     return (f'<span class="seed-stack" data-seeds="{seeds}" data-kind="{kind}" role="img"'
             f' aria-label="{e(words)}" title="{e(words)}"{marker}>'
-            f'<span class="seed-pile" aria-hidden="true">{pile}</span>{tally}</span>')
+            f'<span class="seed-pile" aria-hidden="true">{pile}</span>'
+            f'<span class="seed-count">{e(seed_caption(seeds))}</span></span>')
 
 
 def read_counts(url=None, timeout=6.0):

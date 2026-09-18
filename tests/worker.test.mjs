@@ -11,7 +11,7 @@ import { seedRoutes, releaseURL } from '../worker/seeds.mjs';
 import { artRoutes, headerPrompt, iconPrompt, cleanScene, DAILY } from '../worker/art.mjs';
 import { releaseRoutes, appJWT, privateKeyBytes, pickRelease, pickURL, serialize } from '../worker/release.mjs';
 import { checkManifest } from '../worker/manifest.mjs';
-import { seedKind, seedRows, seedWords, seedStackHTML } from '../worker/catalog.mjs';
+import { seedKind, seedRows, seedWords, seedCaption, seedStackHTML } from '../worker/catalog.mjs';
 import worker, { FarmCoordinator } from '../worker/main.mjs';
 const ORIGIN = 'https://tiinyapp.farm';
 const PROFILE = 'https://www.tiinyverse.com/users/39628b1e-e94e-4bd8-800e-5437d5336e1f';
@@ -819,19 +819,20 @@ test('the seed stack grows in the shape every renderer agrees on', async () => {
     const n = Number(count), total = rows.reduce((a, b) => a + b, 0);
     const kind = n === 0 ? 'none' : n <= 9 ? 'seeds' : 'heap';
     const words = n === 0 ? 'No seeds yet' : n === 1 ? '1 seed' : n + ' seeds';
-    for (const [where, module] of [['worker', { seedKind, seedRows, seedWords }], ['browser', browser]]) {
+    // The label speaks the launcher's words; the caption prints the site's invitation.
+    const caption = n === 0 ? 'No seeds yet' : 'Seeds \u00b7 ' + n;
+    for (const [where, module] of [['worker', { seedKind, seedRows, seedWords, seedCaption }], ['browser', browser]]) {
       assert.deepEqual(module.seedRows(n), rows, where + ' rows for ' + count);
       assert.equal(module.seedKind(n), kind, where + ' kind for ' + count);
       assert.equal(module.seedWords(n), words, where + ' words for ' + count);
+      assert.equal(module.seedCaption(n), caption, where + ' caption for ' + count);
     }
     const html = seedStackHTML(n);
     assert.ok(html.includes(`data-seeds="${n}"`) && html.includes(`data-kind="${kind}"`), html);
     assert.ok(html.includes(`aria-label="${words}"`) && html.includes(`title="${words}"`), html);
     assert.equal((html.match(/class="seed-row"/g) || []).length, rows.length);
     assert.equal((html.match(/<i class="seed"><\/i>/g) || []).length, total);
-    // Only a heap shows a numeral, because nine seeds cannot be counted to 57.
-    assert.equal(html.includes('seed-count'), kind === 'heap', 'numeral on ' + count);
-    if (kind === 'heap') assert.ok(html.includes(`<span class="seed-count">${n}</span>`));
+    assert.ok(html.includes(`<span class="seed-count">${caption}</span>`), html);
   }
   // Nothing is one hollow husk and no rows at all.
   assert.ok(seedStackHTML(0).includes('<i class="seed seed-husk"></i>'));
@@ -903,13 +904,15 @@ test("a maker's page carries the seeds their apps have been given, added up", as
   f.published.set('fake-app', listedApp());
   f.published.set('little-library', listedApp({ id: 'little-library', name: 'Little Library' }));
   const empty = await (await f.call(`/makers/${user.handle}/`)).text();
-  assert.ok(empty.includes('data-seeds="0"') && empty.includes('No seeds yet'));
+  assert.ok(empty.includes('data-seeds="0"') && empty.includes('aria-label="No seeds yet"'));
+  assert.ok(empty.includes('<span class="seed-count">No seeds yet</span>'));
   for (const [app, who] of [['fake-app', maker], ['fake-app', visitor], ['little-library', visitor]]) {
     assert.equal((await f.call(`/api/seeds/${app}/seed`, {}, who.cookie)).status, 200);
   }
   const html = await (await f.call(`/makers/${user.handle}/`)).text();
   assert.match(html, /<div class="maker-head"><h1>Aster &amp; Fern<\/h1><span class="seed-stack" data-seeds="3"/);
   assert.ok(html.includes('aria-label="3 seeds" title="3 seeds"'));
+  assert.ok(html.includes('<span class="seed-count">Seeds \u00b7 3</span>'));
   // The pile is the whole field, not one plot.
   assert.equal((await (await f.call('/api/seeds/fake-app/social')).json()).seeds, 2);
 });

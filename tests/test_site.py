@@ -28,7 +28,8 @@ TODAY = date(2026, 9, 12)
 # currency a person gives an app, so the pile's own words are lifted out of the visible text
 # before the old rule is applied to whatever is left. Anything else that calls an app a seed
 # still fails, which is the point of the rule.
-SEED_CURRENCY = re.compile(r'Give a seed|Seed given|give this app a seed|seeds and comments')
+SEED_CURRENCY = re.compile(r'No seeds yet|Seeds \u00b7 \d+|Give a seed|Seed given'
+                           r'|give this app a seed|seeds and comments')
 SEED_WORDS = re.compile(r'(?i)farmhand|\bsprouting\b|\bseeds?\b|My farm')
 
 
@@ -1002,16 +1003,17 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
                 self.assertEqual(SITE['seed_rows'](count), rows)
                 self.assertEqual(SITE['seed_kind'](count), kind)
                 self.assertEqual(SITE['seed_words'](count), words)
+                caption = 'No seeds yet' if count == 0 else f'Seeds \u00b7 {count}'
+                self.assertEqual(SITE['seed_caption'](count), caption)
                 markup = SITE['seed_stack'](count)
                 self.assertIn(f'data-seeds="{count}"', markup)
                 self.assertIn(f'data-kind="{kind}"', markup)
                 self.assertIn(f'aria-label="{words}" title="{words}"', markup)
                 self.assertEqual(markup.count('class="seed-row"'), len(rows))
                 self.assertEqual(markup.count('<i class="seed"></i>'), sum(rows))
-                # Only a heap shows a numeral, because nine seeds cannot be counted to 57.
-                self.assertEqual('seed-count' in markup, kind == 'heap')
-                if kind == 'heap':
-                    self.assertIn(f'<span class="seed-count">{count}</span>', markup)
+                # Every count prints its words, because the site is where a person can act
+                # on one. The muted zero is a different rule from the hay of a real count.
+                self.assertIn(f'<span class="seed-count">{caption}</span>', markup)
         # Nothing is one hollow husk and no rows at all.
         self.assertIn('<i class="seed seed-husk"></i>', SITE['seed_stack'](0))
         self.assertNotIn('seed-row', SITE['seed_stack'](0))
@@ -1072,11 +1074,12 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         row = SITE['ledger_row'](self.apps[0], {self.apps[0]['id']: 7})
         self.assertIn('data-seeds="7"', row)
         self.assertIn('aria-label="7 seeds" title="7 seeds"', row)
+        self.assertIn('<span class="seed-count">Seeds \u00b7 7</span>', row)
         item = SITE['editorial_item'](self.apps[0], {self.apps[0]['id']: 4})
         self.assertIn('data-seeds="4"', item)
         page = SITE['app_page'](self.apps[0], TODAY, counts={self.apps[0]['id']: 57})
         self.assertIn('data-seeds="57"', page)
-        self.assertIn('<span class="seed-count">57</span>', page)
+        self.assertIn('<span class="seed-count">Seeds \u00b7 57</span>', page)
         self.assertNotIn(self.apps[0]['id'], counts)
 
     def test_comment_rendering_keeps_untrusted_text_in_text_nodes(self):
