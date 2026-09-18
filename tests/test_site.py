@@ -29,7 +29,11 @@ TODAY = date(2026, 9, 12)
 # before the old rule is applied to whatever is left. Anything else that calls an app a seed
 # still fails, which is the point of the rule.
 SEED_CURRENCY = re.compile(r'No seeds yet|Seeds \u00b7 \d+|Give a seed|Seed given'
-                           r'|give this app a seed|seeds and comments')
+                           r'|give this app a seed|seeds and comments'
+                           # The launcher's own release notes, rendered on /launcher/versions/,
+                           # talk about the currency in prose (its 0.1.2 added the pile).
+                           r'|A stack of seeds|how many seeds|the seeds themselves'
+                           r'|Giving an app a seed|The seed count')
 SEED_WORDS = re.compile(r'(?i)farmhand|\bsprouting\b|\bseeds?\b|My farm')
 
 
