@@ -1,9 +1,52 @@
 import { fail, json } from './index.mjs';
+import { catalog } from './makers.mjs';
+
+// A seed is the farm's thumbs up: one per person per app, given again to take it back. The
+// stored record still calls the list thumbs so no key has to be rewritten; every answer carries
+// both names with the same number.
+export const seedCount = record => (record?.thumbs || []).length;
+export async function seedsForApps(get, apps) {
+  const counts = {};
+  for (const app of apps) {
+    const record = await get('social:' + app.id);
+    counts[app.id] = { seeds: seedCount(record), comments: (record?.comments || []).length };
+  }
+  return counts;
+}
+export async function makerSeeds(get, apps, counts) {
+  // An app's owner is the maker who planted it. Makers listed before the farm recorded owners
+  // are reached through the profile url of an app whose owner did answer.
+  const handles = new Map();
+  for (const app of apps) {
+    const ownerId = await get('seedowner:' + app.id);
+    const owner = ownerId && await get('user:' + ownerId);
+    if (owner?.handle && owner.tiinyverse?.profileUrl) handles.set(owner.tiinyverse.profileUrl, owner.handle);
+  }
+  const totals = {};
+  for (const app of apps) {
+    const handle = handles.get(app.author?.tiinyverse);
+    if (!handle) continue;
+    totals[handle] = { seeds: (totals[handle]?.seeds || 0) + (counts[app.id]?.seeds || 0) };
+  }
+  return totals;
+}
 export async function socialRoutes(ctx) {
   const { path, request, env, get, put, requireUser, currentUser, bodyJSON, now, random } = ctx;
-  const match = path.match(/^\/api\/seeds\/([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\/(social|thumb|comments)(?:\/([a-f0-9]{32}))?$/);
+  // One read for a whole page of apps: the catalog grid and the launcher both ask once rather
+  // than once per tile. A minute of cache is short enough that a seed given now shows up while
+  // the visitor is still looking at the page.
+  if (path === '/api/social/counts') {
+    if (request.method !== 'GET') fail(405, 'That action does not use this method.');
+    const apps = await catalog(env);
+    const counts = await seedsForApps(get, apps);
+    return json({ apps: counts, makers: await makerSeeds(get, apps, counts) },
+      200, { 'Cache-Control': 'public, max-age=60' });
+  }
+  const match = path.match(/^\/api\/seeds\/([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\/(social|thumb|seed|comments)(?:\/([a-f0-9]{32}))?$/);
   if (!match) return null;
-  const [, seedId, action, commentId] = match;
+  const [, seedId, route, commentId] = match;
+  // /seed is the name a person reads; /thumb is the name the first release shipped with.
+  const action = route === 'seed' ? 'thumb' : route;
   const allowed = action === 'social' ? request.method === 'GET' && !commentId
     : action === 'thumb' ? request.method === 'POST' && !commentId
       : commentId ? request.method === 'DELETE' : request.method === 'POST';
@@ -25,7 +68,8 @@ export async function socialRoutes(ctx) {
         name: author?.tiinyverse?.name || 'A maker', avatar: author?.avatarKey ? '/' + author.avatarKey : null },
         text: comment.text, at: comment.at, canDelete: canDelete(comment) });
     }
-    return { thumbs: social.thumbs.length, mine: !!user && social.thumbs.includes(user.id), comments };
+    return { thumbs: social.thumbs.length, seeds: social.thumbs.length,
+      mine: !!user && social.thumbs.includes(user.id), comments };
   }
   if (action === 'social') return json(await view());
   if (action === 'thumb') {

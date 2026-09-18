@@ -24,6 +24,18 @@ ROOT = Path(__file__).resolve().parents[1]
 SITE = runpy.run_path(str(ROOT / 'scripts/build-site.py'))
 SITE_SPEC = runpy.run_path(str(ROOT / 'worker/openapi.py'))['spec']()
 TODAY = date(2026, 9, 12)
+# Since the 2026-09-12 redesign no visitor reads "seed" as a word for an app. A seed is now the
+# currency a person gives an app, so the pile's own words are lifted out of the visible text
+# before the old rule is applied to whatever is left. Anything else that calls an app a seed
+# still fails, which is the point of the rule.
+SEED_CURRENCY = re.compile(r'No seeds yet|Seeds \u00b7 \d+|Give a seed|Seed given'
+                           r'|give this app a seed|seeds and comments')
+SEED_WORDS = re.compile(r'(?i)farmhand|\bsprouting\b|\bseeds?\b|My farm')
+
+
+def app_words(text):
+    """Visible text with the seed currency removed, ready for the no-seeds-mean-apps rule."""
+    return SEED_CURRENCY.sub(' ', text)
 
 
 class Document(HTMLParser):
@@ -606,7 +618,7 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
                     self.assertNotIn('tiny' + 'app', text.lower())
                     if relative not in ('docs/agents/index.html', 'docs/api/index.html'):
                         # Those two name every route literally, /api/seeds included.
-                        self.assertNotRegex(' '.join(doc.text), r'(?i)farmhand|\bsprouting\b|\bseeds?\b|My farm')
+                        self.assertNotRegex(app_words(' '.join(doc.text)), SEED_WORDS)
                     source_url = 'https://tiinyapp.farm/' + path.relative_to(dist).as_posix()
                     for reference in doc.references:
                         parsed = urlsplit(urljoin(source_url, reference))
@@ -959,8 +971,9 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
 
     def test_social_strip_has_accessible_controls_and_auth_invitation(self):
         for app in self.apps:
-            doc = Document((self.output / 'apps' / app['id'] / 'index.html').read_text())
-            self.assertTrue({'social-heading', 'social-status', 'seed-thumb', 'thumb-count',
+            text = (self.output / 'apps' / app['id'] / 'index.html').read_text()
+            doc = Document(text)
+            self.assertTrue({'social-heading', 'social-status', 'seed-thumb', 'seed-give',
                              'social-signin', 'seed-comments', 'comment-form', 'comment-text'}.issubset(doc.ids))
             controls = {attrs.get('id'): attrs for tag, attrs in doc.tags if attrs.get('id')}
             self.assertEqual(controls['seed-thumb']['aria-pressed'], 'false')
@@ -970,6 +983,86 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
             self.assertEqual(controls['social-status']['aria-live'], 'polite')
             self.assertIn('/submit/', doc.references)
             self.assertTrue(any(attrs.get('data-seed-social') == app['id'] for tag, attrs in doc.tags))
+            # Seeds are what a person reads; a thumb is only the shape of the stored record.
+            visible = ' '.join(doc.text)
+            self.assertIn('Give a seed', visible)
+            self.assertIn('Tell the maker how it is growing.', visible)
+            self.assertIn('Sign in to give this app a seed or leave a comment.', visible)
+            self.assertNotIn('thumbs up', text.lower())
+            self.assertNotIn('Thumbs up', visible)
+
+    def test_the_seed_pile_grows_in_the_shape_the_renderers_agree_on(self):
+        shapes = {0: [[0]], 1: [[1]], 3: [[1, 1, 1]], 4: [[1, 1], [1, 1]],
+                  9: [[1, 1, 1, 1], [1, 1, 1, 1, 1]], 10: [[1], [1, 1], [1, 1, 1]],
+                  57: [[1], [1, 1], [1, 1, 1]]}
+        for count, rows in shapes.items():
+            with self.subTest(count=count):
+                self.assertEqual(SITE['seed_rows'](count), rows)
+                words = 'No seeds yet' if count == 0 else f'Seeds \u00b7 {count}'
+                self.assertEqual(SITE['seed_words'](count), words)
+                markup = SITE['seed_stack'](count)
+                self.assertEqual(markup.count('class="seed-row"'), len(rows))
+                self.assertEqual(markup.count('<i class="seed"></i>'), sum(sum(row) for row in rows))
+                self.assertIn(f'data-seeds="{count}"', markup)
+                self.assertIn(f'aria-label="{words}"', markup)
+                self.assertIn(f'<span class="seed-count">{words}</span>', markup)
+        self.assertIn('<i class="seed seed-husk"></i>', SITE['seed_stack'](0))
+        self.assertNotIn('husk', SITE['seed_stack'](1))
+        # An empty husk must not borrow the catalog's .empty rule, which pads 40px.
+        self.assertNotIn('class="seed empty"', SITE['seed_stack'](0))
+        self.assertIn('data-seed-stack="little-library"', SITE['seed_stack'](2, 'little-library'))
+        # The Worker writes maker pages and the build writes app pages. One pile, one markup.
+        script = ('import assert from \'node:assert/strict\';\n'
+                  'const { seedStackHTML } = await import(process.argv[1]);\n'
+                  'const counts = JSON.parse(process.argv[2]);\n'
+                  'for (const [count, html] of Object.entries(counts))'
+                  ' assert.equal(seedStackHTML(Number(count)), html, "count " + count);\n')
+        expected = {str(count): SITE['seed_stack'](count) for count in shapes}
+        result = subprocess.run(['node', '--input-type=module', '-e', script,
+                                 (ROOT / 'worker/catalog.mjs').as_uri(), json.dumps(expected)],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_every_card_and_row_carries_a_seed_pile_the_browser_can_refresh(self):
+        index = (self.output / 'index.html').read_text()
+        featured = [app for app in self.apps if app.get('featured')][:6]
+        for app in self.apps:
+            self.assertIn(f'data-seed-stack="{app["id"]}"', index)
+        # One per ledger row, plus one per featured item.
+        self.assertEqual(index.count('class="seed-stack"'), len(self.apps) + len(featured))
+        # Every pile the build writes starts at nothing, because no count was fetched.
+        self.assertEqual(index.count('data-seeds="0"'), len(self.apps) + len(featured))
+        # A card carries the tally and nothing to press; the button lives on the app page.
+        for app in self.apps:
+            self.assertIn(SITE['seed_stack'](0, app['id']), index)
+        self.assertNotIn('<button', SITE['seed_stack'](0, 'little-library'))
+        for app in self.apps:
+            page = (self.output / 'apps' / app['id'] / 'index.html').read_text()
+            rail = page.split('class="rail-actions"')[1]
+            button = rail.split('<button id="seed-thumb"')[1].split('</button>')[0]
+            self.assertIn(f'data-seed-stack="{app["id"]}"', button)
+            self.assertIn('<span id="seed-give">Give a seed</span>', button)
+        source = (ROOT / 'site/assets/catalog.js').read_text()
+        self.assertIn("import { seedStack, refreshStacks } from './seed-stack.js';", source)
+        self.assertIn('seedStack(0, app.id)', source)
+        stack_module = (ROOT / 'site/assets/seed-stack.js').read_text()
+        self.assertNotIn('innerHTML', stack_module)
+        self.assertIn("fetch('/api/social/counts'", stack_module)
+        self.assertEqual((self.output / 'assets/seed-stack.js').read_text(), stack_module)
+
+    def test_a_build_that_cannot_read_the_counts_still_plants_every_pile(self):
+        self.assertEqual(SITE['read_counts'](None), {})
+        self.assertEqual(SITE['read_counts']('https://127.0.0.1:1/api/social/counts', timeout=1), {})
+        counts = {'little-library': 12, 'fake-app': 0}
+        row = SITE['ledger_row'](self.apps[0], {self.apps[0]['id']: 7})
+        self.assertIn('data-seeds="7"', row)
+        self.assertIn('Seeds \u00b7 7', row)
+        item = SITE['editorial_item'](self.apps[0], {self.apps[0]['id']: 4})
+        self.assertIn('data-seeds="4"', item)
+        page = SITE['app_page'](self.apps[0], TODAY, counts={self.apps[0]['id']: 57})
+        self.assertIn('data-seeds="57"', page)
+        self.assertIn('Seeds \u00b7 57', page)
+        self.assertNotIn(self.apps[0]['id'], counts)
 
     def test_comment_rendering_keeps_untrusted_text_in_text_nodes(self):
         script = r'''import assert from 'node:assert/strict';
@@ -1143,7 +1236,7 @@ assert.equal(anonymous.children[0].children[0].tag, 'span');
             if path.relative_to(self.output).as_posix() in ('docs/agents/index.html', 'docs/api/index.html'):
                 continue  # The public API route is /api/seeds; both pages name every route literally.
             visible = ' '.join(Document(path.read_text()).text)
-            self.assertNotRegex(visible, r'(?i)farmhand|\bsprouting\b|\bseeds?\b|My farm')
+            self.assertNotRegex(app_words(visible), SEED_WORDS)
 
     def test_needs_card_says_whether_the_port_moves(self):
         movable = next(app for app in self.apps if app['id'] == 'tiiny-bench')

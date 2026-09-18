@@ -28,8 +28,11 @@ PAGES = [
 FILES = [
     "/llms.txt", "/robots.txt", "/sitemap.xml", "/catalog.json", "/categories.json",
     "/site.webmanifest", "/assets/site.css", "/assets/farm.js", "/assets/session.js",
-    "/brand/og-image.png", "/brand/favicon.ico", "/docs/SUBMIT.md",
+    "/assets/seed-stack.js", "/brand/og-image.png", "/brand/favicon.ico", "/docs/SUBMIT.md",
     "/docs/manifest.schema.json", "/docs/openapi.json", "/manifests/",
+    # The one read every catalog page and the launcher make for seed counts. A stranger with no
+    # cookie must get it, because that is who reads the catalog.
+    "/api/social/counts",
 ]
 REDIRECTS = {"/account/": 302}
 

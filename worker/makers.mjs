@@ -1,4 +1,5 @@
 import { fail, json, boundedBody } from './index.mjs';
+import { seedStackHTML } from './catalog.mjs';
 const ORIGIN = 'https://tiinyapp.farm';
 export const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export const makerDefaults = user => Object.assign(user, {
@@ -120,6 +121,10 @@ export async function makerRoutes(ctx) {
     if (!user?.tiinyverse || user.handle !== match[1]) fail(404, 'That maker was not found.');
     if (user.public === false && !await ctx.currentUser()) return privateMakerResponse(request.method);
     const seeds = (await catalog(env)).filter(seed => seed.author.tiinyverse === user.tiinyverse.profileUrl);
+    // The seeds this maker's apps have been given, added up, so the pile beside the name is
+    // the whole field rather than one plot.
+    let given = 0;
+    for (const seed of seeds) given += ((await get('social:' + seed.id))?.thumbs || []).length;
     const links = Object.entries(user.links || {}).map(([label, url]) => `<a href="${escape(url)}">${escape(label)}</a>`).join(' · ');
     const cards = seeds.map(seed => {
       const appURL = '/apps/' + escape(seed.id) + '/';
@@ -143,7 +148,7 @@ export async function makerRoutes(ctx) {
 <meta property="og:image" content="${escape(pageURL)}card.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,800&amp;family=Nunito:wght@400;600;700&amp;display=swap"><link rel="stylesheet" href="/assets/site.css"><script type="module" src="/assets/session.js"></script><script type="module" src="/assets/share.js"></script>
-</head><body><div class="wrap"><header><a class="brand" href="/"><img class="brand-mark" src="/brand/icon-512.png" width="36" height="36" alt="">tiinyapp.farm</a><nav aria-label="Main navigation"><a class="on" aria-current="page" href="/">Apps</a><a href="/install/">Install</a><a href="/submit/">Submit an app</a><a class="me" data-farm-nav href="/submit/#account-panel">Sign in</a></nav></header><main class="page">${user.avatarKey ? `<img class="maker-avatar" src="/${escape(user.avatarKey)}" alt="">` : ''}<h1>${escape(user.tiinyverse.name)}</h1><p>@${escape(user.handle)} <span class="badge verified">Verified Tiiny owner</span></p><p class="maker-bio">${escape(description)}</p><p><button class="btn ghost" type="button" data-share data-share-title="${escape(title)}" data-share-text="${escape(description)}">Share</button> <span data-share-status role="status" aria-live="polite"></span></p><p>${links}</p><h2>Apps by ${escape(user.tiinyverse.name)}</h2><div class="field">${cards || '<p>No apps in the catalog yet.</p>'}</div></main></div></body></html>`, { headers: {
+</head><body><div class="wrap"><header><a class="brand" href="/"><img class="brand-mark" src="/brand/icon-512.png" width="36" height="36" alt="">tiinyapp.farm</a><nav aria-label="Main navigation"><a class="on" aria-current="page" href="/">Apps</a><a href="/install/">Install</a><a href="/submit/">Submit an app</a><a class="me" data-farm-nav href="/submit/#account-panel">Sign in</a></nav></header><main class="page">${user.avatarKey ? `<img class="maker-avatar" src="/${escape(user.avatarKey)}" alt="">` : ''}<div class="maker-head"><h1>${escape(user.tiinyverse.name)}</h1>${seedStackHTML(given)}</div><p>@${escape(user.handle)} <span class="badge verified">Verified Tiiny owner</span></p><p class="maker-bio">${escape(description)}</p><p><button class="btn ghost" type="button" data-share data-share-title="${escape(title)}" data-share-text="${escape(description)}">Share</button> <span data-share-status role="status" aria-live="polite"></span></p><p>${links}</p><h2>Apps by ${escape(user.tiinyverse.name)}</h2><div class="field">${cards || '<p>No apps in the catalog yet.</p>'}</div></main></div></body></html>`, { headers: {
       'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
       ...(user.public === false ? { Vary: 'Cookie' } : {}),
     } });

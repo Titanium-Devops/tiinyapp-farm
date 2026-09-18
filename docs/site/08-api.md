@@ -37,6 +37,8 @@ these routes accept one:
 | POST | `/api/media` |
 | GET | `/api/seeds/mine` |
 | GET, POST | `/api/seeds/<id>/art` |
+| POST | `/api/seeds/<id>/seed` and its older name `/thumb` |
+| POST | `/api/seeds/<id>/comments` |
 
 Everywhere else a token is ignored and the cookie decides. Creating and revoking tokens needs the
 cookie, so a token cannot mint another token, and so does checking for a new release. Tokens are
@@ -196,7 +198,8 @@ curl --fail-with-body \
 ```
 
 Each entry in `GET /api/seeds/mine` carries `id`, `name`, `version`, `icon`, `state`, `prUrl`, a
-`checks` array of `{name, status}`, a `reviews` array, `thumbs`, `comments`, and `canUpdate`. When
+`checks` array of `{name, status}`, a `reviews` array, `seeds`, `thumbs` (the same number under
+the name the first release used), `comments`, and `canUpdate`. When
 GitHub cannot be reached the entry carries `unavailable: true` and its stored state instead. States
 you will see are `preparing`, `label pending`, `awaiting review`, `draft`, `closed`, `merged`,
 `published`, `submission failed` and `submission uncertain`.
@@ -205,20 +208,30 @@ Three answers are 202 rather than an error, and each says what to do: an interru
 that may still have succeeded, a submission that reached review but whose label did not, and the
 same form sent again to retry that label.
 
-## Comments and thumbs up
+## Seeds and comments
+
+A seed is the farm's thumbs up: one per person per app, given again to take it back.
 
 | Method | Path | Answers |
 | --- | --- | --- |
-| GET | `/api/seeds/<id>/social` | `{"thumbs": 0, "mine": false, "comments": [...]}` |
-| POST | `/api/seeds/<id>/thumb` | The same view, with your thumb toggled on or off |
+| GET | `/api/social/counts` | `{"apps": {"<id>": {"seeds": 0, "comments": 0}}, "makers": {"<handle>": {"seeds": 0}}}` |
+| GET | `/api/seeds/<id>/social` | `{"seeds": 0, "thumbs": 0, "mine": false, "comments": [...]}` |
+| POST | `/api/seeds/<id>/seed` | The same view, with your seed given or taken back |
+| POST | `/api/seeds/<id>/thumb` | The same route under the name the first release used |
 | POST | `/api/seeds/<id>/comments` | 201 and the same view |
 | DELETE | `/api/seeds/<id>/comments/<commentId>` | The same view |
 
-Reading needs nothing. A thumb needs a signed-in account. A comment needs a verified Tiiny profile,
-is 1 to 1,000 characters, and is limited to five per hour; deleting your comments does not give the
-limit back. A comment can be deleted by its author or by a farm admin. Only apps in the deployed
-catalog have a conversation, so an unknown id answers 404, and the wrong method for a route answers
-405.
+`/api/social/counts` is one read for a whole catalog page, so a grid of apps does not ask once per
+tile. It needs no credential and is cached for 60 seconds. A maker's total is the seeds their apps
+have been given, added up.
+
+Reading needs nothing. Giving a seed needs a signed-in account or a `farm_` token. A comment needs
+a verified Tiiny profile, is 1 to 1,000 characters, and is limited to five per hour; deleting your
+comments does not give the limit back. A comment can be deleted by its author or by a farm admin.
+Only apps in the deployed catalog have a conversation, so an unknown id answers 404, and the wrong
+method for a route answers 405.
+
+`thumbs` carries the same number as `seeds` so an older reader keeps working. Read `seeds`.
 
 Each comment comes back as `{id, author: {handle, name, avatar}, text, at, canDelete}`. The author
 name falls back to "A maker" when a profile is not readable, and an email address is never part of

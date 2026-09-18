@@ -8,3 +8,6 @@ __pycache__/
 build/
 dist/
 farm-lite-patch/
+
+# graft's local graph cache: regenerable, not committed (run `graft build`).
+/graft/

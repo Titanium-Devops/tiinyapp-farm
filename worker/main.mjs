@@ -55,7 +55,7 @@ export class FarmCoordinator {
     // A release check stays in the queue: it runs in seconds, and the queue is what makes its
     // once-a-minute limit per app hold, so two presses cannot open two pull requests.
     const { pathname } = new URL(request.url);
-    if (request.method === 'GET' && ['/api/owners'].includes(pathname)) return execute();
+    if (request.method === 'GET' && ['/api/owners', '/api/social/counts'].includes(pathname)) return execute();
     if (request.method === 'POST' && /^\/api\/seeds\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*\/art$/.test(pathname)) return execute();
     const operation = this.tail.then(execute);
     this.tail = operation.catch(() => {});

@@ -11,6 +11,7 @@ import { seedRoutes, releaseURL } from '../worker/seeds.mjs';
 import { artRoutes, headerPrompt, iconPrompt, cleanScene, DAILY } from '../worker/art.mjs';
 import { releaseRoutes, appJWT, privateKeyBytes, pickRelease, pickURL, serialize } from '../worker/release.mjs';
 import { checkManifest } from '../worker/manifest.mjs';
+import { seedRows, seedWords, seedStackHTML } from '../worker/catalog.mjs';
 import worker, { FarmCoordinator } from '../worker/main.mjs';
 const ORIGIN = 'https://tiinyapp.farm';
 const PROFILE = 'https://www.tiinyverse.com/users/39628b1e-e94e-4bd8-800e-5437d5336e1f';
@@ -663,14 +664,20 @@ function socialFixture(f) {
 test('social: public counts, account thumb toggle, verified comments, limits and safe author projection', async () => {
   const f = fixture(); socialFixture(f);
   const endpoint = '/api/seeds/little-library';
-  assert.deepEqual(await (await f.call(endpoint + '/social')).json(), { thumbs: 0, mine: false, comments: [] });
+  assert.deepEqual(await (await f.call(endpoint + '/social')).json(), { thumbs: 0, seeds: 0, mine: false, comments: [] });
   assert.equal((await f.call('/api/seeds/not-here/social')).status, 404);
   assert.equal((await f.call(endpoint + '/thumb', {})).status, 401);
   const first = await f.email();
   assert.equal((await f.call(endpoint + '/comments', { text: 'Hi' }, first.cookie)).status, 403);
   let social = await (await f.call(endpoint + '/thumb', {}, first.cookie)).json();
-  assert.equal(social.thumbs, 1); assert.equal(social.mine, true);
-  social = await (await f.call(endpoint + '/thumb', {}, first.cookie)).json(); assert.equal(social.thumbs, 0); assert.equal(social.mine, false);
+  assert.equal(social.thumbs, 1); assert.equal(social.seeds, 1); assert.equal(social.mine, true);
+  social = await (await f.call(endpoint + '/thumb', {}, first.cookie)).json(); assert.equal(social.thumbs, 0); assert.equal(social.seeds, 0); assert.equal(social.mine, false);
+  // /seed is the name a person reads and /thumb is the name the first release shipped with.
+  social = await (await f.call(endpoint + '/seed', {}, first.cookie)).json();
+  assert.equal(social.seeds, 1); assert.equal(social.thumbs, 1); assert.equal(social.mine, true);
+  social = await (await f.call(endpoint + '/seed', {}, first.cookie)).json();
+  assert.equal(social.seeds, 0); assert.equal(social.mine, false);
+  assert.equal((await f.call(endpoint + '/seed', undefined, first.cookie, {}, 'GET')).status, 405);
   await f.proof(first.cookie);
   for (const text of ['', ' ', 'x'.repeat(1001), 123]) assert.equal((await f.call(endpoint + '/comments', { text }, first.cookie)).status, 400);
   const result = await f.call(endpoint + '/comments', { text: '<img src=x onerror=alert(1)>' }, first.cookie);
@@ -739,6 +746,88 @@ test('coordinator serializes concurrent thumbs/comments and mirrors social recor
   assert.deepEqual(await mirror.get('social:little-library', 'json'), durable);
 });
 
+test('seed counts: one public read carries every app and every maker in the catalog', async () => {
+  const f = fixture();
+  const owner = await f.email(); await f.proof(owner.cookie);
+  const visitor = await f.email('other@example.org');
+  const handle = (await (await f.call('/api/me', undefined, owner.cookie)).json()).user.handle;
+  assert.match(handle, /^aster-fern-[a-f0-9]{4}$/);
+  f.published.set('fake-app', listedApp());
+  f.published.set('little-library', listedApp({ id: 'little-library', name: 'Little Library' }));
+  // fake-app has an owner record; little-library is reached through the profile url instead,
+  // the way an app listed before the farm recorded owners is.
+  await f.store.put('seedowner:fake-app', JSON.stringify(owner.user.id));
+  const endpoint = '/api/seeds/fake-app';
+  assert.equal((await f.call(endpoint + '/seed', {}, owner.cookie)).status, 200);
+  assert.equal((await f.call(endpoint + '/seed', {}, visitor.cookie)).status, 200);
+  assert.equal((await f.call(endpoint + '/comments', { text: 'Growing well' }, owner.cookie)).status, 201);
+  assert.equal((await f.call('/api/seeds/little-library/seed', {}, owner.cookie)).status, 200);
+  const response = await f.call('/api/social/counts');
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('Cache-Control'), 'public, max-age=60');
+  const counts = await response.json();
+  assert.deepEqual(counts.apps, { 'fake-app': { seeds: 2, comments: 1 },
+    'little-library': { seeds: 1, comments: 0 } });
+  assert.deepEqual(counts.makers, { [handle]: { seeds: 3 } });
+  // Nothing about a person travels with a public count.
+  const text = JSON.stringify(counts);
+  assert.ok(!text.includes(owner.user.id) && !text.includes(visitor.user.id));
+  assert.ok(!text.includes('example.org'));
+  assert.equal((await f.call('/api/social/counts', {})).status, 405);
+});
+
+test('a farm_ token gives a seed and leaves a comment without an Origin, the way the launcher will', async () => {
+  const f = fixture(); socialFixture(f);
+  const signed = await f.email(); await f.proof(signed.cookie);
+  const issued = await (await f.call('/api/tokens', { name: 'Launcher' }, signed.cookie)).json();
+  const auth = { Authorization: `Bearer ${issued.token}`, Origin: 'https://launcher.example' };
+  const endpoint = '/api/seeds/little-library';
+  let social = await (await f.call(endpoint + '/seed', {}, '', auth)).json();
+  assert.equal(social.seeds, 1); assert.equal(social.mine, true);
+  social = await (await f.call(endpoint + '/thumb', {}, '', auth)).json();
+  assert.equal(social.seeds, 0); assert.equal(social.mine, false);
+  social = await (await f.call(endpoint + '/comments', { text: 'From the launcher' }, '', auth)).json();
+  assert.equal(social.comments[0].text, 'From the launcher');
+  // A token with no verified Tiiny behind it is refused a comment exactly as a cookie is.
+  const plain = await f.email('plain@example.org');
+  assert.equal((await f.call('/api/tokens', { name: 'No Tiiny' }, plain.cookie)).status, 403);
+  // Reading is still open to anyone, and a wrong token is nobody rather than the cookie holder.
+  const wrong = { Authorization: 'Bearer farm_' + 'f'.repeat(40), Origin: 'https://launcher.example' };
+  assert.equal((await f.call(endpoint + '/seed', {}, signed.cookie, wrong)).status, 401);
+  assert.equal((await f.call(endpoint + '/comments', { text: 'Nope' }, signed.cookie, wrong)).status, 401);
+  assert.equal((await f.call(endpoint + '/social')).status, 200);
+  // A revoked token stops working.
+  assert.equal((await f.call('/api/tokens/' + issued.id, {}, signed.cookie, {}, 'DELETE')).status, 200);
+  assert.equal((await f.call(endpoint + '/seed', {}, '', auth)).status, 401);
+});
+
+test('the seed stack grows in the shape the three renderers agree on', async () => {
+  const browser = await import('../site/assets/seed-stack.js');
+  const shapes = { 0: [[0]], 1: [[1]], 3: [[1, 1, 1]], 4: [[1, 1], [1, 1]],
+    9: [[1, 1, 1, 1], [1, 1, 1, 1, 1]], 10: [[1], [1, 1], [1, 1, 1]], 57: [[1], [1, 1], [1, 1, 1]] };
+  for (const [count, rows] of Object.entries(shapes)) {
+    assert.deepEqual(seedRows(Number(count)), rows, 'worker rows for ' + count);
+    assert.deepEqual(browser.seedRows(Number(count)), rows, 'browser rows for ' + count);
+    const words = Number(count) === 0 ? 'No seeds yet' : 'Seeds · ' + count;
+    assert.equal(seedWords(Number(count)), words);
+    assert.equal(browser.seedWords(Number(count)), words);
+    const html = seedStackHTML(Number(count));
+    assert.equal((html.match(/class="seed-row"/g) || []).length, rows.length);
+    assert.equal((html.match(/<i class="seed"><\/i>/g) || []).length, rows.flat().filter(Boolean).length);
+    assert.ok(html.includes('data-seeds="' + count + '"'));
+    assert.ok(html.includes('aria-label="' + words + '"'));
+  }
+  assert.ok(seedStackHTML(0).includes('<i class="seed seed-husk"></i>'));
+  assert.ok(!seedStackHTML(1).includes('husk'));
+  // Nothing hostile can reach the markup: the count is a whole number or it is zero.
+  assert.equal(seedStackHTML('3"><script>'), seedStackHTML(0));
+  assert.ok(!seedStackHTML('3"><script>').includes('<script>'));
+  assert.equal(seedStackHTML('7'), seedStackHTML(7));
+  assert.equal(seedStackHTML(4.8), seedStackHTML(4));
+  assert.ok(seedStackHTML(-4).includes('No seeds yet'));
+  assert.ok(seedStackHTML(2, ' data-seed-stack="little-library"').includes('data-seed-stack="little-library"'));
+});
+
 test('private seed cards include live social counts and only published page links', async () => {
   const f = fixture(), first = await f.email(); await f.proof(first.cookie);
   await f.call('/api/seeds', seedForm(), first.cookie);
@@ -748,7 +837,7 @@ test('private seed cards include live social counts and only published page link
   await f.call('/api/seeds/little-library/thumb', {}, first.cookie);
   await f.call('/api/seeds/little-library/comments', { text: 'Growing well' }, first.cookie);
   seeds = (await (await f.call('/api/seeds/mine', undefined, first.cookie)).json()).seeds;
-  assert.equal(seeds[0].url, '/apps/little-library/'); assert.equal(seeds[0].thumbs, 1); assert.equal(seeds[0].comments, 1);
+  assert.equal(seeds[0].url, '/apps/little-library/'); assert.equal(seeds[0].seeds, 1); assert.equal(seeds[0].thumbs, 1); assert.equal(seeds[0].comments, 1);
 });
 
 test('maker pages carry sprout identity, escaped share metadata and accessible share controls', async () => {
@@ -780,6 +869,24 @@ test('maker pages carry sprout identity, escaped share metadata and accessible s
   assert.match(html, /src="\/assets\/share.js"/);
   assert.match(html, /<button[^>]*type="button"[^>]*data-share /);
   assert.match(html, /data-share-status role="status" aria-live="polite"/);
+});
+
+test("a maker's page carries the seeds their apps have been given, added up", async () => {
+  const f = fixture(), maker = await f.email(); await f.proof(maker.cookie);
+  const visitor = await f.email('other@example.org');
+  const user = (await (await f.call('/api/me', undefined, maker.cookie)).json()).user;
+  f.published.set('fake-app', listedApp());
+  f.published.set('little-library', listedApp({ id: 'little-library', name: 'Little Library' }));
+  const empty = await (await f.call(`/makers/${user.handle}/`)).text();
+  assert.ok(empty.includes('data-seeds="0"') && empty.includes('No seeds yet'));
+  for (const [app, who] of [['fake-app', maker], ['fake-app', visitor], ['little-library', visitor]]) {
+    assert.equal((await f.call(`/api/seeds/${app}/seed`, {}, who.cookie)).status, 200);
+  }
+  const html = await (await f.call(`/makers/${user.handle}/`)).text();
+  assert.match(html, /<div class="maker-head"><h1>Aster &amp; Fern<\/h1><span class="seed-stack" data-seeds="3"/);
+  assert.ok(html.includes('Seeds · 3'));
+  // The pile is the whole field, not one plot.
+  assert.equal((await (await f.call('/api/seeds/fake-app/social')).json()).seeds, 2);
 });
 
 test('maker share cards serve build snapshots, handle HEAD and fall back for missing snapshots', async () => {

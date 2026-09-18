@@ -74,7 +74,7 @@ export async function seedRoutes(ctx) {
         } catch { item.unavailable = true; }
       }
       const social = await get('social:' + seed.id);
-      item.thumbs = social?.thumbs?.length || 0; item.comments = social?.comments?.length || 0;
+      item.seeds = item.thumbs = social?.thumbs?.length || 0; item.comments = social?.comments?.length || 0;
       item.release = await releaseState(get, seed.id);
       try {
         const published = await env.ASSETS.fetch(new Request(ORIGIN + '/manifests/' + seed.id + '.json'));
@@ -96,7 +96,8 @@ export async function seedRoutes(ctx) {
         const social = await get('social:' + manifest.id);
         seeds.push({ id: manifest.id, name: manifest.name, version: manifest.version, icon: manifest.media?.icon,
           state: manifest.release ? 'published' : 'sprouting', url: '/apps/' + manifest.id + '/',
-          canUpdate: true, checks: [], reviews: [], thumbs: social?.thumbs?.length || 0, comments: social?.comments?.length || 0,
+          canUpdate: true, checks: [], reviews: [], seeds: social?.thumbs?.length || 0,
+          thumbs: social?.thumbs?.length || 0, comments: social?.comments?.length || 0,
           release: await releaseState(get, manifest.id) });
       }
     }
