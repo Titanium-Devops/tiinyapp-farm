@@ -223,7 +223,8 @@ A seed is the farm's thumbs up: one per person per app, given again to take it b
 
 `/api/social/counts` is one read for a whole catalog page, so a grid of apps does not ask once per
 tile. It needs no credential and is cached for 60 seconds. A maker's total is the seeds their apps
-have been given, added up.
+have been given, added up, credited through the verified profile on each manifest. A maker who
+hid their page is not listed.
 
 Reading needs nothing. Giving a seed needs a signed-in account or a `farm_` token. A comment needs
 a verified Tiiny profile, is 1 to 1,000 characters, and is limited to five per hour; deleting your

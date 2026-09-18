@@ -285,7 +285,8 @@ def paths():
             "Every app's seeds and comments in one answer",
             "One read for a whole catalog page, so a grid of apps does not ask once per tile."
             " Reading needs no credential and the answer is cached for 60 seconds. Makers are"
-            " keyed by handle and carry the seeds their apps have been given, added up.",
+            " keyed by handle and carry the seeds their apps have been given, added up. A"
+            " maker who hid their page is not listed.",
             tags=["Seeds and comments"],
             answers={"200": answer("The seed and comment counts.",
                                    {"$ref": "#/components/schemas/SocialCounts"})},
