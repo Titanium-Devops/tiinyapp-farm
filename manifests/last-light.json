@@ -1,0 +1,61 @@
+{
+  "id": "last-light",
+  "name": "LAST LIGHT",
+  "pitch": "An off-grid library that answers out of real books and names the page.",
+  "description": "Ask a question in plain words and get an answer built only out of the books on this device, with the book and the page it came from printed under it. When the shelf does not cover the question it says so rather than inventing an answer, which is the whole point of it: a library you can trust at the moment you cannot check anything. Browse the shelves, read what is on them, and look a subject up by name. Nothing is uploaded and nothing is looked up online; the retrieval and the answering both happen on your Tiiny, and the books sit on your own disk. This is the books half of the archiver repo, the same corpus the notes half reads, and it is the half that assumes the power is out. It does not build a shelf from your own PDFs, because turning a PDF into text needs a program the farm will not run; instead it downloads a prebuilt shelf once, checks it by length and by hash before unpacking it, and then works with nothing connected. On first run, before the shelf is there, it says so and offers to fetch it. Python standard library only.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Jason Brashear",
+    "url": "https://github.com/webdevtodayjason",
+    "tiinyverse": "https://www.tiinyverse.com/users/39628b1e-e94e-4bd8-800e-5437d5336e1f"
+  },
+  "license": "MIT",
+  "homepage": "https://lastlight.cc",
+  "repo": "https://github.com/webdevtodayjason/archiver",
+  "screenshots": [],
+  "release": {
+    "url": "https://github.com/webdevtodayjason/archiver/releases/download/last-light-v0.1.0/last-light-0.1.0.tar.gz",
+    "sha256": "86a02f199a0d4e10464edb3692625f3d688e1c8fc34b0f71e5e9fbc38ca1713b",
+    "size": 71805
+  },
+  "entry": {
+    "command": "python3 last-light --serve"
+  },
+  "port": {
+    "argv": "--port"
+  },
+  "selfcheck": true,
+  "health": "/api/health",
+  "requires": {
+    "python": "3.9",
+    "ports": [
+      8700
+    ],
+    "device": {
+      "models": [
+        "chat",
+        "embedding"
+      ],
+      "npuUnits": 29,
+      "prefers": []
+    }
+  },
+  "permissions": [
+    "files",
+    "network",
+    "device"
+  ],
+  "tags": [
+    "knowledge",
+    "offline",
+    "search",
+    "tools"
+  ],
+  "verified": false,
+  "addedAt": "2026-09-18",
+  "updatedAt": "2026-09-18",
+  "links": {
+    "repo": "https://github.com/webdevtodayjason/archiver",
+    "homepage": "https://lastlight.cc"
+  }
+}
