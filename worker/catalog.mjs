@@ -22,31 +22,39 @@ export async function ownsSeed(user, manifest, get) {
   return owner ? owner === user.id : LEGACY.has(manifest.id) && manifest.author?.tiinyverse === user.tiinyverse.profileUrl;
 }
 
-// The pile of seeds a person sees beside an app. One shape, drawn three times: here for the
-// pages the Worker writes, in scripts/build-site.py for the pages the build writes, and in
-// site/assets/seed-stack.js for the counts the browser refreshes. Keep the three in step.
-// 0 is one empty husk, 1 to 3 sit in one row, 4 to 9 fall into two rows, and 10 or more become
-// a heap of six with the number doing the counting.
+// The pile of seeds a person sees beside an app. One shape, drawn four times: here for the pages
+// the Worker writes, in scripts/build-site.py for the pages the build writes, in
+// site/assets/seed-stack.js for the counts a browser refreshes, and in the desktop launcher.
+// Keep them in step; tests compare the markup here against the build's.
+//
+// Rows are counted from the bottom of the pile up. Nothing is one hollow husk and no rows. One
+// to three lie in a single row. Four to nine split in two, the wider row underneath. Ten and up
+// hold at a nine-seed heap and let the number do the counting, so the pile never shrinks as the
+// count rises.
+const whole = count => Math.max(0, Math.trunc(Number(count) || 0));
+export const seedKind = count => {
+  const seeds = whole(count);
+  return seeds === 0 ? 'none' : seeds <= 9 ? 'seeds' : 'heap';
+};
 export function seedRows(count) {
-  const seeds = Math.max(0, Math.trunc(Number(count) || 0));
-  if (seeds === 0) return [[0]];
-  if (seeds <= 3) return [Array(seeds).fill(1)];
-  if (seeds <= 9) {
-    const top = Math.floor(seeds / 2);
-    return [Array(top).fill(1), Array(seeds - top).fill(1)];
-  }
-  return [[1], [1, 1], [1, 1, 1]];
+  const seeds = whole(count);
+  if (seeds === 0) return [];
+  if (seeds <= 3) return [seeds];
+  if (seeds <= 9) return [Math.ceil(seeds / 2), Math.floor(seeds / 2)];
+  return [5, 4];
 }
 export const seedWords = count => {
-  const seeds = Math.max(0, Math.trunc(Number(count) || 0));
-  return seeds === 0 ? 'No seeds yet' : 'Seeds · ' + seeds;
+  const seeds = whole(count);
+  return seeds === 0 ? 'No seeds yet' : seeds === 1 ? '1 seed' : seeds + ' seeds';
 };
 export function seedStackHTML(count, attributes = '') {
-  const seeds = Math.max(0, Math.trunc(Number(count) || 0));
-  const pile = seedRows(seeds).map(row =>
-    '<span class="seed-row">' + row.map(seed => `<i class="seed${seed ? '' : ' seed-husk'}"></i>`).join('') + '</span>').join('');
-  const words = seedWords(seeds);
-  return `<span class="seed-stack" data-seeds="${seeds}" role="img" aria-label="${words}"${attributes}>`
-    + `<span class="seed-pile" aria-hidden="true">${pile}</span>`
-    + `<span class="seed-count">${words}</span></span>`;
+  const seeds = whole(count), kind = seedKind(seeds), words = seedWords(seeds);
+  // The pile reads as a picture, so the words travel in the label and the tooltip rather than
+  // beside every count. Only a heap shows a numeral, because nine seeds cannot be counted to 57.
+  const pile = kind === 'none' ? '<i class="seed seed-husk"></i>'
+    : seedRows(seeds).map(row => '<span class="seed-row">' + '<i class="seed"></i>'.repeat(row) + '</span>').join('');
+  const tally = kind === 'heap' ? `<span class="seed-count">${seeds}</span>` : '';
+  return `<span class="seed-stack" data-seeds="${seeds}" data-kind="${kind}" role="img"`
+    + ` aria-label="${words}" title="${words}"${attributes}>`
+    + `<span class="seed-pile" aria-hidden="true">${pile}</span>${tally}</span>`;
 }

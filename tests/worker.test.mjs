@@ -11,7 +11,7 @@ import { seedRoutes, releaseURL } from '../worker/seeds.mjs';
 import { artRoutes, headerPrompt, iconPrompt, cleanScene, DAILY } from '../worker/art.mjs';
 import { releaseRoutes, appJWT, privateKeyBytes, pickRelease, pickURL, serialize } from '../worker/release.mjs';
 import { checkManifest } from '../worker/manifest.mjs';
-import { seedRows, seedWords, seedStackHTML } from '../worker/catalog.mjs';
+import { seedKind, seedRows, seedWords, seedStackHTML } from '../worker/catalog.mjs';
 import worker, { FarmCoordinator } from '../worker/main.mjs';
 const ORIGIN = 'https://tiinyapp.farm';
 const PROFILE = 'https://www.tiinyverse.com/users/39628b1e-e94e-4bd8-800e-5437d5336e1f';
@@ -810,24 +810,40 @@ test('a farm_ token gives a seed and leaves a comment without an Origin, the way
   assert.equal((await f.call(endpoint + '/seed', {}, '', auth)).status, 401);
 });
 
-test('the seed stack grows in the shape the three renderers agree on', async () => {
+test('the seed stack grows in the shape every renderer agrees on', async () => {
   const browser = await import('../site/assets/seed-stack.js');
-  const shapes = { 0: [[0]], 1: [[1]], 3: [[1, 1, 1]], 4: [[1, 1], [1, 1]],
-    9: [[1, 1, 1, 1], [1, 1, 1, 1, 1]], 10: [[1], [1, 1], [1, 1, 1]], 57: [[1], [1, 1], [1, 1, 1]] };
+  // Rows are counted from the bottom of the pile up, so the wider row is written first.
+  const shapes = { 0: [], 1: [1], 2: [2], 3: [3], 4: [2, 2], 5: [3, 2], 9: [5, 4],
+    10: [5, 4], 12: [5, 4], 57: [5, 4] };
   for (const [count, rows] of Object.entries(shapes)) {
-    assert.deepEqual(seedRows(Number(count)), rows, 'worker rows for ' + count);
-    assert.deepEqual(browser.seedRows(Number(count)), rows, 'browser rows for ' + count);
-    const words = Number(count) === 0 ? 'No seeds yet' : 'Seeds · ' + count;
-    assert.equal(seedWords(Number(count)), words);
-    assert.equal(browser.seedWords(Number(count)), words);
-    const html = seedStackHTML(Number(count));
+    const n = Number(count), total = rows.reduce((a, b) => a + b, 0);
+    const kind = n === 0 ? 'none' : n <= 9 ? 'seeds' : 'heap';
+    const words = n === 0 ? 'No seeds yet' : n === 1 ? '1 seed' : n + ' seeds';
+    for (const [where, module] of [['worker', { seedKind, seedRows, seedWords }], ['browser', browser]]) {
+      assert.deepEqual(module.seedRows(n), rows, where + ' rows for ' + count);
+      assert.equal(module.seedKind(n), kind, where + ' kind for ' + count);
+      assert.equal(module.seedWords(n), words, where + ' words for ' + count);
+    }
+    const html = seedStackHTML(n);
+    assert.ok(html.includes(`data-seeds="${n}"`) && html.includes(`data-kind="${kind}"`), html);
+    assert.ok(html.includes(`aria-label="${words}"`) && html.includes(`title="${words}"`), html);
     assert.equal((html.match(/class="seed-row"/g) || []).length, rows.length);
-    assert.equal((html.match(/<i class="seed"><\/i>/g) || []).length, rows.flat().filter(Boolean).length);
-    assert.ok(html.includes('data-seeds="' + count + '"'));
-    assert.ok(html.includes('aria-label="' + words + '"'));
+    assert.equal((html.match(/<i class="seed"><\/i>/g) || []).length, total);
+    // Only a heap shows a numeral, because nine seeds cannot be counted to 57.
+    assert.equal(html.includes('seed-count'), kind === 'heap', 'numeral on ' + count);
+    if (kind === 'heap') assert.ok(html.includes(`<span class="seed-count">${n}</span>`));
   }
+  // Nothing is one hollow husk and no rows at all.
   assert.ok(seedStackHTML(0).includes('<i class="seed seed-husk"></i>'));
+  assert.ok(!seedStackHTML(0).includes('seed-row'));
   assert.ok(!seedStackHTML(1).includes('husk'));
+  // The pile never shrinks as the count rises. Ten used to drop it from nine seeds to six.
+  let drawn = -1;
+  for (let n = 0; n <= 12; n++) {
+    const total = seedRows(n).reduce((a, b) => a + b, 0);
+    assert.ok(total >= drawn, `the pile shrank going into ${n}`);
+    drawn = total;
+  }
   // Nothing hostile can reach the markup: the count is a whole number or it is zero.
   assert.equal(seedStackHTML('3"><script>'), seedStackHTML(0));
   assert.ok(!seedStackHTML('3"><script>').includes('<script>'));
@@ -893,7 +909,7 @@ test("a maker's page carries the seeds their apps have been given, added up", as
   }
   const html = await (await f.call(`/makers/${user.handle}/`)).text();
   assert.match(html, /<div class="maker-head"><h1>Aster &amp; Fern<\/h1><span class="seed-stack" data-seeds="3"/);
-  assert.ok(html.includes('Seeds · 3'));
+  assert.ok(html.includes('aria-label="3 seeds" title="3 seeds"'));
   // The pile is the whole field, not one plot.
   assert.equal((await (await f.call('/api/seeds/fake-app/social')).json()).seeds, 2);
 });
