@@ -754,9 +754,9 @@ test('seed counts: one public read carries every app and every maker in the cata
   assert.match(handle, /^aster-fern-[a-f0-9]{4}$/);
   f.published.set('fake-app', listedApp());
   f.published.set('little-library', listedApp({ id: 'little-library', name: 'Little Library' }));
-  // fake-app has an owner record; little-library is reached through the profile url instead,
-  // the way an app listed before the farm recorded owners is.
-  await f.store.put('seedowner:fake-app', JSON.stringify(owner.user.id));
+  // Neither app has an owner record, the way every app listed before the farm recorded owners
+  // is. Both are credited through the verified profile on the manifest instead.
+  assert.equal(await f.store.get('seedowner:fake-app'), null);
   const endpoint = '/api/seeds/fake-app';
   assert.equal((await f.call(endpoint + '/seed', {}, owner.cookie)).status, 200);
   assert.equal((await f.call(endpoint + '/seed', {}, visitor.cookie)).status, 200);
@@ -774,6 +774,15 @@ test('seed counts: one public read carries every app and every maker in the cata
   assert.ok(!text.includes(owner.user.id) && !text.includes(visitor.user.id));
   assert.ok(!text.includes('example.org'));
   assert.equal((await f.call('/api/social/counts', {})).status, 405);
+  // An app whose author profile was never verified is credited through its owner record.
+  f.published.set('orphan-app', listedApp({ id: 'orphan-app', name: 'Orphan',
+    author: { name: 'Nobody', url: 'https://example.org/nobody', tiinyverse: 'https://example.org/nobody' } }));
+  await f.store.put('seedowner:orphan-app', JSON.stringify(owner.user.id));
+  assert.equal((await f.call('/api/seeds/orphan-app/seed', {}, owner.cookie)).status, 200);
+  assert.deepEqual((await (await f.call('/api/social/counts')).json()).makers, { [handle]: { seeds: 4 } });
+  // A maker who hid their page is not listed, the way their page is not served.
+  assert.equal((await f.call('/api/maker/visibility', { public: false }, owner.cookie, {}, 'PUT')).status, 200);
+  assert.deepEqual((await (await f.call('/api/social/counts')).json()).makers, {});
 });
 
 test('a farm_ token gives a seed and leaves a comment without an Origin, the way the launcher will', async () => {

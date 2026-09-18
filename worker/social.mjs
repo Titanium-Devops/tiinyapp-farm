@@ -1,5 +1,6 @@
 import { fail, json } from './index.mjs';
 import { catalog } from './makers.mjs';
+import { profileId } from './proof.mjs';
 
 // A seed is the farm's thumbs up: one per person per app, given again to take it back. The
 // stored record still calls the list thumbs so no key has to be rewritten; every answer carries
@@ -13,18 +14,22 @@ export async function seedsForApps(get, apps) {
   }
   return counts;
 }
+// Who to credit an app's seeds to. The manifest's author profile is the same thing the maker
+// page filters on, and tvowner: already maps a profile to the account that proved it, so an app
+// listed before the farm recorded owners is reached as easily as one submitted through the site.
+// seedowner: answers for an app whose author profile was never verified.
+async function makerOf(get, app) {
+  let owner = null;
+  try { owner = await get('tvowner:' + profileId(app.author?.tiinyverse)); } catch { owner = null; }
+  if (!owner) owner = await get('seedowner:' + app.id);
+  const user = owner && await get('user:' + owner);
+  // A maker who hid their page is not listed here either.
+  return user?.handle && user.tiinyverse && user.public !== false ? user.handle : null;
+}
 export async function makerSeeds(get, apps, counts) {
-  // An app's owner is the maker who planted it. Makers listed before the farm recorded owners
-  // are reached through the profile url of an app whose owner did answer.
-  const handles = new Map();
-  for (const app of apps) {
-    const ownerId = await get('seedowner:' + app.id);
-    const owner = ownerId && await get('user:' + ownerId);
-    if (owner?.handle && owner.tiinyverse?.profileUrl) handles.set(owner.tiinyverse.profileUrl, owner.handle);
-  }
   const totals = {};
   for (const app of apps) {
-    const handle = handles.get(app.author?.tiinyverse);
+    const handle = await makerOf(get, app);
     if (!handle) continue;
     totals[handle] = { seeds: (totals[handle]?.seeds || 0) + (counts[app.id]?.seeds || 0) };
   }
