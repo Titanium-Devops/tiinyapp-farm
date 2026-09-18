@@ -919,10 +919,15 @@ class FarmTests(unittest.TestCase):
         The first version of this test ran the child against an empty peer list and let it
         broadcast for real. A GitHub macOS runner forbids that, answers EHOSTUNREACH, and the test
         failed there for a reason that had nothing to do with the child source it is about.
+
+        The second version gave the child half a second per probe. A GitHub Windows runner under
+        load took longer than that to answer on loopback, the child gave up mid-reply (WinError
+        10053 on the serving side) and reported an empty network. The probe timeout here is not
+        what the test is about either, so it is generous; the subprocess timeout still bounds it.
         """
         with self.a_tiiny_on_loopback() as served:
             done = subprocess.run([sys.executable, "-c", farm_module.FIND_PROBE,
-                                   str(ROOT), json.dumps(["127.0.0.1"]), "0.5"],
+                                   str(ROOT), json.dumps(["127.0.0.1"]), "5"],
                                   capture_output=True, text=True, timeout=60,
                                   env=dict(os.environ, PYTHONPATH=served))
         self.assertEqual(done.returncode, 0, done.stderr)
