@@ -43,18 +43,23 @@ export function seedRows(count) {
   if (seeds <= 9) return [Math.ceil(seeds / 2), Math.floor(seeds / 2)];
   return [5, 4];
 }
+// What the pile says out loud, in its label and its tooltip. The launcher says the same.
 export const seedWords = count => {
   const seeds = whole(count);
   return seeds === 0 ? 'No seeds yet' : seeds === 1 ? '1 seed' : seeds + ' seeds';
 };
+// What the pile prints beside itself. The site is where a person can act on a count today, so
+// the words are the invitation and every count carries them.
+export const seedCaption = count => {
+  const seeds = whole(count);
+  return seeds === 0 ? 'No seeds yet' : 'Seeds \u00b7 ' + seeds;
+};
 export function seedStackHTML(count, attributes = '') {
-  const seeds = whole(count), kind = seedKind(seeds), words = seedWords(seeds);
-  // The pile reads as a picture, so the words travel in the label and the tooltip rather than
-  // beside every count. Only a heap shows a numeral, because nine seeds cannot be counted to 57.
+  const seeds = whole(count), kind = seedKind(seeds);
   const pile = kind === 'none' ? '<i class="seed seed-husk"></i>'
     : seedRows(seeds).map(row => '<span class="seed-row">' + '<i class="seed"></i>'.repeat(row) + '</span>').join('');
-  const tally = kind === 'heap' ? `<span class="seed-count">${seeds}</span>` : '';
   return `<span class="seed-stack" data-seeds="${seeds}" data-kind="${kind}" role="img"`
-    + ` aria-label="${words}" title="${words}"${attributes}>`
-    + `<span class="seed-pile" aria-hidden="true">${pile}</span>${tally}</span>`;
+    + ` aria-label="${seedWords(seeds)}" title="${seedWords(seeds)}"${attributes}>`
+    + `<span class="seed-pile" aria-hidden="true">${pile}</span>`
+    + `<span class="seed-count">${seedCaption(seeds)}</span></span>`;
 }

@@ -22,9 +22,17 @@ export function seedRows(count) {
   return [5, 4];
 }
 
+// What the pile says out loud, in its label and its tooltip. The launcher says the same.
 export function seedWords(count) {
   const seeds = whole(count);
   return seeds === 0 ? 'No seeds yet' : seeds === 1 ? '1 seed' : seeds + ' seeds';
+}
+
+// What the pile prints beside itself. The site is where a person can act on a count today, so
+// the words are the invitation and every count carries them.
+export function seedCaption(count) {
+  const seeds = whole(count);
+  return seeds === 0 ? 'No seeds yet' : 'Seeds \u00b7 ' + seeds;
 }
 
 const span = className => {
@@ -60,13 +68,9 @@ export function fillStack(stack, count) {
       pile.append(line);
     }
   }
-  // Only a heap shows a numeral, because nine seeds cannot be counted to 57.
-  if (kind !== 'heap') stack.replaceChildren(pile);
-  else {
-    const tally = span('seed-count');
-    tally.textContent = String(seeds);
-    stack.replaceChildren(pile, tally);
-  }
+  const tally = span('seed-count');
+  tally.textContent = seedCaption(seeds);
+  stack.replaceChildren(pile, tally);
   return stack;
 }
 
