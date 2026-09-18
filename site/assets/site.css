@@ -188,16 +188,17 @@ footer{border-top:1px solid var(--fence);color:var(--mute);font-size:14px}footer
 .owner-art input{width:100%;box-sizing:border-box;border:1px solid #2a3542;background:#0b1017;color:var(--ink);border-radius:12px;padding:10px 12px;font:15px var(--body)}
 @media(max-width:480px){.art-icon{width:72px;height:72px;margin-top:-36px}}
 
-/* A seed is the farm's thumbs up. The pile beside an app grows with the count: nothing is an
-   empty husk, one to three sit in a row, four to nine fall into two rows, and ten or more become
-   a heap of six with the number doing the counting. */
-.seed-stack{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
-.seed-pile{display:inline-flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:1px;min-height:12px}
+/* A seed is the farm's thumbs up. The pile beside an app grows with the count: nothing is one
+   hollow husk, one to three lie in a row, four to nine split in two with the wider row
+   underneath, and ten or more hold at a nine-seed heap with the number doing the counting, so
+   the pile never shrinks as the count rises. Rows are written bottom first and the pile stacks
+   them upward, which is why it reverses. */
+.seed-stack{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.seed-pile{display:inline-flex;flex-direction:column-reverse;align-items:center;gap:1.5px;min-height:8px}
 .seed-row{display:inline-flex;gap:2px}
 .seed-stack .seed{display:block;width:6px;height:8px;padding:0;margin:0;flex:0 0 auto;border-radius:50% 50% 45% 45%/60% 60% 40% 40%;background:linear-gradient(160deg,#f7d98f,var(--hay) 55%,#c9973a);box-shadow:0 1px 0 rgba(0,0,0,.35);transform:rotate(-8deg)}
 .seed-stack .seed-husk{background:none;box-shadow:none;border:1px dashed #46525f}
-.seed-count{font:700 12px var(--body);color:var(--hay);letter-spacing:.01em}
-.seed-stack[data-seeds="0"] .seed-count{color:var(--mute);font-weight:600}
+.seed-count{font:700 12px var(--body);color:var(--hay);letter-spacing:.01em;font-variant-numeric:tabular-nums}
 .chips .seed-stack{margin-left:2px}
 .give-seed .seed-count{color:inherit}
 .give-seed[aria-pressed=true] .seed{background:linear-gradient(160deg,#0f2b2a,#0b1f1e)}

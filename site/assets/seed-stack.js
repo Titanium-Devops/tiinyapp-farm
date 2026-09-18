@@ -1,22 +1,30 @@
 // The pile of seeds a person sees beside an app, and the one read that refreshes every pile on
-// a page. The same shape is drawn in worker/catalog.mjs for the pages the Worker writes and in
-// scripts/build-site.py for the pages the build writes. Keep the three in step.
-// Nothing is an empty husk, one to three sit in a row, four to nine fall into two rows, and ten
-// or more become a heap of six with the number doing the counting.
+// a page. The same shape is drawn in worker/catalog.mjs for the pages the Worker writes, in
+// scripts/build-site.py for the pages the build writes, and in the desktop launcher.
+// Keep them in step.
+//
+// Rows are counted from the bottom of the pile up. Nothing is one hollow husk and no rows. One
+// to three lie in a single row. Four to nine split in two, the wider row underneath. Ten and up
+// hold at a nine-seed heap and let the number do the counting, so the pile never shrinks as the
+// count rises.
+const whole = count => Math.max(0, Math.trunc(Number(count) || 0));
+
+export const seedKind = count => {
+  const seeds = whole(count);
+  return seeds === 0 ? 'none' : seeds <= 9 ? 'seeds' : 'heap';
+};
+
 export function seedRows(count) {
-  const seeds = Math.max(0, Math.trunc(Number(count) || 0));
-  if (seeds === 0) return [[0]];
-  if (seeds <= 3) return [Array(seeds).fill(1)];
-  if (seeds <= 9) {
-    const top = Math.floor(seeds / 2);
-    return [Array(top).fill(1), Array(seeds - top).fill(1)];
-  }
-  return [[1], [1, 1], [1, 1, 1]];
+  const seeds = whole(count);
+  if (seeds === 0) return [];
+  if (seeds <= 3) return [seeds];
+  if (seeds <= 9) return [Math.ceil(seeds / 2), Math.floor(seeds / 2)];
+  return [5, 4];
 }
 
 export function seedWords(count) {
-  const seeds = Math.max(0, Math.trunc(Number(count) || 0));
-  return seeds === 0 ? 'No seeds yet' : 'Seeds · ' + seeds;
+  const seeds = whole(count);
+  return seeds === 0 ? 'No seeds yet' : seeds === 1 ? '1 seed' : seeds + ' seeds';
 }
 
 const span = className => {
@@ -28,22 +36,37 @@ const span = className => {
 // Redraw one pile in place. The wrapper keeps its own id and dataset, so the app page can hand
 // its rail button's stack straight to this.
 export function fillStack(stack, count) {
-  const seeds = Math.max(0, Math.trunc(Number(count) || 0));
-  const words = seedWords(seeds);
+  const seeds = whole(count), kind = seedKind(seeds), words = seedWords(seeds);
   stack.className = 'seed-stack';
   stack.dataset.seeds = String(seeds);
+  stack.dataset.kind = kind;
   stack.setAttribute('role', 'img');
   stack.setAttribute('aria-label', words);
+  stack.title = words;
   const pile = span('seed-pile');
   pile.setAttribute('aria-hidden', 'true');
-  for (const row of seedRows(seeds)) {
-    const line = span('seed-row');
-    for (const seed of row) line.append(span(seed ? 'seed' : 'seed seed-husk'));
-    pile.append(line);
+  if (kind === 'none') {
+    const husk = document.createElement('i');
+    husk.className = 'seed seed-husk';
+    pile.append(husk);
+  } else {
+    for (const row of seedRows(seeds)) {
+      const line = span('seed-row');
+      for (let n = 0; n < row; n++) {
+        const seed = document.createElement('i');
+        seed.className = 'seed';
+        line.append(seed);
+      }
+      pile.append(line);
+    }
   }
-  const tally = span('seed-count');
-  tally.textContent = words;
-  stack.replaceChildren(pile, tally);
+  // Only a heap shows a numeral, because nine seeds cannot be counted to 57.
+  if (kind !== 'heap') stack.replaceChildren(pile);
+  else {
+    const tally = span('seed-count');
+    tally.textContent = String(seeds);
+    stack.replaceChildren(pile, tally);
+  }
   return stack;
 }
 

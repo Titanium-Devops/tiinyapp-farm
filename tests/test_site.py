@@ -28,8 +28,7 @@ TODAY = date(2026, 9, 12)
 # currency a person gives an app, so the pile's own words are lifted out of the visible text
 # before the old rule is applied to whatever is left. Anything else that calls an app a seed
 # still fails, which is the point of the rule.
-SEED_CURRENCY = re.compile(r'No seeds yet|Seeds \u00b7 \d+|Give a seed|Seed given'
-                           r'|give this app a seed|seeds and comments')
+SEED_CURRENCY = re.compile(r'Give a seed|Seed given|give this app a seed|seeds and comments')
 SEED_WORDS = re.compile(r'(?i)farmhand|\bsprouting\b|\bseeds?\b|My farm')
 
 
@@ -992,26 +991,42 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
             self.assertNotIn('Thumbs up', visible)
 
     def test_the_seed_pile_grows_in_the_shape_the_renderers_agree_on(self):
-        shapes = {0: [[0]], 1: [[1]], 3: [[1, 1, 1]], 4: [[1, 1], [1, 1]],
-                  9: [[1, 1, 1, 1], [1, 1, 1, 1, 1]], 10: [[1], [1, 1], [1, 1, 1]],
-                  57: [[1], [1, 1], [1, 1, 1]]}
+        # Rows are counted from the bottom of the pile up, so the wider row is written first.
+        shapes = {0: [], 1: [1], 2: [2], 3: [3], 4: [2, 2], 5: [3, 2], 9: [5, 4],
+                  10: [5, 4], 12: [5, 4], 57: [5, 4]}
         for count, rows in shapes.items():
             with self.subTest(count=count):
+                kind = 'none' if count == 0 else 'seeds' if count <= 9 else 'heap'
+                words = ('No seeds yet' if count == 0 else
+                         '1 seed' if count == 1 else f'{count} seeds')
                 self.assertEqual(SITE['seed_rows'](count), rows)
-                words = 'No seeds yet' if count == 0 else f'Seeds \u00b7 {count}'
+                self.assertEqual(SITE['seed_kind'](count), kind)
                 self.assertEqual(SITE['seed_words'](count), words)
                 markup = SITE['seed_stack'](count)
-                self.assertEqual(markup.count('class="seed-row"'), len(rows))
-                self.assertEqual(markup.count('<i class="seed"></i>'), sum(sum(row) for row in rows))
                 self.assertIn(f'data-seeds="{count}"', markup)
-                self.assertIn(f'aria-label="{words}"', markup)
-                self.assertIn(f'<span class="seed-count">{words}</span>', markup)
+                self.assertIn(f'data-kind="{kind}"', markup)
+                self.assertIn(f'aria-label="{words}" title="{words}"', markup)
+                self.assertEqual(markup.count('class="seed-row"'), len(rows))
+                self.assertEqual(markup.count('<i class="seed"></i>'), sum(rows))
+                # Only a heap shows a numeral, because nine seeds cannot be counted to 57.
+                self.assertEqual('seed-count' in markup, kind == 'heap')
+                if kind == 'heap':
+                    self.assertIn(f'<span class="seed-count">{count}</span>', markup)
+        # Nothing is one hollow husk and no rows at all.
         self.assertIn('<i class="seed seed-husk"></i>', SITE['seed_stack'](0))
+        self.assertNotIn('seed-row', SITE['seed_stack'](0))
         self.assertNotIn('husk', SITE['seed_stack'](1))
         # An empty husk must not borrow the catalog's .empty rule, which pads 40px.
         self.assertNotIn('class="seed empty"', SITE['seed_stack'](0))
         self.assertIn('data-seed-stack="little-library"', SITE['seed_stack'](2, 'little-library'))
-        # The Worker writes maker pages and the build writes app pages. One pile, one markup.
+        # The pile never shrinks as the count rises. Ten used to drop it to six seeds.
+        drawn = -1
+        for count in range(13):
+            total = sum(SITE['seed_rows'](count))
+            self.assertGreaterEqual(total, drawn, f'the pile shrank going into {count}')
+            drawn = total
+        # The Worker writes maker pages, the build writes app pages, and the desktop launcher
+        # draws the same pile. One shape, one markup.
         script = ('import assert from \'node:assert/strict\';\n'
                   'const { seedStackHTML } = await import(process.argv[1]);\n'
                   'const counts = JSON.parse(process.argv[2]);\n'
@@ -1056,12 +1071,12 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         counts = {'little-library': 12, 'fake-app': 0}
         row = SITE['ledger_row'](self.apps[0], {self.apps[0]['id']: 7})
         self.assertIn('data-seeds="7"', row)
-        self.assertIn('Seeds \u00b7 7', row)
+        self.assertIn('aria-label="7 seeds" title="7 seeds"', row)
         item = SITE['editorial_item'](self.apps[0], {self.apps[0]['id']: 4})
         self.assertIn('data-seeds="4"', item)
         page = SITE['app_page'](self.apps[0], TODAY, counts={self.apps[0]['id']: 57})
         self.assertIn('data-seeds="57"', page)
-        self.assertIn('Seeds \u00b7 57', page)
+        self.assertIn('<span class="seed-count">57</span>', page)
         self.assertNotIn(self.apps[0]['id'], counts)
 
     def test_comment_rendering_keeps_untrusted_text_in_text_nodes(self):

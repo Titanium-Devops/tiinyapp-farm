@@ -524,41 +524,53 @@ def versions_page(releases):
             '<a href="/docs/launcher/">About the launcher</a></p></section>')
 
 
-def seed_rows(count):
-    """The rows of the pile, as counts per row, drawn from the bottom of the heap upward.
+def seed_kind(count):
+    """Which of the three piles this count draws: nothing, a countable row, or a heap."""
+    seeds = max(0, int(count or 0))
+    return "none" if seeds == 0 else "seeds" if seeds <= 9 else "heap"
 
-    One shape, drawn three times: here, in worker/catalog.mjs for the pages the Worker writes,
-    and in site/assets/seed-stack.js for the counts a browser refreshes. Keep the three in step.
-    Nothing is an empty husk, one to three sit in a row, four to nine fall into two rows, and ten
-    or more become a heap of six with the number doing the counting."""
+
+def seed_rows(count):
+    """How many seeds sit in each row, counted from the bottom of the pile up.
+
+    One shape, drawn four times: here, in worker/catalog.mjs for the pages the Worker writes, in
+    site/assets/seed-stack.js for the counts a browser refreshes, and in the desktop launcher.
+    Keep them in step. Nothing is one hollow husk and no rows. One to three lie in a single row.
+    Four to nine split in two, the wider row underneath. Ten and up hold at a nine-seed heap and
+    let the number do the counting, so the pile never shrinks as the count rises."""
     seeds = max(0, int(count or 0))
     if seeds == 0:
-        return [[0]]
+        return []
     if seeds <= 3:
-        return [[1] * seeds]
+        return [seeds]
     if seeds <= 9:
-        top = seeds // 2
-        return [[1] * top, [1] * (seeds - top)]
-    return [[1], [1, 1], [1, 1, 1]]
+        return [-(-seeds // 2), seeds // 2]
+    return [5, 4]
 
 
 def seed_words(count):
-    """What the pile says out loud, and in the line beside it."""
+    """What the pile says in its label and its tooltip."""
     seeds = max(0, int(count or 0))
-    return "No seeds yet" if seeds == 0 else f"Seeds \u00b7 {seeds}"
+    return "No seeds yet" if seeds == 0 else "1 seed" if seeds == 1 else f"{seeds} seeds"
 
 
 def seed_stack(count, app_id=None):
-    """A small pile of seeds that grows with the count. No button, just the tally."""
+    """A small pile of seeds that grows with the count. No button, just the tally.
+
+    The pile reads as a picture, so the words travel in the label and the tooltip rather than
+    beside every count. Only a heap shows a numeral, because nine seeds cannot be counted to 57.
+    """
     seeds = max(0, int(count or 0))
-    pile = "".join('<span class="seed-row">'
-                   + "".join(f'<i class="seed{"" if seed else " seed-husk"}"></i>' for seed in row)
-                   + "</span>" for row in seed_rows(seeds))
+    kind = seed_kind(seeds)
+    pile = ('<i class="seed seed-husk"></i>' if kind == "none" else
+            "".join('<span class="seed-row">' + '<i class="seed"></i>' * row + "</span>"
+                    for row in seed_rows(seeds)))
     words = seed_words(seeds)
+    tally = f'<span class="seed-count">{seeds}</span>' if kind == "heap" else ""
     marker = f' data-seed-stack="{e(app_id)}"' if app_id else ""
-    return (f'<span class="seed-stack" data-seeds="{seeds}" role="img" aria-label="{e(words)}"{marker}>'
-            f'<span class="seed-pile" aria-hidden="true">{pile}</span>'
-            f'<span class="seed-count">{e(words)}</span></span>')
+    return (f'<span class="seed-stack" data-seeds="{seeds}" data-kind="{kind}" role="img"'
+            f' aria-label="{e(words)}" title="{e(words)}"{marker}>'
+            f'<span class="seed-pile" aria-hidden="true">{pile}</span>{tally}</span>')
 
 
 def read_counts(url=None, timeout=6.0):
