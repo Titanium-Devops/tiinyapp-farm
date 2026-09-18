@@ -1,5 +1,41 @@
 [
   {
+    "version": "0.1.2",
+    "date": "2026-09-18",
+    "commit": "5bc5ece22db7e6f50fa10a94cb1377a82a0fedb9",
+    "notes": "### Added\n\n- **Update available, on the card.** An app you have planted that the catalog\n  has moved past says so in the top right corner of its card, over the art,\n  rather than only inside the card. Opening it still shows the same Update\n  button that was always there.\n- **New, on the card.** An app this launcher has never put on your screen\n  before carries a New badge in its top left corner until you open it. The\n  first run of a new install marks the whole farm seen without a word, so\n  nobody's first look is a wall of badges, and an app you have already met does\n  not become New again when it publishes a new version.\n- **A stack of seeds.** Every card says how many seeds the farm has given that\n  app, as a little pile beside the Planted chip that grows with the count: an\n  outline where nobody has given one yet, then the seeds themselves, and from\n  ten up a full pile with the number. It is read once per look at the farm and\n  never holds the cards back.\n- **The launcher updates itself.** It looks for a newer version when you open\n  it and every four hours it stays open. When one is waiting, a quiet strip at\n  the top of the farm says so, with one button that downloads it, installs it\n  and starts the new one. Not now puts that version away for good; the one\n  after it asks again. The menu bar carries the same line. A launcher that\n  cannot reach the farm says nothing at all rather than interrupting you about\n  it.\n- **Windows and Linux can update themselves too**, not only macOS. Every\n  platform's update carries a signature that is checked before anything is\n  installed, and an update whose signature is not ours is refused and says so\n  rather than being installed quietly.\n\n### Known limits\n\n- The seed count is read only. Giving an app a seed is still something you do\n  on tiinyapp.farm; a later version brings it into the window.\n- The count comes from the farm, so a launcher with no network draws the cards\n  with no piles on them rather than waiting.\n- **A real self-update is first proven at 0.1.3.** This is the release that\n  adds the mechanism, so the newest version the feed can offer it is itself.\n  What has been proven here is every part that can be: the banner, the refusal\n  of an update signed with the wrong key, and that each platform's signature\n  belongs to the exact file published. The download and restart on a real\n  release is witnessed at the next one.\n- Nobody on this team has yet run the Linux AppImage on a Linux desktop, so its\n  self-update is signed and verified but unexercised, the same as the AppImage\n  itself has always been.",
+    "files": {
+      "mac-arm64": {
+        "name": "Tiiny-App-Farm_0.1.2_aarch64.dmg",
+        "size": 25361674,
+        "sha256": "b34971a3573c3cb4e87768ad02aa29832fa707e5b89e5fec6c432dabece249de",
+        "signed": true,
+        "notarised": true
+      },
+      "mac-x64": {
+        "name": "Tiiny-App-Farm_0.1.2_x64.dmg",
+        "size": 26039214,
+        "sha256": "7aac41b37653be54216b293f7d8ef99d699fb26befcaba60c1922dbd373e3b85",
+        "signed": true,
+        "notarised": true
+      },
+      "windows-x64": {
+        "name": "Tiiny-App-Farm_0.1.2_x64-setup.exe",
+        "size": 27776952,
+        "sha256": "37609f3e1df91c52e852831827071d9e3815c8be1c07a04a8aa64c7c313f232e",
+        "signed": true,
+        "notarised": false
+      },
+      "linux-x64": {
+        "name": "Tiiny-App-Farm_0.1.2_amd64.AppImage",
+        "size": 100891128,
+        "sha256": "b7d8a6872451f4943fc83d9897f431345bc3e11cc129d8c07af0b6d6f8851d1a",
+        "signed": false,
+        "notarised": false
+      }
+    }
+  },
+  {
     "version": "0.1.1",
     "date": "2026-09-15",
     "commit": "f9273e1e8fe94a4f14dc54f845622b7842fb7f1e",
