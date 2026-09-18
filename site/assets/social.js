@@ -1,4 +1,5 @@
 import { refreshSession } from './session.js';
+import { fillStack } from './seed-stack.js';
 
 const node = (tag, text = '') => {
   const result = document.createElement(tag);
@@ -48,11 +49,18 @@ if (root) {
   const post = data => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
   async function refresh() {
     const social = await request('/social');
-    byId('thumb-count').textContent = String(social.thumbs);
-    byId('seed-thumb').setAttribute('aria-pressed', String(social.mine));
+    const button = byId('seed-thumb');
+    // thumbs is the same number under the name the first release used.
+    const seeds = social.seeds ?? social.thumbs;
+    const stack = button.querySelector('.seed-stack');
+    if (stack) fillStack(stack, seeds);
+    button.setAttribute('aria-pressed', String(social.mine));
+    button.title = social.mine ? 'Give it again to take your seed back.' : 'One seed per person.';
+    byId('seed-give').textContent = social.mine ? 'Seed given' : 'Give a seed';
     const comments = byId('seed-comments'); comments.replaceChildren();
     for (const comment of social.comments) comments.append(commentCard(comment, remove));
     if (!social.comments.length) comments.append(node('p', 'No comments yet.'));
+    return social;
   }
   function controls() {
     byId('seed-thumb').disabled = busy || !user;
@@ -65,7 +73,8 @@ if (root) {
     let saved = false;
     try {
       await action(); saved = true;
-      await refresh(); status(success);
+      const social = await refresh();
+      status(typeof success === 'function' ? success(social) : success);
     } catch (error) {
       status((saved ? 'Saved, but the latest counts could not load. Refresh the page. ' : '') + (error.message || 'Connection interrupted. Please try again.'));
     } finally { busy = false; controls(); }
@@ -73,7 +82,8 @@ if (root) {
   function remove(id) {
     return mutate(() => request('/comments/' + encodeURIComponent(id), { method: 'DELETE' }), 'Comment removed.');
   }
-  byId('seed-thumb').addEventListener('click', () => mutate(() => request('/thumb', post({})), 'Your thumbs up is saved.'));
+  byId('seed-thumb').addEventListener('click', () => mutate(() => request('/seed', post({})),
+    social => social.mine ? 'Your seed is planted.' : 'You took your seed back.'));
   byId('comment-form').addEventListener('submit', event => {
     event.preventDefault();
     const text = byId('comment-text').value.trim();

@@ -334,6 +334,7 @@ ARCH_ORDER = {"mac": ["arm64", "aarch64", "universal", "", "x64", "x86_64"],
               "linux": ["x64", "x86_64", "", "arm64", "aarch64"]}
 ARCH = re.compile(r"[a-z0-9_]+")
 RELEASES_URL = ORIGIN + "/launcher/releases.json"
+COUNTS_URL = ORIGIN + "/api/social/counts"
 SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
@@ -523,6 +524,68 @@ def versions_page(releases):
             '<a href="/docs/launcher/">About the launcher</a></p></section>')
 
 
+def seed_rows(count):
+    """The rows of the pile, as counts per row, drawn from the bottom of the heap upward.
+
+    One shape, drawn three times: here, in worker/catalog.mjs for the pages the Worker writes,
+    and in site/assets/seed-stack.js for the counts a browser refreshes. Keep the three in step.
+    Nothing is an empty husk, one to three sit in a row, four to nine fall into two rows, and ten
+    or more become a heap of six with the number doing the counting."""
+    seeds = max(0, int(count or 0))
+    if seeds == 0:
+        return [[0]]
+    if seeds <= 3:
+        return [[1] * seeds]
+    if seeds <= 9:
+        top = seeds // 2
+        return [[1] * top, [1] * (seeds - top)]
+    return [[1], [1, 1], [1, 1, 1]]
+
+
+def seed_words(count):
+    """What the pile says out loud, and in the line beside it."""
+    seeds = max(0, int(count or 0))
+    return "No seeds yet" if seeds == 0 else f"Seeds \u00b7 {seeds}"
+
+
+def seed_stack(count, app_id=None):
+    """A small pile of seeds that grows with the count. No button, just the tally."""
+    seeds = max(0, int(count or 0))
+    pile = "".join('<span class="seed-row">'
+                   + "".join(f'<i class="seed{"" if seed else " seed-husk"}"></i>' for seed in row)
+                   + "</span>" for row in seed_rows(seeds))
+    words = seed_words(seeds)
+    marker = f' data-seed-stack="{e(app_id)}"' if app_id else ""
+    return (f'<span class="seed-stack" data-seeds="{seeds}" role="img" aria-label="{e(words)}"{marker}>'
+            f'<span class="seed-pile" aria-hidden="true">{pile}</span>'
+            f'<span class="seed-count">{e(words)}</span></span>')
+
+
+def read_counts(url=None, timeout=6.0):
+    """Every app's seed count from the live farm, or nothing, which reads as zero.
+
+    A fresh app has no seeds and a farm that cannot be reached looks the same to a visitor, so a
+    build never stops here. The page a visitor loads refreshes these numbers a moment later from
+    the same endpoint, which is what makes a stale build harmless."""
+    if not url:
+        return {}
+    try:
+        request = Request(url, headers={"User-Agent": "tiinyapp-farm-site/1.0"})
+        with urlopen(request, timeout=timeout) as answer:
+            data = json.loads(answer.read(2_000_000).decode("utf-8"))
+        apps = data.get("apps") if isinstance(data, dict) else None
+        if not isinstance(apps, dict):
+            raise ValueError("no apps object in the answer")
+        counts = {str(key): int(value.get("seeds", 0)) for key, value in apps.items()
+                  if isinstance(value, dict)}
+        print(f"seed counts: read {len(counts)} apps from {url}")
+        return counts
+    except Exception as problem:
+        print(f"seed counts: {url} could not be read ({type(problem).__name__}: {problem});"
+              " building every pile at zero, the page refreshes them live", file=sys.stderr)
+        return {}
+
+
 def seed_icon(app):
     url = app.get("media", {}).get("icon")
     return f'<img class="seed-icon" src="{e(url)}" width="72" height="72" alt="" loading="lazy">' if url else ''
@@ -560,40 +623,42 @@ def plot(app, today, makers=()):
 <div class="perms">{permissions}</div><div class="plant">{planting}</div></article>'''
 
 
-def editorial_item(app):
+def editorial_item(app, counts=None):
     media = app.get("media", {})
     art = (f'<div class="art" style="background-image:url(&quot;{e(media["header"])}&quot;)"></div>'
            if media.get("header") else '<div class="art"></div>')
     chips = ''.join(f'<span class="chip">{e(permission_label(value))}</span>' for value in app["permissions"])
     chips += f'<span class="chip">v{e(app["version"])}</span>'
+    pile = seed_stack((counts or {}).get(app["id"], 0), app["id"])
     return f'''<article class="item">{art}<div class="text"><span class="cat-tag">{e(category_tag(app))}</span>
 <h3 class="name"><a href="/apps/{e(app['id'])}/">{e(app['name'])}</a></h3><p class="pitch">{e(app['pitch'])}</p>
-<p class="desc">{e(first_two_sentences(app['description']))}</p><div class="chips">{chips}</div>
+<p class="desc">{e(first_two_sentences(app['description']))}</p><div class="chips">{chips}{pile}</div>
 <div class="foot"><a class="btn hay" href="/apps/{e(app['id'])}/">Install</a>{copy_command('farm install ' + app['id'])}</div></div></article>'''
 
 
-def ledger_row(app):
+def ledger_row(app, counts=None):
     media = app.get("media", {})
     icon_image = (f'<img src="{e(media["icon"])}" width="56" height="56" alt="">'
                   if media.get("icon") else '<span class="row-icon" aria-hidden="true"></span>')
     chips = f'<span class="chip">{e(needs(app))}</span>'
     chips += ''.join(f'<span class="chip">{e(permission_label(value))}</span>' for value in app["permissions"])
+    pile = seed_stack((counts or {}).get(app["id"], 0), app["id"])
     return f'''<article class="row" data-catalog-search="{e(search_text(app))}">{icon_image}<div><span class="cat-tag">{e(category_tag(app))}</span>
-<h3 class="name"><a href="/apps/{e(app['id'])}/">{e(app['name'])}</a></h3><p class="pitch">{e(app['pitch'])}</p><div class="chips">{chips}</div></div>
+<h3 class="name"><a href="/apps/{e(app['id'])}/">{e(app['name'])}</a></h3><p class="pitch">{e(app['pitch'])}</p><div class="chips">{chips}{pile}</div></div>
 <span class="v">v{e(app['version'])}</span><a class="btn hay" href="/apps/{e(app['id'])}/">Install</a></article>'''
 
 
-def home_page(apps, launcher=None):
+def home_page(apps, launcher=None, counts=None):
     launcher = launcher or LAUNCHER_OFF
     featured = [app for app in apps if app.get("featured")][:6]
     second = ('<a class="btn ghost" href="/install/">Get the launcher</a>' if launcher['enabled']
               else '<a class="btn ghost" href="/install/">Install an app</a>')
     hero = '''<section class="hero"><img src="/assets/hero.jpg" width="1600" height="1066" alt="A fantasy farm at dusk with glowing apps in rows and Titan tending the field."><div class="copy"><h1>Little apps, <em>grown for your Tiiny.</em></h1><p class="lede">Community-made apps that run beside your Pocket Lab on your own computer. Choose an app to see its requirements and install commands.</p><div class="row"><a class="btn hay" href="#all-apps">Browse apps</a>''' + second + '''</div></div></section>'''
     featured_section = f'''<section class="feat wrap"><div class="sechead"><h2>Featured</h2><p>Picked by the maintainers</p></div>
-<div class="v3"><div class="list">{''.join(editorial_item(app) for app in featured)}</div></div></section>'''
+<div class="v3"><div class="list">{''.join(editorial_item(app, counts) for app in featured)}</div></div></section>'''
     ledger = f'''<section class="ledger wrap" id="all-apps"><div class="sechead"><h2>All apps</h2><p><a href="/catalog/">Browse the catalog with filters</a></p></div>
 <div class="toolbar"><label class="search">{icon('search')}<span class="visually-hidden">Search apps</span><input id="q-home" type="search" placeholder="Search apps, makers, tags" autocomplete="off"></label><span class="count" id="count-home">{len(apps)} of {len(apps)}</span></div>
-<div class="v2"><div class="rows" id="rows-home">{''.join(ledger_row(app) for app in apps)}</div><p class="empty" id="empty-home" hidden>No app matches. Try fewer words.</p></div></section>'''
+<div class="v2"><div class="rows" id="rows-home">{''.join(ledger_row(app, counts) for app in apps)}</div><p class="empty" id="empty-home" hidden>No app matches. Try fewer words.</p></div></section>'''
     invitation = '''<section class="seeds wrap"><div><h2>Submit an app</h2><p>Submit an app for automated checks and maintainer review.</p></div><a class="btn hay" href="/submit/">Share your app</a></section>'''
     return hero + featured_section + ledger + invitation
 
@@ -611,11 +676,12 @@ def catalog_page(apps):
 
 def social_strip(app):
     return f'''<section class="seed-social" data-seed-social="{e(app['id'])}" aria-labelledby="social-heading"><h2 id="social-heading">Comments</h2>
-<p id="social-status" role="status" aria-live="polite">Loading comments and thumbs up…</p>
-<p id="social-signin"><a href="/submit/">Sign in to give this app a thumbs up or leave a comment.</a></p>
+<p class="sub">Tell the maker how it is growing.</p>
+<p id="social-status" role="status" aria-live="polite">Loading seeds and comments…</p>
+<p id="social-signin"><a href="/submit/">Sign in to give this app a seed or leave a comment.</a></p>
 <div id="seed-comments" aria-label="App comments"></div>
 <form id="comment-form" hidden><label for="comment-text">Comment</label><textarea id="comment-text" name="text" rows="4" maxlength="1000" required aria-describedby="comment-help"></textarea><p id="comment-help" class="fine">Up to 1,000 characters. Five comments per hour.</p><button id="comment-submit" class="btn hay" type="submit">Post comment</button></form>
-<noscript><p>JavaScript is needed to load thumbs and comments.</p></noscript></section>'''
+<noscript><p>JavaScript is needed to load seeds and comments.</p></noscript></section>'''
 
 
 def art_panel(app):
@@ -639,8 +705,9 @@ def art_panel(app):
             'images change through the same pull request as everything else.</p></section>')
 
 
-def app_page(app, today, makers=(), launcher=None):
+def app_page(app, today, makers=(), launcher=None, counts=None):
     launcher = launcher or LAUNCHER_OFF
+    counts = counts or {}
     band, visual_media = seed_media(app)
     links = app.get('links', {})
     repo = links.get('repo') or app.get('repo')
@@ -694,7 +761,7 @@ def app_page(app, today, makers=(), launcher=None):
 <div class="card"><h3>Needs</h3><dl><dt>Python</dt><dd>{python}</dd><dt>Port</dt><dd>{e(', '.join(map(str, req['ports'])) or 'None')}</dd>{movable}<dt>Models</dt><dd>{e(', '.join(req['device']['models']) or 'None')}</dd><dt>NPU</dt><dd>{e(req['device']['npuUnits'])} units</dd><dt>Uses</dt><dd><div class="chips">{permissions}</div></dd></dl></div>
 <div class="card"><h3>Release</h3>{release_details}</div>
 <div class="card"><h3>Maker</h3><div class="maker">{avatar}<div><b>{link(maker_url, app['author']['name'])}</b><br>{owner}</div></div></div>
-<div class="rail-actions"><button id="seed-thumb" class="btn ghost" type="button" aria-pressed="false" disabled>Thumbs up · <span id="thumb-count">0</span></button><button type="button" class="btn ghost" data-share data-share-title="{e(app['name'])}" data-share-text="{e(app['pitch'])}">Share</button></div><span data-share-status role="status" aria-live="polite"></span>
+<div class="rail-actions"><button id="seed-thumb" class="btn ghost give-seed" type="button" aria-pressed="false" disabled><span id="seed-give">Give a seed</span>{seed_stack(counts.get(app['id'], 0), app['id'])}</button><button type="button" class="btn ghost" data-share data-share-title="{e(app['name'])}" data-share-text="{e(app['pitch'])}">Share</button></div><span data-share-status role="status" aria-live="polite"></span>
 </aside></div></section>'''
 
 
@@ -890,8 +957,12 @@ def doc_page(entry, entries, launcher=None):
 <p class="docs-foot"><a href="/docs/">All documentation</a> <a href="/install/">Install an app</a> <a href="/submit/">Submit an app</a></p></section></div>'''
 
 
-def build(source=ROOT, output=None, today=None, releases_url=None, allow_stale=False):
-    """Build the site. releases_url fetches the launcher history live; None reads the copy here."""
+def build(source=ROOT, output=None, today=None, releases_url=None, allow_stale=False,
+          counts_url=None):
+    """Build the site. releases_url fetches the launcher history live; None reads the copy here.
+
+    counts_url reads every app's seed count from the live farm; None builds every pile at zero,
+    which is what every test and every offline build does."""
     source = Path(source)
     output = Path(output) if output else source / "site" / "dist"
     today = today or datetime.now(timezone.utc).date()
@@ -899,6 +970,7 @@ def build(source=ROOT, output=None, today=None, releases_url=None, allow_stale=F
     # The one description of the HTTP surface, served at /docs/openapi.json.
     openapi = runpy.run_path(str(ROOT / 'worker/openapi.py'))['spec']
     launcher = read_launcher(source)
+    counts = read_counts(counts_url)
     snapshot = source / 'site/makers.json'
     makers = json.loads(snapshot.read_text()) if snapshot.exists() else []
     for maker in makers:
@@ -929,7 +1001,7 @@ def build(source=ROOT, output=None, today=None, releases_url=None, allow_stale=F
         # /llms.txt is the plain-text index an assistant fetches first. The guide it points at is
         # a documentation page like any other, at /docs/agents/.
         guide = (source / 'docs/agents.txt').read_text(encoding='utf-8')
-        pages = {"/": ("App catalog", home_page(apps, launcher)), "/catalog/": ("Catalog", catalog_page(apps)),
+        pages = {"/": ("App catalog", home_page(apps, launcher, counts)), "/catalog/": ("Catalog", catalog_page(apps)),
                  "/install/": ("Install an app", steps(launcher)), "/submit/": ("Submit an app", seeds()),
                  "/submit/done/": ("App submitted", seeds()), "/account/": ("Your apps", my_farm())}
         if launcher['enabled']:
@@ -943,7 +1015,7 @@ def build(source=ROOT, output=None, today=None, releases_url=None, allow_stale=F
             pages[entry['url']] = (entry['title'], doc_page(entry, entries, launcher))
         listing = '<section class="sect"><h1>App manifests</h1><p>The installer catalog at https://tiinyapp.farm/manifests/.</p><ul>'
         for path, app in manifests:
-            pages[f"/apps/{app['id']}/"] = (app["name"], app_page(app, today, makers, launcher))
+            pages[f"/apps/{app['id']}/"] = (app["name"], app_page(app, today, makers, launcher, counts))
             owner = next((maker for maker in makers if maker.get('tiinyverse') and maker['tiinyverse'] == app['author'].get('tiinyverse')), {})
             render_card(source, dest / 'apps' / app['id'] / 'card.png', name=app['name'],
                         pitch=app['pitch'], maker=app['author']['name'], media=app.get('media'),
@@ -981,7 +1053,7 @@ def build(source=ROOT, output=None, today=None, releases_url=None, allow_stale=F
         shutil.copytree(source / 'brand', dest / 'brand')
         shutil.copytree(source / 'site/fonts', dest / 'fonts')
         write('robots.txt', f'User-agent: *\nAllow: /\nSitemap: {ORIGIN}/sitemap.xml\n')
-        assets = ['hero.jpg', 'site.css', 'catalog.js', 'seeds.js', 'session.js', 'farm.js', 'seed-media.js', 'social.js', 'share.js', 'art.js', 'release.js', 'titanium-icon.png', 'titanium-header.webp']
+        assets = ['hero.jpg', 'site.css', 'catalog.js', 'seeds.js', 'session.js', 'farm.js', 'seed-media.js', 'seed-stack.js', 'social.js', 'share.js', 'art.js', 'release.js', 'titanium-icon.png', 'titanium-header.webp']
         if launcher['enabled']:
             assets.append('launcher.js')
         for folder, files in {'assets': assets, 'docs': ['manifest.schema.json', 'SUBMIT.md']}.items():
@@ -1001,7 +1073,8 @@ def main():
     parser.add_argument('--output', type=Path, help='Destination (default: site/dist)')
     parser.add_argument('--today', type=date.fromisoformat, help='UTC date override for reproducible badges')
     parser.add_argument('--no-fetch', action='store_true',
-                        help='Read the launcher history from site/launcher-releases.json only')
+                        help='Read the launcher history from site/launcher-releases.json only '
+                             'and build every seed pile at zero')
     parser.add_argument('--allow-stale-history', action='store_true',
                         help='Build from the checked-in launcher history when the live one '
                              'cannot be read, instead of stopping')
@@ -1010,7 +1083,8 @@ def main():
         print('launcher history: reading site/launcher-releases.json, no live fetch asked')
     count = build(output=args.output, today=args.today,
                   releases_url=None if args.no_fetch else RELEASES_URL,
-                  allow_stale=args.allow_stale_history)
+                  allow_stale=args.allow_stale_history,
+                  counts_url=None if args.no_fetch else COUNTS_URL)
     print(f'Built {count} app pages in {args.output or ROOT / "site/dist"}')
 
 

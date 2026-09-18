@@ -1,3 +1,5 @@
+import { seedStack, refreshStacks } from './seed-stack.js';
+
 const byId = id => document.getElementById(id);
 
 export function textElement(tag, className, value) {
@@ -92,6 +94,8 @@ function catalogTile(app, config) {
   const chips = document.createElement('div');
   chips.className = 'chips';
   for (const value of app.permissions) chips.append(chip(permission(value)));
+  // The pile starts at nothing and the one counts read fills it in a moment later.
+  chips.append(seedStack(0, app.id));
   body.append(chips);
   const foot = document.createElement('div');
   foot.className = 'foot';
@@ -169,6 +173,7 @@ async function setupCatalog() {
     const list = apps.filter(app => (!selected || app.categories.includes(selected)) && (!query ||
       [app.name, app.pitch, app.author.name, ...app.tags, ...app.categories].join(' ').toLowerCase().includes(query)));
     grid.replaceChildren(...list.map(app => catalogTile(app, config)));
+    refreshStacks(grid).catch(() => {});
     byId('count-catalog').textContent = `${list.length} of ${apps.length}`;
     byId('empty-catalog').hidden = list.length !== 0;
     for (const button of categoryBar.querySelectorAll('.cat')) button.setAttribute('aria-pressed', String(button.dataset.cat === selected));

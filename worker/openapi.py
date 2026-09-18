@@ -114,9 +114,22 @@ SCHEMAS = {
                     "text": {"type": "string"}, "at": {"type": "string", "format": "date-time"},
                     "canDelete": {"type": "boolean"}},
                    ["id", "author", "text", "at", "canDelete"]),
-    "Social": obj({"thumbs": {"type": "integer"}, "mine": {"type": "boolean"},
+    "Social": obj({"seeds": {"type": "integer",
+                             "description": "How many people have given this app a seed."},
+                   "thumbs": {"type": "integer",
+                              "description": "The same number under the name the first"
+                                             " release used. Read seeds."},
+                   "mine": {"type": "boolean"},
                    "comments": {"type": "array", "items": {"$ref": "#/components/schemas/Comment"}}},
-                  ["thumbs", "mine", "comments"]),
+                  ["seeds", "thumbs", "mine", "comments"]),
+    "SocialCounts": obj({
+        "apps": {"type": "object", "description": "Keyed by app id.",
+                 "additionalProperties": obj({"seeds": {"type": "integer"},
+                                              "comments": {"type": "integer"}},
+                                             ["seeds", "comments"])},
+        "makers": {"type": "object", "description": "Keyed by maker handle.",
+                   "additionalProperties": obj({"seeds": {"type": "integer"}}, ["seeds"])}},
+        ["apps", "makers"]),
     "Seed": obj({
         "id": {"type": "string", "pattern": APP_ID}, "name": {"type": "string"},
         "version": {"type": "string"}, "icon": {"type": "string"},
@@ -128,7 +141,9 @@ SCHEMAS = {
         "checks": {"type": "array", "items": obj({"name": {"type": "string"},
                                                   "status": {"type": "string"}})},
         "reviews": {"type": "array", "items": {"type": "string"}},
-        "thumbs": {"type": "integer"}, "comments": {"type": "integer"},
+        "seeds": {"type": "integer"},
+        "thumbs": {"type": "integer", "description": "The same number as seeds."},
+        "comments": {"type": "integer"},
         "url": {"type": "string"}, "canUpdate": {"type": "boolean"},
         "release": {"oneOf": [{"$ref": "#/components/schemas/ReleaseCheck"}, {"type": "null"}]},
         "unavailable": {"type": "boolean",
@@ -266,22 +281,42 @@ def paths():
                          "example": "0" * 32}],
             answers={"200": answer("Revoked.", obj({"revoked": {"const": True}}, ["revoked"]))},
             errors=[(401, "Sign in first."), (404, "No such token on this account.")])},
+        "/api/social/counts": {"x-farm-source": "social.mjs", "get": op(
+            "Every app's seeds and comments in one answer",
+            "One read for a whole catalog page, so a grid of apps does not ask once per tile."
+            " Reading needs no credential and the answer is cached for 60 seconds. Makers are"
+            " keyed by handle and carry the seeds their apps have been given, added up.",
+            tags=["Seeds and comments"],
+            answers={"200": answer("The seed and comment counts.",
+                                   {"$ref": "#/components/schemas/SocialCounts"})},
+            errors=[(405, "That action does not use this method."),
+                    (503, "The catalog is temporarily unavailable.")])},
         "/api/seeds/{id}/social": {"x-farm-source": "social.mjs", "get": op(
-            "Read an app's thumbs and comments", "Reading needs no credential. mine is true when"
-            " the signed-in visitor has a thumb on this app.", tags=["Comments and thumbs up"],
+            "Read an app's seeds and comments", "Reading needs no credential. mine is true when"
+            " the signed-in visitor has given this app a seed. thumbs carries the same number as"
+            " seeds, under the name the first release used.", tags=["Seeds and comments"],
             parameters=[APP],
             answers={"200": answer("The conversation.", {"$ref": "#/components/schemas/Social"})},
             errors=[(404, "That app is not in the catalog."),
                     (405, "That action does not use this method.")])},
+        "/api/seeds/{id}/seed": {"x-farm-source": "social.mjs", "post": op(
+            "Give this app a seed", "One seed per person per app. Giving it again takes it back."
+            " The same route as /api/seeds/{id}/thumb, under the name a person reads.",
+            tags=["Seeds and comments"], auth=["session", "farmToken"], parameters=[APP],
+            answers={"200": answer("The conversation, with your seed given or taken back.",
+                                   {"$ref": "#/components/schemas/Social"})},
+            errors=[(401, "Sign in first."), (404, "That app is not in the catalog.")])},
         "/api/seeds/{id}/thumb": {"x-farm-source": "social.mjs", "post": op(
-            "Toggle your thumbs up", "Pressing it again takes it back.",
-            tags=["Comments and thumbs up"], auth=["session"], parameters=[APP],
-            answers={"200": answer("The conversation, with your thumb toggled.",
+            "Give this app a seed, under the first release's name",
+            "The same route as /api/seeds/{id}/seed. Giving it again takes it back.",
+            tags=["Seeds and comments"], auth=["session", "farmToken"], parameters=[APP],
+            answers={"200": answer("The conversation, with your seed given or taken back.",
                                    {"$ref": "#/components/schemas/Social"})},
             errors=[(401, "Sign in first."), (404, "That app is not in the catalog.")])},
         "/api/seeds/{id}/comments": {"x-farm-source": "social.mjs", "post": op(
             "Leave a comment", "Needs a verified Tiiny profile. Deleting comments does not give"
-            " the hourly limit back.", tags=["Comments and thumbs up"], auth=["session"],
+            " the hourly limit back.", tags=["Seeds and comments"],
+            auth=["session", "farmToken"],
             parameters=[APP], limit="5 per hour per account",
             body=json_body(obj({"text": {"type": "string", "minLength": 1, "maxLength": 1000}},
                                ["text"])),
@@ -291,7 +326,7 @@ def paths():
                     (404, "That app is not in the catalog."),
                     (429, "Five comments an hour is the limit.")])},
         "/api/seeds/{id}/comments/{commentId}": {"x-farm-source": "social.mjs", "delete": op(
-            "Remove a comment", "Its author or a farm admin.", tags=["Comments and thumbs up"],
+            "Remove a comment", "Its author or a farm admin.", tags=["Seeds and comments"],
             auth=["session"],
             parameters=[APP, {"name": "commentId", "in": "path", "required": True,
                               "description": "The id of the comment, from the conversation.",
@@ -612,7 +647,7 @@ def spec():
                          "url": ORIGIN + "/docs/agents/"},
         "tags": [{"name": name} for name in
                  ["Sign in", "Prove you own a Tiiny", "Your account", "Images",
-                  "Art in the farm's hand", "Apps", "Releases", "Comments and thumbs up",
+                  "Art in the farm's hand", "Apps", "Releases", "Seeds and comments",
                   "The catalog", "Files", "Pages the Worker serves"]],
         "paths": paths(),
         "components": {
@@ -621,10 +656,12 @@ def spec():
                     "type": "http", "scheme": "bearer",
                     "description":
                         "A token you create on " + ORIGIN + "/account/ and copy once. It is farm_"
-                        " followed by 40 hexadecimal characters. Five routes accept one: POST"
+                        " followed by 40 hexadecimal characters. Eight routes accept one: POST"
                         " /api/seeds, PUT /api/seeds/<id>, POST /api/media, GET /api/seeds/mine,"
-                        " and GET and POST /api/seeds/<id>/art. Everywhere else it is ignored and"
-                        " the cookie decides, so a token cannot mint another token.",
+                        " GET and POST /api/seeds/<id>/art, POST /api/seeds/<id>/seed and its"
+                        " older name /thumb, and POST /api/seeds/<id>/comments. Everywhere else"
+                        " it is ignored and the cookie decides, so a token cannot mint another"
+                        " token.",
                 },
                 "session": {
                     "type": "apiKey", "in": "cookie", "name": "__Host-farm",

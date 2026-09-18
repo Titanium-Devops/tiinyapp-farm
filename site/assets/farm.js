@@ -102,7 +102,7 @@ async function refreshSeeds() {
     name.className = 'n'; meta.className = 'm'; meta.append(element('span', `v${seed.version}`));
     const state = appStatus(seed), stateNode = element('b', state); stateNode.className = state.startsWith('Checks failed') ? 'bad' : state === 'Checks running' ? 'wait' : '';
     meta.append(stateNode);
-    if (['merged', 'published', 'sprouting'].includes(seed.state)) meta.append(element('span', `${seed.thumbs || 0} thumbs · ${seed.comments || 0} comments`));
+    if (['merged', 'published', 'sprouting'].includes(seed.state)) meta.append(element('span', `${seed.seeds ?? seed.thumbs ?? 0} seeds · ${seed.comments || 0} comments`));
     if (seed.release?.message) meta.append(element('span', releaseLine(seed.release)));
     copy.append(name, meta); const actions = document.createElement('div'); actions.className = 'act';
     const addAction = (label, href) => { const anchor = element('a', label); anchor.className = 'btn ghost'; anchor.href = href; actions.append(anchor); };
