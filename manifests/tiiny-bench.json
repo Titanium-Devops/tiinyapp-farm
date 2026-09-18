@@ -3,7 +3,7 @@
   "name": "TiinyBench",
   "pitch": "Measure what your Tiiny does under real work.",
   "description": "Times prefill against prompt length, throughput over a long unbroken generation, what happens when several callers arrive at once, and what a reasoning model charges in wall time for the tokens nobody reads. Image, speech and embedding models get their own measurements: seconds per 512 plate, real-time factor, embeddings per second. Results are plain JSON and the report is one self-contained HTML file with no CDN, no webfont and no JavaScript needed to read it. By default it loads and unloads nothing and benchmarks whatever is already running, so it is safe on a box doing real work. Python standard library only.",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "author": {
     "name": "Jason Brashear",
     "url": "https://github.com/webdevtodayjason",
@@ -14,9 +14,9 @@
   "repo": "https://github.com/webdevtodayjason/tiiny-bench",
   "screenshots": [],
   "release": {
-    "url": "https://github.com/webdevtodayjason/tiiny-bench/archive/refs/tags/v0.1.5.tar.gz",
-    "sha256": "0bc7c1645a6d7c98c0968ee1c53ea681b4dd6685353ebab0bfc6ce7ffa276c59",
-    "size": 2417906
+    "url": "https://github.com/webdevtodayjason/tiiny-bench/archive/refs/tags/v0.1.6.tar.gz",
+    "sha256": "d99d29510ba6b9f5dc775405a0d1f57b3bbddc8e8e9547d9e9826539d776f769",
+    "size": 2417894
   },
   "entry": {
     "command": "python3 tiiny-bench --serve"
