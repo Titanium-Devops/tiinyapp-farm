@@ -57,5 +57,9 @@
   "links": {
     "repo": "https://github.com/webdevtodayjason/archiver",
     "homepage": "https://lastlight.cc"
+  },
+  "media": {
+    "icon": "/assets/art/last-light-icon.png",
+    "header": "/assets/art/last-light-header.webp"
   }
 }
