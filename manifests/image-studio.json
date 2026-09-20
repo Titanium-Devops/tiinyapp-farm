@@ -1,0 +1,65 @@
+{
+  "id": "image-studio",
+  "name": "Image Studio",
+  "pitch": "Upload, describe, and re-render on your own box.",
+  "description": "Chain read, think and render steps across the models you actually have installed. Upload a png and have a vision model describe it, re-render it with a change, refine a plate over several passes, or restyle it with another model from the shelf. The Tiiny has no image-to-image path, so a chain that starts from a photo paints a new plate rather than editing the old one, and the app says so next to the result instead of pretending otherwise. jpeg and webp are refused with a sentence, because png is what this decodes without a platform converter. One inference at a time, since that is what the hardware does. The rail shows NPU units used and free and greys out a model that will not fit. The gallery lives outside the install directory, so a farm update does not throw your plates away.",
+  "author": {
+    "name": "Jason Brashear",
+    "url": "https://github.com/webdevtodayjason",
+    "tiinyverse": "https://www.tiinyverse.com/users/39628b1e-e94e-4bd8-800e-5437d5336e1f"
+  },
+  "license": "MIT",
+  "version": "0.3.0",
+  "homepage": "https://github.com/webdevtodayjason/image-studio",
+  "repo": "https://github.com/webdevtodayjason/image-studio",
+  "screenshots": [],
+  "release": {
+    "url": "https://github.com/webdevtodayjason/image-studio/archive/refs/tags/v0.3.0.tar.gz",
+    "sha256": "c68469607084117f64e3475fd953a4163119c04158865093640020262b8addbb",
+    "size": 637536
+  },
+  "entry": {
+    "command": "python3 studio.py --serve"
+  },
+  "port": {
+    "argv": "--serve"
+  },
+  "requires": {
+    "python": "3.9",
+    "ports": [
+      8430
+    ],
+    "device": {
+      "models": [
+        "image",
+        "vision"
+      ],
+      "npuUnits": 87,
+      "prefers": [
+        "chat"
+      ]
+    }
+  },
+  "permissions": [
+    "files",
+    "network",
+    "device"
+  ],
+  "tags": [
+    "creative",
+    "images",
+    "workflow"
+  ],
+  "verified": true,
+  "featured": false,
+  "addedAt": "2026-09-19",
+  "updatedAt": "2026-09-20",
+  "media": {
+    "icon": "/assets/art/image-studio-icon.png",
+    "header": "/assets/art/image-studio-header.webp"
+  },
+  "links": {
+    "repo": "https://github.com/webdevtodayjason/image-studio",
+    "homepage": "https://github.com/webdevtodayjason/image-studio"
+  }
+}
