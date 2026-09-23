@@ -24,7 +24,7 @@ jobs:
   # never seen, such as a capability token no app had used before. Pushes to
   # main always run the full matrix.
   scope:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       matrix: ${{ steps.pick.outputs.matrix }}
       reason: ${{ steps.pick.outputs.reason }}
@@ -35,8 +35,8 @@ jobs:
       - id: pick
         shell: bash
         run: |
-          FULL='{"os":["ubuntu-latest","macos-latest","windows-latest"],"python":["3.9","3.12"]}'
-          ONE='{"os":["ubuntu-latest"],"python":["3.12"]}'
+          FULL='{"os":["blacksmith-2vcpu-ubuntu-2404","blacksmith-6vcpu-macos-latest","blacksmith-4vcpu-windows-2025"],"python":["3.9","3.12"]}'
+          ONE='{"os":["blacksmith-2vcpu-ubuntu-2404"],"python":["3.12"]}'
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "matrix=$FULL" >> "$GITHUB_OUTPUT"
             echo "reason=not a pull request" >> "$GITHUB_OUTPUT"
@@ -70,7 +70,7 @@ jobs:
       - name: Test the installer with a fake device
         run: python -m unittest tests.test_farm
   site:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
