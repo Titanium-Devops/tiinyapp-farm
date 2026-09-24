@@ -9,14 +9,14 @@
     "tiinyverse": "https://www.tiinyverse.com/users/39628b1e-e94e-4bd8-800e-5437d5336e1f"
   },
   "license": "MIT",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "homepage": "https://github.com/webdevtodayjason/image-studio",
   "repo": "https://github.com/webdevtodayjason/image-studio",
   "screenshots": [],
   "release": {
-    "url": "https://github.com/webdevtodayjason/image-studio/archive/refs/tags/v0.3.0.tar.gz",
-    "sha256": "c68469607084117f64e3475fd953a4163119c04158865093640020262b8addbb",
-    "size": 637536
+    "url": "https://github.com/webdevtodayjason/image-studio/archive/refs/tags/v0.3.1.tar.gz",
+    "sha256": "cdfd67636c1545d6d879f113149431bad8c35c759654478d9b0f71b40fc82e5e",
+    "size": 639796
   },
   "entry": {
     "command": "python3 studio.py --serve"
@@ -53,7 +53,7 @@
   "verified": true,
   "featured": false,
   "addedAt": "2026-09-19",
-  "updatedAt": "2026-09-20",
+  "updatedAt": "2026-09-24",
   "media": {
     "icon": "/assets/art/image-studio-icon.png",
     "header": "/assets/art/image-studio-header.webp"
