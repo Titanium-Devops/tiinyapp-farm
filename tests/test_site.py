@@ -37,6 +37,15 @@ SEED_CURRENCY = re.compile(r'No seeds yet|Seeds \u00b7 \d+|Give a seed|Seed give
 SEED_WORDS = re.compile(r'(?i)farmhand|\bsprouting\b|\bseeds?\b|My farm')
 
 
+RELEASE_NOTES = re.compile(r'<div class="rel-notes">.*?</div><!--/rel-notes-->', re.S)
+
+
+def site_words(html):
+    """Visible text the site itself writes: the launcher's own release notes are its changelog,
+    quoted on /launcher/versions/, and may speak of seeds the currency in its own words."""
+    return ' '.join(Document(RELEASE_NOTES.sub(' ', html)).text)
+
+
 def app_words(text):
     """Visible text with the seed currency removed, ready for the no-seeds-mean-apps rule."""
     return SEED_CURRENCY.sub(' ', text)
@@ -622,7 +631,7 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
                     self.assertNotIn('tiny' + 'app', text.lower())
                     if relative not in ('docs/agents/index.html', 'docs/api/index.html'):
                         # Those two name every route literally, /api/seeds included.
-                        self.assertNotRegex(app_words(' '.join(doc.text)), SEED_WORDS)
+                        self.assertNotRegex(app_words(site_words(text)), SEED_WORDS)
                     source_url = 'https://tiinyapp.farm/' + path.relative_to(dist).as_posix()
                     for reference in doc.references:
                         parsed = urlsplit(urljoin(source_url, reference))
@@ -1257,8 +1266,7 @@ assert.equal(anonymous.children[0].children[0].tag, 'span');
         for path in self.output.rglob('*.html'):
             if path.relative_to(self.output).as_posix() in ('docs/agents/index.html', 'docs/api/index.html'):
                 continue  # The public API route is /api/seeds; both pages name every route literally.
-            visible = ' '.join(Document(path.read_text()).text)
-            self.assertNotRegex(app_words(visible), SEED_WORDS)
+            self.assertNotRegex(app_words(site_words(path.read_text())), SEED_WORDS)
 
     def test_needs_card_says_whether_the_port_moves(self):
         movable = next(app for app in self.apps if app['id'] == 'tiiny-bench')
