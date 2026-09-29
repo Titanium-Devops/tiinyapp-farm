@@ -25,7 +25,12 @@ const APP_REPO = 'maker/fake-app';
 const ARCHIVES = new Map(['v0.1.0', 'v0.1.1', 'v0.2.0'].map(tag => [tag, gzipSync(Buffer.from('fake-app ' + tag + ' source'))]));
 const archiveURL = tag => `https://github.com/${APP_REPO}/archive/refs/tags/${tag}.tar.gz`;
 const assetURL = (tag, name) => `https://github.com/${APP_REPO}/releases/download/${tag}/${name}`;
-const githubRelease = (tag, extra = {}) => ({ tag_name: tag, draft: false, prerelease: false, assets: [], body: 'sha256: ' + '0'.repeat(64), ...extra });
+const githubRelease = (tag, extra = {}) => {
+  const version = tag.startsWith('v') ? tag.slice(1) : tag;
+  const name = `fake-app-${version}.tar.gz`;
+  return { tag_name: tag, draft: false, prerelease: false,
+    assets: [{ name, browser_download_url: assetURL(tag, name) }], body: 'sha256: ' + '0'.repeat(64), ...extra };
+};
 const KEYS = generateKeyPairSync('rsa', { modulusLength: 2048, publicKeyEncoding: { type: 'spki', format: 'pem' }, privateKeyEncoding: { type: 'pkcs1', format: 'pem' } });
 function listedApp(changes = {}) {
   return { id: 'fake-app', name: 'Fake App', pitch: 'A stand-in app.', description: 'Two releases on GitHub.',
@@ -1400,12 +1405,22 @@ test('the archive shape of the listing is kept: an asset stays an asset, a sourc
   const release = githubRelease('v0.1.1', { assets: [{ name: 'fake-app-0.1.1.tar.gz', browser_download_url: assetURL('v0.1.1', 'fake-app-0.1.1.tar.gz') }] });
   assert.equal(pickURL(packaged, APP_REPO, release, '0.1.1'), assetURL('v0.1.1', 'fake-app-0.1.1.tar.gz'));
   assert.equal(pickURL(listedApp(), APP_REPO, githubRelease('v0.1.1'), '0.1.1'), archiveURL('v0.1.1'));
-  assert.equal(pickRelease([githubRelease('v0.1.0'), githubRelease('v0.1.1')]).version, '0.1.1');
-  assert.equal(pickRelease([githubRelease('v0.2.0', { draft: true })]), null);
+  assert.equal(pickRelease([githubRelease('v0.1.0'), githubRelease('v0.1.1')], 'fake-app').version, '0.1.1');
+  assert.equal(pickRelease([githubRelease('v0.2.0', { draft: true })], 'fake-app'), null);
   assert.throws(() => pickURL(packaged, APP_REPO, githubRelease('v0.1.1', { assets: [
     { name: 'one.tar.gz', browser_download_url: assetURL('v0.1.1', 'one.tar.gz') },
     { name: 'two.tar.gz', browser_download_url: assetURL('v0.1.1', 'two.tar.gz') }] }), '0.1.1'),
   /no tar.gz asset named fake-app-0.1.1.tar.gz/);
+});
+
+test('apps sharing a repository each pick their own release and ignore shelf releases', () => {
+  const releases = [
+    githubRelease('v0.1.3', { assets: [{ name: 'tiiny-brain-0.1.3.tar.gz', browser_download_url: assetURL('v0.1.3', 'tiiny-brain-0.1.3.tar.gz') }] }),
+    githubRelease('last-light-v0.1.2', { assets: [{ name: 'last-light-0.1.2.tar.gz', browser_download_url: assetURL('last-light-v0.1.2', 'last-light-0.1.2.tar.gz') }] }),
+    githubRelease('shelf-v0.1.0', { assets: [{ name: 'shelf-0.1.0.tar.gz', browser_download_url: assetURL('shelf-v0.1.0', 'shelf-0.1.0.tar.gz') }] }),
+  ];
+  assert.equal(pickRelease(releases, 'tiiny-brain').release.tag_name, 'v0.1.3');
+  assert.equal(pickRelease(releases, 'last-light').release.tag_name, 'last-light-v0.1.2');
 });
 
 test('a maker repository the farm app cannot read is asked for without a credential', async () => {

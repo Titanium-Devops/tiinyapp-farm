@@ -67,7 +67,10 @@ def asset_url(tag, name):
     return "https://github.com/{}/releases/download/{}/{}".format(APP_REPO, tag, name)
 
 
-def github_release(tag, prerelease=False, draft=False, assets=()):
+def github_release(tag, prerelease=False, draft=False, assets=None):
+    if assets is None:
+        version = tag[1:] if tag.startswith("v") else tag
+        assets = ["fake-app-{}.tar.gz".format(version)]
     return {"tag_name": tag, "prerelease": prerelease, "draft": draft,
             "assets": [{"name": name, "browser_download_url": asset_url(tag, name)} for name in assets],
             # Numbers a maker could put in release notes. The path must ignore them.
@@ -218,6 +221,25 @@ def run(hub, ident="fake-app", **kwargs):
 
 
 class PollerTests(unittest.TestCase):
+    def test_each_app_picks_its_own_release_from_a_shared_repository(self):
+        releases = [
+            github_release("v0.1.3", assets=["tiiny-brain-0.1.3.tar.gz"]),
+            github_release("last-light-v0.1.2", assets=["last-light-0.1.2.tar.gz"]),
+            github_release("shelf-v0.1.0", assets=["shelf-0.1.0.tar.gz"]),
+        ]
+        brain = release.pick_release(releases, "tiiny-brain")
+        light = release.pick_release(releases, "last-light")
+        self.assertEqual(brain[0], (0, 1, 3))
+        self.assertEqual(brain[1]["tag_name"], "v0.1.3")
+        self.assertEqual(light[0], (0, 1, 2))
+        self.assertEqual(light[1]["tag_name"], "last-light-v0.1.2")
+
+    def test_a_repository_with_one_app_still_picks_its_release(self):
+        version, found = release.pick_release(
+            [github_release("v0.1.0"), github_release("v0.1.1")], "fake-app")
+        self.assertEqual(version, (0, 1, 1))
+        self.assertEqual(found["tag_name"], "v0.1.1")
+
     def test_one_pull_request_for_a_newer_release_with_measured_numbers(self):
         hub = Hub()
         outcome = run(hub)
@@ -357,14 +379,13 @@ class PollerTests(unittest.TestCase):
         hub = Hub()
         self.assertEqual(run(hub).manifest["release"]["url"], archive_url("v0.1.1"))
 
-    def test_a_release_without_the_expected_asset_is_reported_not_guessed(self):
+    def test_a_release_without_an_app_asset_does_not_belong_to_the_app(self):
         packaged = copy.deepcopy(MANIFEST)
         packaged["release"]["url"] = asset_url("v0.1.0", "fake-app-0.1.0.tar.gz")
         hub = Hub(manifest=packaged, releases=[
             github_release("v0.1.0", assets=["fake-app-0.1.0.tar.gz"]),
             github_release("v0.1.1", assets=["one.tar.gz", "two.tar.gz"])])
-        with self.assertRaisesRegex(FarmError, "no tar.gz asset named fake-app-0.1.1.tar.gz"):
-            run(hub)
+        self.assertEqual(run(hub).status, "listed")
         self.assertEqual(hub.pulls, [])
 
     def test_a_download_that_is_not_a_gzip_archive_is_refused(self):
