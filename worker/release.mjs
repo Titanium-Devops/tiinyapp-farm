@@ -1,8 +1,8 @@
 import { fail, json, remote, sha256 } from './index.mjs';
 import { FARM_REPO, GITHUB, compareVersion, ownsSeed, releaseURL } from './catalog.mjs';
 // The maker's "Check for a new release" button. It follows the same rules as the hourly
-// poller in farm/release.py: GitHub is asked for the newest full release, the archive is
-// downloaded and measured here, and one pull request per app is opened or refreshed.
+// poller in farm/release.py: GitHub releases are matched to the app by tag and asset name,
+// the archive is downloaded and measured here, and one pull request per app is opened or refreshed.
 const ORIGIN = 'https://tiinyapp.farm';
 const MAX = 50 * 1024 * 1024;
 const BRANCH = 'farm-release/';
@@ -72,12 +72,22 @@ export function repoPath(url) {
   if (!found) fail(400, 'Release tracking needs a github.com repository URL in the manifest.');
   return `${found[1]}/${found[2]}`;
 }
-export function pickRelease(releases, prereleases = false) {
+function releaseVersion(release, id) {
+  const tag = release?.tag_name;
+  const prefixed = `${id}-v`;
+  const version = typeof tag === 'string' && tag.startsWith(prefixed)
+    ? parseTag(tag.slice(id.length + 1)) : parseTag(tag);
+  if (!version) return null;
+  const belongs = (release.assets || []).some(asset => asset && typeof asset.name === 'string'
+    && asset.name.startsWith(`${id}-`) && /\.(tar\.gz|tgz)$/.test(asset.name));
+  return belongs ? version : null;
+}
+export function pickRelease(releases, id, prereleases = false) {
   let best = null;
   for (const release of Array.isArray(releases) ? releases : []) {
     if (!release || typeof release !== 'object' || release.draft) continue;
     if (release.prerelease && !prereleases) continue;
-    const version = parseTag(release.tag_name);
+    const version = releaseVersion(release, id);
     if (!version) continue;
     if (!best || compareVersion(version, best.version) > 0) best = { version, release };
   }
@@ -189,7 +199,7 @@ export async function checkRelease(ctx, listed) {
   // GitHub refuses there is dropped rather than reported as a failure.
   const listing = `/repos/${repo}/releases?per_page=100`;
   const published = await api('GET', listing, undefined, [404]) ?? await client(fetcher, null)('GET', listing);
-  const best = pickRelease(published, current.prereleases === true);
+  const best = pickRelease(published, current.id, current.prereleases === true);
   const found = best ? compareVersion(best.version, current.version) : -1;
   if (found < 0) return said('none', `no release newer than v${current.version} on GitHub`, { version: current.version });
   if (found === 0) return said('listed', `already listed at v${current.version}`, { version: current.version });

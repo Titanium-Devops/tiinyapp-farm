@@ -134,15 +134,30 @@ def repo_path(url):
     return found.group(1) + "/" + found.group(2)
 
 
-def pick_release(releases, prereleases=False):
-    """The highest three-number tag GitHub has published, drafts always excluded."""
+def release_version(release, ident):
+    """A version only when both the tag and an archive asset belong to this app."""
+    tag = release.get("tag_name", "")
+    prefixed = ident + "-v"
+    if isinstance(tag, str) and tag.startswith(prefixed):
+        version = parse_tag(tag[len(ident) + 1:])
+    else:
+        version = parse_tag(tag)
+    if version is None:
+        return None
+    if not any(asset["name"].startswith(ident + "-") for asset in tarball_assets(release)):
+        return None
+    return version
+
+
+def pick_release(releases, ident, prereleases=False):
+    """The highest release belonging to ident, with drafts always excluded."""
     best = None
     for release in releases if isinstance(releases, list) else []:
         if not isinstance(release, dict) or release.get("draft"):
             continue
         if release.get("prerelease") and not prereleases:
             continue
-        version = parse_tag(release.get("tag_name", ""))
+        version = release_version(release, ident)
         if version is None:
             continue
         if best is None or version > best[0]:
@@ -243,7 +258,8 @@ def plan(api, manifest, opener=None, day=None):
     if not manifest.get("repo"):
         return Outcome("untracked", "this app has no GitHub repository in its manifest", listed)
     repo = repo_path(manifest["repo"])
-    version, release = pick_release(releases(api, repo), prereleases=manifest.get("prereleases") is True)
+    version, release = pick_release(releases(api, repo), manifest["id"],
+                                    prereleases=manifest.get("prereleases") is True)
     current = parse_version(listed) or (0, 0, 0)
     if version is None or version < current:
         return Outcome("none", "no release newer than v{} on GitHub".format(listed), listed)
