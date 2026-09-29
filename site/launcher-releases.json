@@ -1,5 +1,41 @@
 [
   {
+    "version": "0.1.5",
+    "date": "2026-09-29",
+    "commit": "7d470b78e15e35f75a27f5eb39f606ef6aab7bc7",
+    "notes": "### Added\n\n- **Give an app a seed from its card.** Paste a farm token once in Settings,\n  then give or take back your seed without leaving the launcher. The card\n  keeps the same seed pile and count as the farm.\n- **Read and leave comments from the launcher.** An app's card carries its\n  conversation and a comment box. The launcher explains when the account\n  needs a verified Tiiny, when the hourly limit resets, and when a token is no\n  longer accepted.\n- **A farm account in Settings.** The token is saved separately with\n  owner-only permissions, is never shown again, and can be removed with Sign\n  out. Every request and the bearer header stay in Rust rather than entering\n  the page.",
+    "files": {
+      "mac-arm64": {
+        "name": "Tiiny-App-Farm_0.1.5_aarch64.dmg",
+        "size": 25635523,
+        "sha256": "d0644e959e15a1ffdc3c87c5dec649530acc3f0c1e984e3bf7fd5b64680836bf",
+        "signed": true,
+        "notarised": true
+      },
+      "mac-x64": {
+        "name": "Tiiny-App-Farm_0.1.5_x64.dmg",
+        "size": 26332748,
+        "sha256": "ea497a28832576d3b04e88caa731aecb14b55dec210fad5f2e1c394f231301cf",
+        "signed": true,
+        "notarised": true
+      },
+      "windows-x64": {
+        "name": "Tiiny-App-Farm_0.1.5_x64-setup.exe",
+        "size": 28023424,
+        "sha256": "3c0d0f4baa95824baa2c02301e8171bf2e258abaab59557f298a1db96852133e",
+        "signed": true,
+        "notarised": false
+      },
+      "linux-x64": {
+        "name": "Tiiny-App-Farm_0.1.5_amd64.AppImage",
+        "size": 101722616,
+        "sha256": "78c735511d23281b1e500179c27ec997a534e892c88d7f53bf4d7e11cc121c44",
+        "signed": false,
+        "notarised": false
+      }
+    }
+  },
+  {
     "version": "0.1.4",
     "date": "2026-09-18",
     "commit": "15d7fa8863582f55f8e11e5cc60eaf76311127b0",
