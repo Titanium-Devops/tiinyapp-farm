@@ -191,7 +191,7 @@ class OpenAPITests(unittest.TestCase):
         self.assertGreater(len(table), 25)
 
     def test_the_tokens_the_document_promises_are_the_ones_the_worker_takes(self):
-        """Nine operations on eight routes take a farm_ token. A tenth means the Worker changed."""
+        """Ten operations on nine routes take a farm_ token. An eleventh means the Worker changed."""
         worker = (ROOT / 'worker/index.mjs').read_text(encoding='utf-8')
         bearer = worker.split('const bearerRoute =')[1].split(';')[0]
         taking = {(method.lower(), path) for path, item in SPEC['paths'].items()
@@ -202,15 +202,17 @@ class OpenAPITests(unittest.TestCase):
                                   ('get', '/api/seeds/{id}/art'), ('post', '/api/seeds/{id}/art'),
                                   ('post', '/api/seeds/{id}/seed'),
                                   ('post', '/api/seeds/{id}/thumb'),
-                                  ('post', '/api/seeds/{id}/comments')})
+                                  ('post', '/api/seeds/{id}/comments'),
+                                  ('get', '/api/seeds/{id}/social')})
         for _, path in taking:
             self.assertIn(path.split('/{')[0], bearer)
         # Giving a seed and leaving a comment are what the launcher will carry a token for.
         for tail in ('thumb', 'seed', 'comments'):
             self.assertIn(tail, bearer)
-        # Reading is public and stays cookie-only, so a token cannot borrow someone's mine flag.
+        # Reading is public; a cookie or a farm token only decides whose mine flag it carries, and
+        # that is always the caller's own. The Worker answers it no-store, so no shared cache holds it.
         reading = SPEC['paths']['/api/seeds/{id}/social']['get']
-        self.assertEqual(reading['security'], [])
+        self.assertEqual(reading['security'], [{'session': []}, {'farmToken': []}])
 
 
 if __name__ == '__main__':

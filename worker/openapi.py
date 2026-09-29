@@ -295,10 +295,11 @@ def paths():
         "/api/seeds/{id}/social": {"x-farm-source": "social.mjs", "get": op(
             "Read an app's seeds and comments", "Reading needs no credential. mine is true when"
             " the signed-in visitor has given this app a seed. thumbs carries the same number as"
-            " seeds, under the name the first release used.", tags=["Seeds and comments"],
-            parameters=[APP],
+            " seeds, under the name the first release used. A farm token is optional; one that"
+            " matches nobody is refused with 401.", tags=["Seeds and comments"],
+            auth=["session", "farmToken"], parameters=[APP],
             answers={"200": answer("The conversation.", {"$ref": "#/components/schemas/Social"})},
-            errors=[(404, "That app is not in the catalog."),
+            errors=[(401, "That farm token is not valid."), (404, "That app is not in the catalog."),
                     (405, "That action does not use this method.")])},
         "/api/seeds/{id}/seed": {"x-farm-source": "social.mjs", "post": op(
             "Give this app a seed", "One seed per person per app. Giving it again takes it back."

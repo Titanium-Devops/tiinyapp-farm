@@ -75,6 +75,8 @@ export function createApp({ fetcher = fetch, now = () => Date.now(), seedRoutes 
       (['GET', 'POST'].includes(request.method) && /^\/api\/seeds\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*\/art$/.test(path)) ||
       // Giving a seed and leaving a comment from the launcher, with the same rules a browser gets.
       (request.method === 'POST' && /^\/api\/seeds\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*\/(?:thumb|seed|comments)$/.test(path)) ||
+      // The launcher reads whether this person already gave a seed before it draws the toggle.
+      (request.method === 'GET' && /^\/api\/seeds\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*\/social$/.test(path)) ||
       (request.method === 'GET' && path === '/api/seeds/mine');
     const bearerMatch = bearerRoute && request.headers.get('Authorization')?.match(/^Bearer\s+(.+)$/i);
     const get = async key => env.FARM.get(key, 'json');

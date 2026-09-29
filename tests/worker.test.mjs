@@ -798,6 +798,9 @@ test('a farm_ token gives a seed and leaves a comment without an Origin, the way
   const endpoint = '/api/seeds/little-library';
   let social = await (await f.call(endpoint + '/seed', {}, '', auth)).json();
   assert.equal(social.seeds, 1); assert.equal(social.mine, true);
+  // The launcher reads its own seed before drawing the toggle; without a token the same read says nobody.
+  assert.equal((await (await f.call(endpoint + '/social', undefined, '', auth, 'GET')).json()).mine, true);
+  assert.equal((await (await f.call(endpoint + '/social')).json()).mine, false);
   social = await (await f.call(endpoint + '/thumb', {}, '', auth)).json();
   assert.equal(social.seeds, 0); assert.equal(social.mine, false);
   social = await (await f.call(endpoint + '/comments', { text: 'From the launcher' }, '', auth)).json();
@@ -810,6 +813,7 @@ test('a farm_ token gives a seed and leaves a comment without an Origin, the way
   assert.equal((await f.call(endpoint + '/seed', {}, signed.cookie, wrong)).status, 401);
   assert.equal((await f.call(endpoint + '/comments', { text: 'Nope' }, signed.cookie, wrong)).status, 401);
   assert.equal((await f.call(endpoint + '/social')).status, 200);
+  assert.equal((await f.call(endpoint + '/social', undefined, '', wrong, 'GET')).status, 401);
   // A revoked token stops working.
   assert.equal((await f.call('/api/tokens/' + issued.id, {}, signed.cookie, {}, 'DELETE')).status, 200);
   assert.equal((await f.call(endpoint + '/seed', {}, '', auth)).status, 401);
