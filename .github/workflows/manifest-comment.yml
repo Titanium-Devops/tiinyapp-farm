@@ -9,7 +9,7 @@ permissions:
 jobs:
   comment:
     if: github.event.workflow_run.event == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       # No checkout and no execution of PR code or artifact contents in this job.
       - name: Download the data-only report

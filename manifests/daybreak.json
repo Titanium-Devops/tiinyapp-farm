@@ -3,7 +3,7 @@
   "name": "Daybreak",
   "pitch": "A live world-news wall that your Tiiny reads, writes up and keeps.",
   "description": "Daybreak pulls world news from fourteen free RSS feeds every five minutes and hands every article to your Tiiny. The device writes the summary, picks the category, works out where on earth it happened, scores how serious it is, and builds the embedding that groups related stories into developing threads. The lot is rendered as a wall display you can leave running on a spare monitor: a live wire, six theatre cards, developing stories, and the device's own telemetry while it works. No cloud model, no AI subscription, and no article text leaves your network. The only things that touch the internet are the public news feeds. It uses whatever chat and embedding models you already have loaded rather than asking for particular ones, and with no embedder it clusters on title overlap instead and says so on the page. When the wire goes quiet it writes daily briefs, follows up on developing stories and files regional assessments. Articles are kept forever, because the archive is the point. Python standard library only, no pip, no build step. With no device configured at all the wall still serves and says so, and the queue drains in order from where it stopped once you name one.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": {
     "name": "Jason Brashear",
     "url": "https://github.com/webdevtodayjason",
@@ -47,16 +47,16 @@
     "osint"
   ],
   "release": {
-    "url": "https://github.com/webdevtodayjason/daybreak/releases/download/v0.1.0/daybreak-0.1.0.tar.gz",
-    "sha256": "c25c7fda5d6c0dfa773db76a006306a3a9493057a4d909b11a2b90b9d89933eb",
-    "size": 1900488
+    "url": "https://github.com/webdevtodayjason/daybreak/releases/download/v0.1.1/daybreak-0.1.1.tar.gz",
+    "sha256": "05194592e97a34d4459867da588b230938a4457c59b49b744da34bae848b61e0",
+    "size": 1901082
   },
   "health": "/healthz",
   "selfcheck": true,
   "verified": true,
   "featured": false,
   "addedAt": "2026-09-14",
-  "updatedAt": "2026-09-14",
+  "updatedAt": "2026-09-24",
   "links": {
     "repo": "https://github.com/webdevtodayjason/daybreak",
     "homepage": "https://github.com/webdevtodayjason/daybreak"
