@@ -509,7 +509,7 @@ def versions_page(releases):
         notes = markdown(release["notes"]) if release["notes"] else '<p>No notes for this one.</p>'
         history.append(f'<section class="rel"><h2 id="v{e(release["version"].replace(".", "-"))}">'
                        f'{e(release["version"])}</h2>'
-                       f'<p class="rel-when">{e(stamp)}{commit}</p>{notes}'
+                       f'<p class="rel-when">{e(stamp)}{commit}</p><div class="rel-notes">{notes}</div><!--/rel-notes-->'
                        + release_files(release) + '</section>')
     return ('<section class="page versions-page"><h1>Launcher versions</h1>'
             '<p class="sub">Every version of Tiiny App Farm that has shipped, what changed in it, '
