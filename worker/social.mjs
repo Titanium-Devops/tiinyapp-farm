@@ -63,6 +63,9 @@ export async function socialRoutes(ctx) {
   if (manifest.id !== seedId) fail(404, 'That app is not in the catalog.');
   const key = 'social:' + seedId, social = await get(key) || { thumbs: [], comments: [] };
   const user = action === 'social' ? await currentUser() : await requireUser();
+  // A read is open to anyone, but a token that was sent and matches nobody is said out loud,
+  // so the launcher stops calling itself signed in rather than quietly reading as a stranger.
+  if (action === 'social' && !user && /^Bearer\s/i.test(request.headers.get('Authorization') || '')) fail(401, 'That farm token is not valid. Make a new one on your account page.');
   const admins = new Set((env.FARM_ADMINS || '').split(',').map(id => id.trim()).filter(Boolean));
   const canDelete = comment => !!user && (comment.userId === user.id || admins.has(user.id));
   async function view() {
