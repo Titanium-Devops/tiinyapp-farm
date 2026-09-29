@@ -209,9 +209,10 @@ class OpenAPITests(unittest.TestCase):
         # Giving a seed and leaving a comment are what the launcher will carry a token for.
         for tail in ('thumb', 'seed', 'comments'):
             self.assertIn(tail, bearer)
-        # Reading is public and stays cookie-only, so a token cannot borrow someone's mine flag.
+        # Reading is public; a cookie or a farm token only decides whose mine flag it carries, and
+        # that is always the caller's own. The Worker answers it no-store, so no shared cache holds it.
         reading = SPEC['paths']['/api/seeds/{id}/social']['get']
-        self.assertEqual(reading['security'], [])
+        self.assertEqual(reading['security'], [{'session': []}, {'farmToken': []}])
 
 
 if __name__ == '__main__':
