@@ -29,7 +29,7 @@ FILES = [
     "/llms.txt", "/robots.txt", "/sitemap.xml", "/catalog.json", "/categories.json",
     "/site.webmanifest", "/assets/site.css", "/assets/farm.js", "/assets/session.js",
     "/assets/seed-stack.js", "/brand/og-image.png", "/brand/favicon.ico", "/docs/SUBMIT.md",
-    "/docs/manifest.schema.json", "/docs/openapi.json", "/manifests/",
+    "/docs/manifest.schema.json", "/docs/openapi.json", "/manifests/", "/api/health",
     # The one read every catalog page and the launcher make for seed counts. A stranger with no
     # cookie must get it, because that is who reads the catalog.
     "/api/social/counts",
@@ -97,6 +97,15 @@ def main(argv=None):
             cells.append(f"{status:>3}  {len(body):>7}B  {round(elapsed):>5}ms")
             if status != want:
                 failures.append((path, label, want, status))
+            elif path == "/api/health":
+                try:
+                    health = json.loads(body)
+                    healthy = all(health.get(part) is True for part in ("ok", "kv", "r2"))
+                except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+                    healthy = False
+                row[label]["healthy"] = healthy
+                if not healthy:
+                    failures.append((path, label, "healthy JSON", "an unhealthy or invalid body"))
         results.append(row)
         print(f"{path:<34}{want:>5}  {cells[0]}  {cells[1]}")
 

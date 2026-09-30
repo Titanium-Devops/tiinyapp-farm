@@ -57,9 +57,11 @@ function fixture({ appKeys = true } = {}) {
   const env = { FARM: store, SESSION_SECRET: 'test-secret-with-at-least-32-characters', RESEND_API_KEY: 'resend-secret',
     GITHUB_CLIENT_ID: 'client', GITHUB_CLIENT_SECRET: 'client-secret', FARM_GITHUB_TOKEN: 'farm-only-secret',
     OPENAI_API_KEY: 'drawing-only-secret',
+    CF_VERSION_METADATA: { id: 'fixture-build' },
     ...(appKeys ? { FARM_APP_ID: '456', FARM_APP_PRIVATE_KEY: KEYS.privateKey } : {}),
     SEEDS: { async put(key, value, options) { objects.set(key, { value, options }); },
       async get(key) { const object = objects.get(key); return object && { body: object.value, size: object.value.length, httpEtag: '"fixture"' }; },
+      async head(key) { const object = objects.get(key); return object && { size: object.value.length, httpEtag: '"fixture"' }; },
       async delete(key) { objects.delete(key); } },
     ASSETS: { fetch: async request => {
       const path = new URL(request.url).pathname;
@@ -185,6 +187,34 @@ function seedForm({ upload = false, ...changes } = {}) {
   else if (!form.has('releaseUrl')) form.set('releaseUrl', 'https://releases.example.org/seed.tar.gz');
   return form;
 }
+
+test('health: GET and HEAD report KV, R2 and the deployed version without caching', async () => {
+  const f = fixture();
+  f.objects.set('launcher/latest.json', { value: '{}', options: {} });
+  const response = await worker.fetch(new Request(ORIGIN + '/api/health'), f.env);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('Cache-Control'), 'no-store');
+  assert.deepEqual(await response.json(), { ok: true, kv: true, r2: true, version: 'fixture-build' });
+  const head = await worker.fetch(new Request(ORIGIN + '/api/health', { method: 'HEAD' }), f.env);
+  assert.equal(head.status, 200);
+  assert.equal(head.headers.get('Cache-Control'), 'no-store');
+  assert.equal(await head.text(), '');
+  const refused = await worker.fetch(new Request(ORIGIN + '/api/health', { method: 'POST' }), f.env);
+  assert.equal(refused.status, 405);
+  assert.equal(refused.headers.get('Allow'), 'GET, HEAD');
+});
+
+test('health: a KV failure returns 503 without exposing its error', async () => {
+  const f = fixture();
+  f.objects.set('launcher/latest.json', { value: '{}', options: {} });
+  f.env.FARM.get = async () => { throw new Error('secret backend detail'); };
+  const response = await worker.fetch(new Request(ORIGIN + '/api/health'), f.env);
+  assert.equal(response.status, 503);
+  const body = await response.json();
+  assert.deepEqual(body, { ok: false, kv: false, r2: true, version: 'fixture-build',
+    error: 'KV health check failed.' });
+  assert.doesNotMatch(JSON.stringify(body), /secret backend detail/);
+});
 
 test('email: six digits, HMAC only, normalization, secure session, single redemption, logout', async () => {
   const f = fixture(), signed = await f.email(' GROWER@example.org ');

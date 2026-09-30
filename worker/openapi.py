@@ -87,6 +87,13 @@ SCHEMAS = {
     "Error": obj({"error": {"type": "string",
                             "description": "One sentence meant for a person to read."}},
                  ["error"], extra=False),
+    "Health": obj({"ok": {"type": "boolean"}, "kv": {"type": "boolean"},
+                    "r2": {"type": "boolean"},
+                    "version": {"type": "string",
+                                "description": "The deployed Worker version when available."},
+                    "error": {"type": "string",
+                              "description": "Names the failed service without exposing details."}},
+                   ["ok", "kv", "r2"], extra=False),
     "User": obj({
         "id": {"type": "string"}, "createdAt": {"type": "string", "format": "date-time"},
         "email": {"type": "string"},
@@ -208,6 +215,21 @@ REDIRECT = answer("A redirect.", headers={"Location": {"schema": {"type": "strin
 def paths():
     """Every path the farm answers, in the order the Worker tries them."""
     return {
+        "/api/health": {"x-farm-source": "index.mjs", "get": op(
+            "Check the farm services", "Reads one fixed KV key and checks the launcher feed in"
+            " R2. A missing key or object is healthy; only a failed service call is not. The"
+            " response is never cached and needs no credential.", tags=["Health"],
+            answers={"200": answer("KV and R2 answered.",
+                                   {"$ref": "#/components/schemas/Health"}),
+                     "503": answer("KV or R2 did not answer.",
+                                   {"$ref": "#/components/schemas/Health"})},
+            errors=[(405, "Use GET or HEAD for the health check.")]),
+            "head": op(
+                "Check the farm services without a body", "Runs the same KV and R2 checks as GET"
+                " and returns only the status and no-store headers.", tags=["Health"],
+                answers={"200": answer("KV and R2 answered."),
+                         "503": answer("KV or R2 did not answer.")},
+                errors=[(405, "Use GET or HEAD for the health check.")])},
         "/api/auth/start": {"x-farm-source": "index.mjs", "post": op(
             "Send a sign-in code", "Emails a six digit code that lasts ten minutes and dies after"
             " five wrong attempts.", tags=["Sign in"], limit="3 per hour per address",
@@ -638,8 +660,9 @@ def spec():
                 " Cache-Control: no-store unless said otherwise.\n\n"
                 "Any POST, PUT, PATCH or DELETE that does not carry a bearer token on a route that"
                 " accepts one must send Origin: https://tiinyapp.farm, or it is refused with 403."
-                "\n\nEvery failure is a JSON object with one error field holding a sentence meant"
-                " for a person. An unexpected failure answers 502 with a general sentence rather"
+                "\n\nEvery failure is a JSON object with an error field holding a sentence meant"
+                " for a person. The health route also reports its component booleans. An"
+                " unexpected failure answers 502 with a general sentence rather"
                 " than the underlying text, because that text can carry credentials.",
             "license": {"name": "MIT",
                         "url": "https://github.com/Titanium-Devops/tiinyapp-farm/blob/main/LICENSE"},
@@ -648,7 +671,7 @@ def spec():
         "externalDocs": {"description": "The written guide for assistants",
                          "url": ORIGIN + "/docs/agents/"},
         "tags": [{"name": name} for name in
-                 ["Sign in", "Prove you own a Tiiny", "Your account", "Images",
+                 ["Health", "Sign in", "Prove you own a Tiiny", "Your account", "Images",
                   "Art in the farm's hand", "Apps", "Releases", "Seeds and comments",
                   "The catalog", "Files", "Pages the Worker serves"]],
         "paths": paths(),
