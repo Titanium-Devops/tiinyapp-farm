@@ -3,6 +3,7 @@ import { makerDefaults, ensureMaker, makerRoutes } from './makers.mjs';
 const ORIGIN = 'https://tiinyapp.farm';
 const COOKIE = '__Host-farm';
 const DAY = 86400000;
+const HEALTH_TIMEOUT = 1000;
 const encoder = new TextEncoder();
 export class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -11,6 +12,26 @@ export const fail = (status, message) => { throw new HttpError(status, message);
 export const json = (data, status = 200, headers = {}) => new Response(JSON.stringify(data), {
   status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers },
 });
+async function healthProbe(operation) {
+  let timer;
+  try {
+    await Promise.race([
+      Promise.resolve().then(operation),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('health check timed out')), HEALTH_TIMEOUT); }),
+    ]);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function healthResponse(request, data, status) {
+  if (request.method === 'HEAD') return new Response(null, { status, headers: {
+    'Content-Type': 'application/json', 'Cache-Control': 'no-store',
+  } });
+  return json(data, status);
+}
 const random = (length = 32) => Array.from(crypto.getRandomValues(new Uint8Array(length)), n => n.toString(16).padStart(2, '0')).join('');
 export const sha256 = async data => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', data)), n => n.toString(16).padStart(2, '0')).join('');
 const cookies = request => Object.fromEntries((request.headers.get('Cookie') || '').split(';').map(s => s.trim().split('=')));
@@ -130,6 +151,23 @@ export function createApp({ fetcher = fetch, now = () => Date.now(), seedRoutes 
       return user;
     }
     try {
+      if (path === '/api/health') {
+        if (!['GET', 'HEAD'].includes(request.method)) return json(
+          { error: 'Use GET or HEAD for the health check.' }, 405, { Allow: 'GET, HEAD' });
+        const [kv, r2] = await Promise.all([
+          healthProbe(() => env.FARM.get('health:probe')),
+          healthProbe(() => env.SEEDS.head('launcher/latest.json')),
+        ]);
+        const data = { ok: kv && r2, kv, r2 };
+        const version = [env.SITE_BUILD_ID, env.COMMIT_SHA, env.CF_VERSION_METADATA?.id]
+          .find(value => typeof value === 'string' && value);
+        if (version) data.version = version;
+        if (!data.ok) {
+          const failed = [kv ? '' : 'KV', r2 ? '' : 'R2'].filter(Boolean);
+          data.error = `${failed.join(' and ')} health check${failed.length > 1 ? 's' : ''} failed.`;
+        }
+        return healthResponse(request, data, data.ok ? 200 : 503);
+      }
       if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method) && !bearerMatch && request.headers.get('Origin') !== ORIGIN) fail(403, 'Please submit this form from tiinyapp.farm.');
       if (path === '/api/auth/start' && request.method === 'POST') {
         const input = await bodyJSON(request);

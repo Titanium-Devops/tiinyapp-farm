@@ -65,6 +65,8 @@ export class FarmCoordinator {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    // Health checks read the real KV namespace, not the coordinator's durable storage mirror.
+    if (url.pathname === '/api/health') return app(request, env);
     if (url.pathname.startsWith('/api/') || /^\/(account|farm|plant|seeds|makers)(?:\/|$)/.test(url.pathname)) {
       return env.FARM_COORDINATOR.get(env.FARM_COORDINATOR.idFromName('farm')).fetch(request);
     }

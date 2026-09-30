@@ -948,6 +948,7 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         self.assertTrue(set(['/api/*', '/seeds-files/*', '/farm/*', '/makers/*', '/media/*', '/seeds/*']).issubset(config['assets']['run_worker_first']))
         self.assertEqual(config['kv_namespaces'][0]['binding'], 'FARM')
         self.assertEqual(config['r2_buckets'][0], {'binding': 'SEEDS', 'bucket_name': 'farm-seeds'})
+        self.assertEqual(config['version_metadata']['binding'], 'CF_VERSION_METADATA')
         self.assertEqual(config['durable_objects']['bindings'][0]['class_name'], 'FarmCoordinator')
         self.assertEqual(config['routes'], [{'pattern': 'tiinyapp.farm', 'custom_domain': True}])
         self.assertEqual(config['assets']['directory'], './site/dist')
