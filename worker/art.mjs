@@ -14,6 +14,8 @@ export const MAX_SCENE = 200;
 export const MIN_SCENE = 3;
 // Three pairs per app per day. A maker who needs a fourth has a scene problem, not a quota problem.
 export const DAILY = 3;
+const USER_DAILY = 12;
+const FARM_DAILY = 30;
 const DAY = 86400000;
 // A generation runs far past the ten seconds every other call to the outside world gets.
 const DRAW_TIMEOUT = 120000;
@@ -159,6 +161,18 @@ export async function artRoutes(ctx) {
   await put(flightKey, now());
   const history = recent(await get(rateKey), now());
   if (history.length >= DAILY) { await del(flightKey); fail(429, `You can draw art ${DAILY} times a day for one app. Try again tomorrow.`); }
+  // An app ID is chosen by the maker and unclaimed IDs are allowed while a submission is being
+  // prepared. Bound paid drawing calls by the authenticated maker and by the whole farm as well,
+  // so changing the ID cannot create an unlimited OpenAI bill.
+  const userRateKey = 'art-user-rate:' + user.id, farmRateKey = 'art-farm-rate';
+  const userHistory = recent(await get(userRateKey), now());
+  const farmHistory = recent(await get(farmRateKey), now());
+  if (userHistory.length >= USER_DAILY || farmHistory.length >= FARM_DAILY) {
+    await del(flightKey);
+    fail(429, 'The farm has reached its drawing limit for today. Try again tomorrow.');
+  }
+  await put(userRateKey, [...userHistory, now()]);
+  await put(farmRateKey, [...farmHistory, now()]);
   await put(rateKey, [...history, now()]);
   try {
     const header = await draw(ctx, prompts.header, { size: HEADER_SIZE, output_format: 'webp', output_compression: 82 });

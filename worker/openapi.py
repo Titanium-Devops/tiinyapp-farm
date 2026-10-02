@@ -440,7 +440,7 @@ def paths():
                        " takes a minute or two, so give the call a generous timeout. A refusal or"
                        " a failure costs you nothing.", tags=["Art in the farm's hand"],
                        auth=["farmToken", "session"], parameters=[APP],
-                       limit="3 per app per day, one drawing at a time",
+                       limit="3 per app, 12 per maker, and 30 across the farm per day; one drawing at a time per app",
                        body=json_body(obj({"scene": {"type": "string", "minLength": 3,
                                                      "maxLength": 200}}, ["scene"])),
                        answers={"201": answer("Both images are stored and answered as URLs.",
@@ -450,7 +450,7 @@ def paths():
                                (403, "This app id belongs to another maker."),
                                (409, "The farm is still drawing this app."),
                                (422, "The drawing service refused those words."),
-                               (429, "Three drawings a day for one app."),
+                               (429, "The app, maker, or farm daily drawing limit was reached."),
                                (502, "The drawing could not be made or kept."),
                                (503, "Drawing app art is not switched on yet."),
                                (504, "The drawing took too long.")])},

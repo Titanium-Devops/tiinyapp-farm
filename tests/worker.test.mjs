@@ -1273,6 +1273,28 @@ test('app art: three a day for one app, one at a time, and a failed drawing cost
   assert.equal((await drawArt(f, cookie)).status, 201);
 });
 
+test('app art: attacker-chosen app ids cannot bypass user and farm spending caps', async () => {
+  const userLimited = fixture(), cookie = await maker(userLimited);
+  for (let i = 0; i < 12; i++) {
+    assert.equal((await drawArt(userLimited, cookie, 'a lantern beside a garden gate', `user-app-${i}`)).status, 201);
+  }
+  assert.equal((await drawArt(userLimited, cookie, 'a lantern beside a garden gate', 'user-app-over')).status, 429);
+
+  const globallyLimited = fixture();
+  const sessions = [];
+  for (let i = 0; i < 3; i++) {
+    const signed = await globallyLimited.email(`artist-${i}@example.org`);
+    signed.user.tiinyverse = { profileUrl: `https://www.tiinyverse.com/users/00000000-0000-4000-8000-00000000000${i}`,
+      name: `Artist ${i}`, verifiedAt: new Date(globallyLimited.now()).toISOString() };
+    await globallyLimited.store.put('user:' + signed.user.id, JSON.stringify(signed.user));
+    sessions.push(signed.cookie);
+  }
+  for (let i = 0; i < 30; i++) {
+    assert.equal((await drawArt(globallyLimited, sessions[i % sessions.length], 'a lantern beside a garden gate', `global-app-${i}`)).status, 201);
+  }
+  assert.equal((await drawArt(globallyLimited, sessions[0], 'a lantern beside a garden gate', 'global-app-over')).status, 429);
+});
+
 test('app art: every failure from the drawing service becomes a sentence a maker can act on', async () => {
   const f = fixture(), cookie = await maker(f);
   assert.equal((await f.call('/api/seeds/little-library/art', { scene: 'ab' }, cookie)).status, 400);
