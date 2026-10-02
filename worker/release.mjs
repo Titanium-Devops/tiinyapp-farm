@@ -226,12 +226,21 @@ export async function releaseRoutes(ctx) {
   if (listed?.id !== id) fail(404, 'That app is not in the catalog.');
   if (!await ownsSeed(user, listed, get)) fail(403, 'Only this app’s verified maker can check for a new release.');
   const previous = await get('release:' + id);
-  if (previous && now() - previous.checkedAt < MINUTE) {
-    const seconds = Math.ceil((MINUTE - (now() - previous.checkedAt)) / 1000);
+  const attemptKey = 'release-attempt:' + id;
+  const previousAttempt = await get(attemptKey);
+  if (previousAttempt && now() - previousAttempt.attemptedAt < MINUTE) {
+    const seconds = Math.ceil((MINUTE - (now() - previousAttempt.attemptedAt)) / 1000);
     const waiting = `checked a moment ago, so try again in ${seconds} seconds`;
-    return json({ ...previous, message: waiting, error: waiting }, 429);
+    return json({ ...(previous || { status: 'error', version: listed.version }), message: waiting, error: waiting }, 429);
   }
-  const state = await checkRelease(ctx, listed);
-  await put('release:' + id, state);
-  return json(state);
+  const attemptedAt = now();
+  await put(attemptKey, { attemptedAt, lastError: null });
+  try {
+    const state = await checkRelease(ctx, listed);
+    await put('release:' + id, state);
+    return json(state);
+  } catch (error) {
+    await put(attemptKey, { attemptedAt, lastError: 'The release check did not finish.' });
+    throw error;
+  }
 }

@@ -1399,6 +1399,21 @@ test('the button is limited to once a minute and then reuses the open pull reque
   assert.equal(f.manifests.length, 1, 'an unchanged branch is not rewritten');
 });
 
+test('a failed release check reserves the minute before another outbound call', async () => {
+  const f = fixture(), signed = await ownedApp(f);
+  f.githubFail('/contents/');
+  const first = await checkFor(f, signed);
+  assert.equal(first.status, 502);
+  const callsAfterFailure = f.calls.length;
+  const again = await checkFor(f, signed);
+  assert.equal(again.status, 429);
+  assert.equal(f.calls.length, callsAfterFailure, 'the retry makes no GitHub or archive call');
+  assert.equal(await f.store.get('release:fake-app', 'json'), null, 'failed attempts do not replace successful state');
+  assert.deepEqual(await f.store.get('release-attempt:fake-app', 'json'), {
+    attemptedAt: f.now(), lastError: 'The release check did not finish.',
+  });
+});
+
 test('a newer release refreshes the same pull request instead of opening another', async () => {
   const f = fixture(), signed = await ownedApp(f);
   const first = await (await checkFor(f, signed)).json();
