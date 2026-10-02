@@ -60,7 +60,8 @@ visitor's cookie.
 | POST | `/api/auth/logout` | none | `{"signedOut": true}` and clears the cookie |
 | GET | `/api/me` | none | `{"user": {...}}`, or `{"user": null}` when signed out |
 
-A code lasts ten minutes and dies after five wrong attempts. Three codes per hour per address. If
+A code lasts ten minutes and dies after five wrong attempts. The farm sends at most three codes per
+hour per address, ten per hour per client, and one hundred per hour across the service. If
 you are already signed in when you start either flow, finishing it links that method to your
 existing account rather than making a second one; finishing it from a different account is refused
 with 403.
