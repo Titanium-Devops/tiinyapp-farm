@@ -1,6 +1,10 @@
 import { fail, json, boundedBody } from './index.mjs';
 import { seedStackHTML } from './catalog.mjs';
 const ORIGIN = 'https://tiinyapp.farm';
+export const MEDIA_HOURLY = 20;
+export const MEDIA_OBJECTS = 100;
+export const MEDIA_BYTES = 20 * 1024 * 1024;
+export const MEDIA_RECONCILE_ACCOUNTS = 10;
 export const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export const makerDefaults = user => Object.assign(user, {
   handle: user.handle ?? null,
@@ -38,6 +42,35 @@ export function imageType(bytes) {
   if (bytes.length >= 12 && new TextDecoder().decode(bytes.slice(0,4)) === 'RIFF' && new TextDecoder().decode(bytes.slice(8,12)) === 'WEBP') return ['webp', 'image/webp'];
   fail(415, 'Choose a PNG, JPG or WebP image.');
 }
+async function mediaAccount(ctx, userId) {
+  const key = 'media-account:' + userId;
+  const saved = await ctx.get(key);
+  if (saved) return { key, account: saved };
+  const prefix = `media/${userId}/`;
+  const found = await ctx.env.SEEDS.list({ prefix, limit: MEDIA_OBJECTS + 1 });
+  if (found.truncated || found.objects.length > MEDIA_OBJECTS) fail(409, 'Your image library needs a maintainer to reconcile it before another upload.');
+  const objects = Object.fromEntries(found.objects.map(object => [object.key, object.size]));
+  const account = { objects, bytes: Object.values(objects).reduce((total, size) => total + size, 0), reconciledAt: ctx.now() };
+  await ctx.put(key, account);
+  return { key, account };
+}
+export async function reconcileMediaAccounts(storage, bucket, put, now) {
+  const cursorKey = 'media-reconcile-cursor';
+  const cursor = await storage.get(cursorKey);
+  const found = await storage.list({ prefix: 'media-account:', ...(cursor ? { startAfter: cursor } : {}),
+    limit: MEDIA_RECONCILE_ACCOUNTS + 1 });
+  const accounts = [...found.keys()].slice(0, MEDIA_RECONCILE_ACCOUNTS);
+  for (const accountKey of accounts) {
+    const userId = accountKey.slice('media-account:'.length);
+    const listed = await bucket.list({ prefix: `media/${userId}/`, limit: MEDIA_OBJECTS + 1 });
+    if (listed.truncated || listed.objects.length > MEDIA_OBJECTS) continue;
+    const objects = Object.fromEntries(listed.objects.map(object => [object.key, object.size]));
+    await put(accountKey, { objects, bytes: Object.values(objects).reduce((total, size) => total + size, 0), reconciledAt: now });
+  }
+  if (found.size > MEDIA_RECONCILE_ACCOUNTS) await storage.put(cursorKey, accounts.at(-1));
+  else await storage.delete(cursorKey);
+  return accounts.length;
+}
 export async function catalog(env) {
   const response = await env.ASSETS.fetch(new Request(ORIGIN + '/catalog.json'));
   if (!response.ok) fail(503, 'The catalog is temporarily unavailable.');
@@ -47,7 +80,7 @@ export async function catalog(env) {
   return Array.isArray(published) ? published : (published?.apps ?? []);
 }
 export async function makerRoutes(ctx) {
-  const { path, request, env, requireUser, get, put, bodyJSON, random } = ctx;
+  const { path, request, env, requireUser, get, put, bodyJSON, random, now } = ctx;
   const legacy = path.match(/^\/(plant|seeds|farm|seeds\/mine)(?:\/|\/index\.html)?$/);
   if (legacy) return new Response(null, { status: 301, headers: {
     Location: { plant: '/install/', seeds: '/submit/', farm: '/account/', 'seeds/mine': '/account/' }[legacy[1]],
@@ -84,14 +117,38 @@ export async function makerRoutes(ctx) {
     const user = await requireUser();
     if (!user.tiinyverse) fail(403, 'Verify you own a Tiiny before uploading images.');
     const bytes = await boundedBody(request, 2 * 1024 * 1024), [ext, contentType] = imageType(bytes);
+    const rateKey = 'media-rate:' + user.id;
+    const recent = ((await get(rateKey)) || []).filter(at => now() - at < 60 * 60 * 1000);
+    if (recent.length >= MEDIA_HOURLY) fail(429, 'You can upload twenty images per hour. Please try again later.');
+    const { key: accountKey, account } = await mediaAccount(ctx, user.id);
+    if (Object.keys(account.objects).length >= MEDIA_OBJECTS || account.bytes + bytes.length > MEDIA_BYTES) {
+      fail(409, 'Your image library is full. Remove an image before uploading another.');
+    }
     const key = `media/${user.id}/${random(16)}.${ext}`;
     await env.SEEDS.put(key, bytes, { httpMetadata: { contentType } });
+    try {
+      account.objects[key] = bytes.length; account.bytes += bytes.length;
+      await put(accountKey, account);
+      await put(rateKey, [...recent, now()]);
+    } catch (error) {
+      await env.SEEDS.delete(key);
+      throw error;
+    }
     return json({ key, url: ORIGIN + '/' + key }, 201);
   }
   if (path.startsWith('/api/media/') && request.method === 'DELETE') {
     const user = await requireUser(), key = path.slice('/api/'.length);
     if (!mediaPattern.test(key) || !key.startsWith('media/' + user.id + '/')) fail(403, 'Only your own images can be removed.');
+    const existing = await env.SEEDS.head(key);
     await env.SEEDS.delete(key);
+    if (existing) {
+      const { key: accountKey, account } = await mediaAccount(ctx, user.id);
+      const size = account.objects[key];
+      if (size !== undefined) {
+        delete account.objects[key]; account.bytes = Math.max(0, account.bytes - size);
+        await put(accountKey, account);
+      }
+    }
     if (user.avatarKey === key) { user.avatarKey = null; await put('user:' + user.id, user); }
     return json({ deleted: true });
   }

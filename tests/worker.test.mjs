@@ -7,6 +7,7 @@ import { runInNewContext } from 'node:vm';
 import { spawnSync } from 'node:child_process';
 import { createApp, sha256, boundedBody } from '../worker/index.mjs';
 import { proofRoutes } from '../worker/proof.mjs';
+import { MEDIA_HOURLY, MEDIA_BYTES, reconcileMediaAccounts } from '../worker/makers.mjs';
 import { seedRoutes, releaseURL } from '../worker/seeds.mjs';
 import { artRoutes, headerPrompt, iconPrompt, cleanScene, DAILY } from '../worker/art.mjs';
 import { releaseRoutes, appJWT, privateKeyBytes, pickRelease, pickURL, serialize } from '../worker/release.mjs';
@@ -63,6 +64,8 @@ function fixture({ appKeys = true } = {}) {
     SEEDS: { async put(key, value, options) { objects.set(key, { value, options }); },
       async get(key) { const object = objects.get(key); return object && { body: object.value, size: object.value.length, httpEtag: '"fixture"' }; },
       async head(key) { const object = objects.get(key); return object && { size: object.value.length, httpEtag: '"fixture"' }; },
+      async list({ prefix, limit }) { const listed = [...objects].filter(([key]) => key.startsWith(prefix)).slice(0, limit);
+        return { objects: listed.map(([key, object]) => ({ key, size: object.value.length })), truncated: listed.length === limit }; },
       async delete(key) { objects.delete(key); } },
     ASSETS: { fetch: async request => {
       const path = new URL(request.url).pathname;
@@ -698,6 +701,46 @@ test('media uses sniffed types, caps bodies, enforces owner deletion and origin,
   assert.equal((await send('/api/' + key, 'DELETE')).status, 200);
   assert.equal((await worker.fetch(new Request(url), f.env)).status, 404);
   assert.equal((await (await f.call('/api/me', undefined, first.cookie)).json()).user.avatarKey, null);
+});
+
+test('media caps hourly uploads and retained bytes, then releases quota after deletion', async () => {
+  const f = fixture(), signed = await f.email(); await f.proof(signed.cookie);
+  const current = createApp({ proofRoutes, seedRoutes, fetcher: f.fetcher, now: f.now });
+  const send = (method, body, path = '/api/media') => current(new Request(ORIGIN + path, {
+    method, body, headers: { Cookie: signed.cookie, Origin: ORIGIN, 'Content-Type': 'image/png' },
+  }), f.env);
+  const png = Uint8Array.from([137,80,78,71,13,10,26,10,0]);
+  await f.store.put('media-account:' + signed.user.id, JSON.stringify({ objects: {}, bytes: MEDIA_BYTES - png.length + 1, reconciledAt: f.now() }));
+  assert.equal((await send('POST', png)).status, 409, 'retained byte quota is enforced');
+  await f.store.put('media-account:' + signed.user.id, JSON.stringify({ objects: {}, bytes: 0, reconciledAt: f.now() }));
+  let uploaded;
+  for (let i = 0; i < MEDIA_HOURLY; i++) {
+    const response = await send('POST', png); assert.equal(response.status, 201); uploaded = await response.json();
+  }
+  assert.equal((await send('POST', png)).status, 429, 'hourly upload quota is enforced');
+  const before = await f.store.get('media-account:' + signed.user.id, 'json');
+  assert.equal(before.bytes, MEDIA_HOURLY * png.length);
+  assert.equal((await send('DELETE', undefined, '/api/' + uploaded.key)).status, 200);
+  const after = await f.store.get('media-account:' + signed.user.id, 'json');
+  assert.equal(after.bytes, (MEDIA_HOURLY - 1) * png.length, 'successful owned deletion releases retained bytes');
+  assert.equal(Object.hasOwn(after.objects, uploaded.key), false);
+});
+
+test('media reconciliation repairs a bounded batch of retained-byte accounts', async () => {
+  const storage = new Map([
+    ['media-account:one', { objects: { stale: 99 }, bytes: 99 }],
+    ['media-account:two', { objects: {}, bytes: 0 }],
+  ]);
+  storage.list = async ({ prefix }) => new Map([...storage].filter(([key]) => key.startsWith(prefix)));
+  storage.get = async key => Map.prototype.get.call(storage, key);
+  storage.put = async (key, value) => Map.prototype.set.call(storage, key, value);
+  storage.delete = async key => Map.prototype.delete.call(storage, key);
+  const objects = [{ key: 'media/one/kept.png', size: 12 }];
+  const bucket = { list: async ({ prefix }) => ({ objects: objects.filter(item => item.key.startsWith(prefix)), truncated: false }) };
+  const written = new Map();
+  assert.equal(await reconcileMediaAccounts(storage, bucket, async (key, value) => written.set(key, value), 123), 2);
+  assert.deepEqual(written.get('media-account:one'), { objects: { 'media/one/kept.png': 12 }, bytes: 12, reconciledAt: 123 });
+  assert.deepEqual(written.get('media-account:two'), { objects: {}, bytes: 0, reconciledAt: 123 });
 });
 
 test('seed media and links survive the bot PR; shared schema caps gallery and rejects unsafe/video URLs', async () => {
