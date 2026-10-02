@@ -13,6 +13,7 @@ import { artRoutes, headerPrompt, iconPrompt, cleanScene, DAILY } from '../worke
 import { releaseRoutes, appJWT, privateKeyBytes, pickRelease, pickURL, serialize } from '../worker/release.mjs';
 import { dispatchReleasePoll } from '../worker/release-poll.mjs';
 import { checkManifest } from '../worker/manifest.mjs';
+import { COMMENTS_RETAINED, COMMENTS_PAGE } from '../worker/social.mjs';
 import { seedKind, seedRows, seedWords, seedCaption, seedStackHTML } from '../worker/catalog.mjs';
 import worker, { FarmCoordinator } from '../worker/main.mjs';
 const ORIGIN = 'https://tiinyapp.farm';
@@ -786,7 +787,9 @@ function socialFixture(f) {
 test('social: public counts, account thumb toggle, verified comments, limits and safe author projection', async () => {
   const f = fixture(); socialFixture(f);
   const endpoint = '/api/seeds/little-library';
-  assert.deepEqual(await (await f.call(endpoint + '/social')).json(), { thumbs: 0, seeds: 0, mine: false, comments: [] });
+  assert.deepEqual(await (await f.call(endpoint + '/social')).json(), {
+    thumbs: 0, seeds: 0, mine: false, comments: [], page: 0, nextPage: null,
+  });
   assert.equal((await f.call('/api/seeds/not-here/social')).status, 404);
   assert.equal((await f.call(endpoint + '/thumb', {})).status, 401);
   const first = await f.email();
@@ -864,8 +867,37 @@ test('coordinator serializes concurrent thumbs/comments and mirrors social recor
   assert.deepEqual(comments.map(r => r.status), [201, 201, 201, 201, 201, 429]);
   await Promise.all(pending);
   const durable = await storage.get('social:little-library');
-  assert.equal(durable.comments.length, 5); assert.equal(new Set(durable.comments.map(c => c.id)).size, 5);
+  assert.equal(durable.commentIds.length, 5); assert.equal(new Set(durable.commentIds).size, 5);
+  assert.ok(durable.commentIds.every(id => storage.values.has('social-comment:little-library:' + id)));
   assert.deepEqual(await mirror.get('social:little-library', 'json'), durable);
+});
+
+test('legacy social records migrate without losing thumbs or comments and paginate at the cap', async () => {
+  const f = fixture(); socialFixture(f);
+  const signed = await f.email(); await f.proof(signed.cookie);
+  const comments = Array.from({ length: COMMENTS_RETAINED }, (_, i) => ({
+    id: i.toString(16).padStart(32, '0'), userId: signed.user.id, text: 'Legacy thought ' + i,
+    at: new Date(f.now() + i).toISOString(),
+  }));
+  const thumbs = ['legacy-person'];
+  await f.store.put('social:little-library', JSON.stringify({ thumbs, comments }));
+  const first = await f.call('/api/seeds/little-library/social');
+  const page = await first.json();
+  assert.equal(page.comments.length, COMMENTS_PAGE); assert.equal(page.nextPage, 1);
+  assert.equal(page.comments.at(-1).text, 'Legacy thought 199');
+  const migrated = await f.store.get('social:little-library', 'json');
+  assert.deepEqual(migrated.thumbs, thumbs, 'every legacy thumb survives');
+  assert.equal(migrated.commentIds.length, COMMENTS_RETAINED);
+  assert.equal(new Set(migrated.commentIds).size, COMMENTS_RETAINED);
+  for (const comment of comments) {
+    assert.deepEqual(await f.store.get(`social-comment:little-library:${comment.id}`, 'json'), comment);
+  }
+  assert.equal((await f.call('/api/seeds/little-library/comments', { text: 'Over the cap' }, signed.cookie)).status, 409);
+  const toggled = await f.call('/api/seeds/little-library/thumb', {}, signed.cookie);
+  assert.equal(toggled.status, 200, 'a full conversation does not block seed toggles');
+  assert.equal((await toggled.json()).seeds, 2);
+  assert.equal((await f.call('/api/seeds/little-library/comments/' + comments[0].id, {}, signed.cookie, {}, 'DELETE')).status, 200);
+  assert.equal((await f.call('/api/seeds/little-library/comments', { text: 'Room after deletion' }, signed.cookie)).status, 201);
 });
 
 test('seed counts: one public read carries every app and every maker in the catalog', async () => {

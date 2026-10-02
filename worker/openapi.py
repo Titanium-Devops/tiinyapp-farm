@@ -127,8 +127,11 @@ SCHEMAS = {
                               "description": "The same number under the name the first"
                                              " release used. Read seeds."},
                    "mine": {"type": "boolean"},
-                   "comments": {"type": "array", "items": {"$ref": "#/components/schemas/Comment"}}},
-                  ["seeds", "thumbs", "mine", "comments"]),
+                   "comments": {"type": "array", "maxItems": 50,
+                                "items": {"$ref": "#/components/schemas/Comment"}},
+                   "page": {"type": "integer", "minimum": 0},
+                   "nextPage": {"type": ["integer", "null"], "minimum": 1}},
+                  ["seeds", "thumbs", "mine", "comments", "page", "nextPage"]),
     "SocialCounts": obj({
         "apps": {"type": "object", "description": "Keyed by app id.",
                  "additionalProperties": obj({"seeds": {"type": "integer"},
@@ -320,7 +323,11 @@ def paths():
             " the signed-in visitor has given this app a seed. thumbs carries the same number as"
             " seeds, under the name the first release used. A farm token is optional; one that"
             " matches nobody is refused with 401.", tags=["Seeds and comments"],
-            auth=["session", "farmToken"], parameters=[APP],
+            auth=["session", "farmToken"], parameters=[APP, {
+                "name": "page", "in": "query", "required": False,
+                "description": "Comment page, newest page first, with at most 50 comments.",
+                "schema": {"type": "integer", "minimum": 0},
+            }],
             answers={"200": answer("The conversation.", {"$ref": "#/components/schemas/Social"})},
             errors=[(401, "That farm token is not valid."), (404, "That app is not in the catalog."),
                     (405, "That action does not use this method.")])},
@@ -349,6 +356,7 @@ def paths():
             errors=[(400, "Write 1 to 1000 characters."), (401, "Sign in first."),
                     (403, "Verify you own a Tiiny first."),
                     (404, "That app is not in the catalog."),
+                    (409, "This conversation already retains 200 comments."),
                     (429, "Five comments an hour is the limit.")])},
         "/api/seeds/{id}/comments/{commentId}": {"x-farm-source": "social.mjs", "delete": op(
             "Remove a comment", "Its author or a farm admin.", tags=["Seeds and comments"],

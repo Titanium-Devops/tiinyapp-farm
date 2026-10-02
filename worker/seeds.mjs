@@ -3,6 +3,7 @@ import { checkManifest } from './manifest.mjs';
 import { catalog } from './makers.mjs';
 import { FARM_REPO, GITHUB, compareVersion, ownsSeed, releaseURL } from './catalog.mjs';
 import { releaseState } from './release.mjs';
+import { commentCount } from './social.mjs';
 export { releaseURL };
 const ORIGIN = 'https://tiinyapp.farm';
 const API = `${GITHUB}/repos/${FARM_REPO}`;
@@ -74,7 +75,7 @@ export async function seedRoutes(ctx) {
         } catch { item.unavailable = true; }
       }
       const social = await get('social:' + seed.id);
-      item.seeds = item.thumbs = social?.thumbs?.length || 0; item.comments = social?.comments?.length || 0;
+      item.seeds = item.thumbs = social?.thumbs?.length || 0; item.comments = commentCount(social);
       item.release = await releaseState(get, seed.id);
       try {
         const published = await env.ASSETS.fetch(new Request(ORIGIN + '/manifests/' + seed.id + '.json'));
@@ -97,7 +98,7 @@ export async function seedRoutes(ctx) {
         seeds.push({ id: manifest.id, name: manifest.name, version: manifest.version, icon: manifest.media?.icon,
           state: manifest.release ? 'published' : 'sprouting', url: '/apps/' + manifest.id + '/',
           canUpdate: true, checks: [], reviews: [], seeds: social?.thumbs?.length || 0,
-          thumbs: social?.thumbs?.length || 0, comments: social?.comments?.length || 0,
+          thumbs: social?.thumbs?.length || 0, comments: commentCount(social),
           release: await releaseState(get, manifest.id) });
       }
     }
