@@ -1,0 +1,58 @@
+{
+  "id": "tiinyengineer",
+  "name": "TiinyEngineer",
+  "pitch": "Know when infrastructure or a scheduled job silently stops.",
+  "description": "TiinyEngineer watches endpoints and scheduled jobs from one browser dashboard. It verifies repeated failures, keeps an append-only incident timeline, sends plain-language alerts with the first useful action, and closes the same incident when service returns. Checks, timing, alert wording, ownership, and source credentials are managed on the page. It uses Python 3.11 and its standard library only. Stage 1 review is still underway, so this draft has no installable release yet.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Jason Brashear",
+    "url": "https://github.com/webdevtodayjason",
+    "tiinyverse": "https://www.tiinyverse.com/users/39628b1e-e94e-4bd8-800e-5437d5336e1f"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/webdevtodayjason/tiinyengineer",
+  "repo": "https://github.com/webdevtodayjason/tiinyengineer",
+  "screenshots": [],
+  "entry": {
+    "python": "tiinyengineer",
+    "args": [
+      "--host",
+      "0.0.0.0",
+      "--port",
+      "8787"
+    ]
+  },
+  "port": {
+    "argv": "--port"
+  },
+  "requires": {
+    "python": "3.11",
+    "ports": [
+      8787
+    ],
+    "device": {
+      "models": [],
+      "npuUnits": 0
+    }
+  },
+  "permissions": [
+    "files",
+    "network"
+  ],
+  "tags": [
+    "monitoring",
+    "operations",
+    "developer-tools"
+  ],
+  "verified": false,
+  "featured": false,
+  "addedAt": "2026-10-02",
+  "updatedAt": "2026-10-02",
+  "selfcheck": true,
+  "health": "/api/status",
+  "open": "/",
+  "links": {
+    "repo": "https://github.com/webdevtodayjason/tiinyengineer",
+    "homepage": "https://github.com/webdevtodayjason/tiinyengineer"
+  }
+}
