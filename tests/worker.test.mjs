@@ -10,6 +10,7 @@ import { proofRoutes } from '../worker/proof.mjs';
 import { seedRoutes, releaseURL } from '../worker/seeds.mjs';
 import { artRoutes, headerPrompt, iconPrompt, cleanScene, DAILY } from '../worker/art.mjs';
 import { releaseRoutes, appJWT, privateKeyBytes, pickRelease, pickURL, serialize } from '../worker/release.mjs';
+import { dispatchReleasePoll } from '../worker/release-poll.mjs';
 import { checkManifest } from '../worker/manifest.mjs';
 import { seedKind, seedRows, seedWords, seedCaption, seedStackHTML } from '../worker/catalog.mjs';
 import worker, { FarmCoordinator } from '../worker/main.mjs';
@@ -108,6 +109,7 @@ function fixture({ appKeys = true } = {}) {
         'unexpected credential ' + options.headers.Authorization);
       if (githubFail && route.includes(githubFail)) return reply({ error: 'fake failure' }, 500);
       if (route === '/installation') return reply({ id: 7 });
+      if (route === '/dispatches' && options.method === 'POST') return new Response(null, { status: 204 });
       if (route === '') return reply({ default_branch: 'main' });
       if (route.startsWith('/contents/') && options.method === 'GET') {
         const [, id, ref] = route.match(/manifests\/(.+?)\.json(?:\?ref=(.+))?$/) || [];
@@ -187,6 +189,29 @@ function seedForm({ upload = false, ...changes } = {}) {
   else if (!form.has('releaseUrl')) form.set('releaseUrl', 'https://releases.example.org/seed.tar.gz');
   return form;
 }
+
+test('scheduled release poll dispatches the workflow with the App installation token', async () => {
+  const f = fixture();
+  await dispatchReleasePoll(f.env, f.fetcher, f.now());
+  const call = f.calls.find(item => item.url.endsWith('/repos/Titanium-Devops/tiinyapp-farm/dispatches'));
+  assert.ok(call);
+  assert.equal(call.method, 'POST');
+  assert.equal(call.headers.Authorization, 'Bearer app-installation-token');
+  assert.deepEqual(JSON.parse(call.body), { event_type: 'release-poll' });
+});
+
+test('release poll keeps GitHub cron backup and reports its heartbeat last', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/release-poll.yml', import.meta.url), 'utf8');
+  const config = await readFile(new URL('../wrangler.toml', import.meta.url), 'utf8');
+  assert.match(config, /\[triggers\]\s+crons = \["17 \* \* \* \*"\]/);
+  assert.match(workflow, /schedule:\s+.*cron: '17 \* \* \* \*'/s);
+  assert.match(workflow, /repository_dispatch:\s+types: \[release-poll\]/);
+  const heartbeat = workflow.indexOf('- name: Report poll heartbeat');
+  assert.ok(heartbeat > workflow.indexOf('- name: Open a bump pull request'));
+  assert.match(workflow.slice(heartbeat), /if: always\(\)/);
+  assert.match(workflow.slice(heartbeat), /WATCHTOWER_BEAT_TOKEN_POLL/);
+  assert.match(workflow.slice(heartbeat), /\[ "\$status" = "404" \]/);
+});
 
 test('health: GET and HEAD report KV, R2 and the deployed version without caching', async () => {
   const f = fixture();
