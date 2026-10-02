@@ -1,4 +1,4 @@
-import { mediaPattern } from './makers.mjs';
+import { mediaPattern, reconcileMediaAccounts } from './makers.mjs';
 import { createApp, json } from './index.mjs';
 import { proofRoutes } from './proof.mjs';
 import { releaseRoutes } from './release.mjs';
@@ -47,6 +47,11 @@ export class FarmCoordinator {
           this.ctx.waitUntil(this.env.FARM.delete(key).catch(() => console.error('FARM mirror delete failed')));
         },
       };
+      if (new URL(request.url).pathname === '/internal/reconcile-media') {
+        const reconciled = await reconcileMediaAccounts(storage, this.env.SEEDS,
+          async (key, value) => farm.put(key, JSON.stringify(value)), Date.now());
+        return json({ reconciled });
+      }
       return app(request, { ...this.env, FARM: farm });
     };
     // Read-only lookups must not sit behind a large upload or GitHub PR request.
@@ -65,7 +70,11 @@ export class FarmCoordinator {
 }
 export default {
   async scheduled(_controller, env) {
-    await dispatchReleasePoll(env);
+    const reconciliation = env.FARM_COORDINATOR
+      ? env.FARM_COORDINATOR.get(env.FARM_COORDINATOR.idFromName('farm')).fetch(
+        new Request('https://tiinyapp.farm/internal/reconcile-media', { method: 'POST' }))
+      : Promise.resolve();
+    await Promise.all([dispatchReleasePoll(env), reconciliation]);
   },
   async fetch(request, env) {
     const url = new URL(request.url);
