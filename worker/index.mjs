@@ -4,6 +4,8 @@ const ORIGIN = 'https://tiinyapp.farm';
 const COOKIE = '__Host-farm';
 const DAY = 86400000;
 const HEALTH_TIMEOUT = 1000;
+const EMAIL_CLIENT_HOURLY = 10;
+const EMAIL_GLOBAL_HOURLY = 100;
 const encoder = new TextEncoder();
 export class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -177,6 +179,27 @@ export function createApp({ fetcher = fetch, now = () => Date.now(), seedRoutes 
         const address = await sha256(encoder.encode(email));
         const history = (await get('email-rate:' + address) || []).filter(t => t > now() - 3600000);
         if (history.length >= 3) fail(429, 'Three codes per hour; please try again later.');
+        // The address limit stops one inbox from being flooded. These two independent limits
+        // stop an attacker from choosing a fresh address for every paid email and durable write.
+        // Cloudflare supplies CF-Connecting-IP at the edge. Hash it before storage so the abuse
+        // record does not retain a visitor's network address.
+        const client = await sha256(encoder.encode((request.headers.get('CF-Connecting-IP') || 'unknown').slice(0, 256)));
+        const storedRate = await get('email-send-rate');
+        const sent = Array.isArray(storedRate?.sent) ? storedRate.sent.filter(t => Number.isFinite(t) && t > now() - 3600000) : [];
+        const clients = {};
+        if (storedRate?.clients && typeof storedRate.clients === 'object' && !Array.isArray(storedRate.clients)) {
+          for (const [key, values] of Object.entries(storedRate.clients)) {
+            if (!/^[a-f0-9]{64}$/.test(key) || !Array.isArray(values)) continue;
+            const recent = values.filter(t => Number.isFinite(t) && t > now() - 3600000);
+            if (recent.length) clients[key] = recent;
+          }
+        }
+        const clientHistory = clients[client] || [];
+        if (clientHistory.length >= EMAIL_CLIENT_HOURLY || sent.length >= EMAIL_GLOBAL_HOURLY) {
+          fail(429, 'Too many sign-in codes were requested. Please try again later.');
+        }
+        sent.push(now()); clientHistory.push(now()); clients[client] = clientHistory;
+        await put('email-send-rate', { sent, clients });
         await put('email-rate:' + address, [...history, now()]);
         // Rejection sampling avoids bias in the six-digit code.
         let number;

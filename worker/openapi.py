@@ -232,7 +232,8 @@ def paths():
                 errors=[(405, "Use GET or HEAD for the health check.")])},
         "/api/auth/start": {"x-farm-source": "index.mjs", "post": op(
             "Send a sign-in code", "Emails a six digit code that lasts ten minutes and dies after"
-            " five wrong attempts.", tags=["Sign in"], limit="3 per hour per address",
+            " five wrong attempts.", tags=["Sign in"],
+            limit="3 per hour per address, 10 per hour per client, 100 per hour across the farm",
             body=json_body(obj({"email": {"type": "string", "maxLength": 254}}, ["email"])),
             answers={"200": answer("The code was sent.", obj({"sent": {"const": True}}, ["sent"]))},
             errors=[(400, "That is not an email address."), (403, "The Origin header is missing."),

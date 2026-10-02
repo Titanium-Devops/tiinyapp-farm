@@ -268,6 +268,25 @@ test('email throttles three sends per rolling hour, expires and limits guesses',
   f.advance(600001);
   assert.equal((await f.call('/api/auth/verify', { email: 'x@example.org', code: f.mails.at(-1).text.match(/\b\d{6}\b/)[0] })).status, 400);
 });
+test('email sending is capped per client and globally across attacker-chosen addresses', async () => {
+  const client = fixture();
+  for (let i = 0; i < 10; i++) {
+    const response = await client.call('/api/auth/start', { email: `client-${i}@example.org` }, '',
+      { 'CF-Connecting-IP': '203.0.113.8' });
+    assert.equal(response.status, 200);
+  }
+  assert.equal((await client.call('/api/auth/start', { email: 'client-over@example.org' }, '',
+    { 'CF-Connecting-IP': '203.0.113.8' })).status, 429);
+
+  const global = fixture();
+  for (let i = 0; i < 100; i++) {
+    const response = await global.call('/api/auth/start', { email: `global-${i}@example.org` }, '',
+      { 'CF-Connecting-IP': `198.51.100.${i}` });
+    assert.equal(response.status, 200);
+  }
+  assert.equal((await global.call('/api/auth/start', { email: 'global-over@example.org' }, '',
+    { 'CF-Connecting-IP': '192.0.2.1' })).status, 429);
+});
 test('failed email delivery invalidates the challenge; CSRF, bad body and tampered sessions fail', async () => {
   const f = fixture(); f.resendStatus(500);
   assert.equal((await f.call('/api/auth/start', { email: 'x@example.org' })).status, 502);
