@@ -4,6 +4,9 @@ compatibility_date = "2026-09-12"
 workers_dev = false
 main = "worker/main.mjs"
 
+[triggers]
+crons = ["17 * * * *"]
+
 [[routes]]
 pattern = "tiinyapp.farm"
 custom_domain = true

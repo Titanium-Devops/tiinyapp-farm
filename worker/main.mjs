@@ -4,6 +4,7 @@ import { proofRoutes } from './proof.mjs';
 import { releaseRoutes } from './release.mjs';
 import { seedRoutes } from './seeds.mjs';
 import { artRoutes } from './art.mjs';
+import { dispatchReleasePoll } from './release-poll.mjs';
 const app = createApp({ proofRoutes, releaseRoutes, seedRoutes, artRoutes });
 
 // The desktop launcher's downloads and its update feed, kept in the same R2 bucket as the app
@@ -63,6 +64,9 @@ export class FarmCoordinator {
   }
 }
 export default {
+  async scheduled(_controller, env) {
+    await dispatchReleasePoll(env);
+  },
   async fetch(request, env) {
     const url = new URL(request.url);
     // Health checks read the real KV namespace, not the coordinator's durable storage mirror.
