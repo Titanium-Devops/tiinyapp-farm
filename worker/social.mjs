@@ -6,11 +6,28 @@ import { profileId } from './proof.mjs';
 // stored record still calls the list thumbs so no key has to be rewritten; every answer carries
 // both names with the same number.
 export const seedCount = record => (record?.thumbs || []).length;
-export async function seedsForApps(get, apps) {
+export const commentCount = record => (record?.commentIds || record?.comments || []).length;
+export const COMMENTS_RETAINED = 200;
+export const COMMENTS_PAGE = 50;
+export async function socialRecord(get, put, seedId) {
+  const key = 'social:' + seedId;
+  const stored = await get(key) || { thumbs: [], commentIds: [] };
+  if (!Array.isArray(stored.comments)) return { key, social: { ...stored, thumbs: stored.thumbs || [], commentIds: stored.commentIds || [] } };
+  const commentIds = [];
+  for (const comment of stored.comments) {
+    await put(`social-comment:${seedId}:${comment.id}`, comment);
+    commentIds.push(comment.id);
+  }
+  const social = { ...stored, thumbs: stored.thumbs || [], commentIds };
+  delete social.comments;
+  await put(key, social);
+  return { key, social };
+}
+export async function seedsForApps(get, put, apps) {
   const counts = {};
   for (const app of apps) {
-    const record = await get('social:' + app.id);
-    counts[app.id] = { seeds: seedCount(record), comments: (record?.comments || []).length };
+    const { social: record } = await socialRecord(get, put, app.id);
+    counts[app.id] = { seeds: seedCount(record), comments: commentCount(record) };
   }
   return counts;
 }
@@ -36,14 +53,14 @@ export async function makerSeeds(get, apps, counts) {
   return totals;
 }
 export async function socialRoutes(ctx) {
-  const { path, request, env, get, put, requireUser, currentUser, bodyJSON, now, random } = ctx;
+  const { path, request, env, url, get, put, requireUser, currentUser, bodyJSON, now, random } = ctx;
   // One read for a whole page of apps: the catalog grid and the launcher both ask once rather
   // than once per tile. A minute of cache is short enough that a seed given now shows up while
   // the visitor is still looking at the page.
   if (path === '/api/social/counts') {
     if (request.method !== 'GET') fail(405, 'That action does not use this method.');
     const apps = await catalog(env);
-    const counts = await seedsForApps(get, apps);
+    const counts = await seedsForApps(get, put, apps);
     return json({ apps: counts, makers: await makerSeeds(get, apps, counts) },
       200, { 'Cache-Control': 'public, max-age=60' });
   }
@@ -61,7 +78,7 @@ export async function socialRoutes(ctx) {
   if (!response.ok) fail(404, 'That app is not in the catalog.');
   let manifest; try { manifest = await response.json(); } catch { fail(404, 'That app is not in the catalog.'); }
   if (manifest.id !== seedId) fail(404, 'That app is not in the catalog.');
-  const key = 'social:' + seedId, social = await get(key) || { thumbs: [], comments: [] };
+  const { key, social } = await socialRecord(get, put, seedId);
   const user = action === 'social' ? await currentUser() : await requireUser();
   // A read is open to anyone, but a token that was sent and matches nobody is said out loud,
   // so the launcher stops calling itself signed in rather than quietly reading as a stranger.
@@ -69,15 +86,23 @@ export async function socialRoutes(ctx) {
   const admins = new Set((env.FARM_ADMINS || '').split(',').map(id => id.trim()).filter(Boolean));
   const canDelete = comment => !!user && (comment.userId === user.id || admins.has(user.id));
   async function view() {
+    const rawPage = url.searchParams.get('page') || '0';
+    if (!/^(0|[1-9][0-9]*)$/.test(rawPage)) fail(400, 'Choose a valid comment page.');
+    const page = Number(rawPage), end = Math.max(0, social.commentIds.length - page * COMMENTS_PAGE);
+    const start = Math.max(0, end - COMMENTS_PAGE);
+    const stored = (await Promise.all(social.commentIds.slice(start, end).map(id => get(`social-comment:${seedId}:${id}`)))).filter(Boolean);
+    const userIds = [...new Set(stored.map(comment => comment.userId))];
+    const authors = new Map(await Promise.all(userIds.map(async id => [id, await get('user:' + id)])));
     const comments = [];
-    for (const comment of social.comments) {
-      const author = await get('user:' + comment.userId);
+    for (const comment of stored) {
+      const author = authors.get(comment.userId);
       comments.push({ id: comment.id, author: { handle: author?.handle || null,
         name: author?.tiinyverse?.name || 'A maker', avatar: author?.avatarKey ? '/' + author.avatarKey : null },
         text: comment.text, at: comment.at, canDelete: canDelete(comment) });
     }
     return { thumbs: social.thumbs.length, seeds: social.thumbs.length,
-      mine: !!user && social.thumbs.includes(user.id), comments };
+      mine: !!user && social.thumbs.includes(user.id), comments,
+      page, nextPage: start > 0 ? page + 1 : null };
   }
   if (action === 'social') return json(await view());
   if (action === 'thumb') {
@@ -91,14 +116,20 @@ export async function socialRoutes(ctx) {
     const rateKey = 'comment-rate:' + user.id;
     const recent = (await get(rateKey) || []).filter(time => time > now() - 3600000);
     if (recent.length >= 5) fail(429, 'You can post five comments per hour. Please try again later.');
+    if (social.commentIds.length >= COMMENTS_RETAINED) fail(409, 'This conversation is full. Remove a comment before adding another.');
     // Keep rate history separate so deleting comments cannot reset the limit.
     await put(rateKey, [...recent, now()]);
-    social.comments.push({ id: random(16), userId: user.id, text: input.text.trim(), at: new Date(now()).toISOString() });
+    const comment = { id: random(16), userId: user.id, text: input.text.trim(), at: new Date(now()).toISOString() };
+    await put(`social-comment:${seedId}:${comment.id}`, comment);
+    social.commentIds.push(comment.id);
   } else {
-    const index = social.comments.findIndex(comment => comment.id === commentId);
+    const index = social.commentIds.indexOf(commentId);
     if (index < 0) fail(404, 'That comment is not here.');
-    if (!canDelete(social.comments[index])) fail(403, 'Only the author or a farm admin can remove this comment.');
-    social.comments.splice(index, 1);
+    const comment = await get(`social-comment:${seedId}:${commentId}`);
+    if (!comment) fail(404, 'That comment is not here.');
+    if (!canDelete(comment)) fail(403, 'Only the author or a farm admin can remove this comment.');
+    social.commentIds.splice(index, 1);
+    await ctx.del(`social-comment:${seedId}:${commentId}`);
   }
   await put(key, social);
   return json(await view(), action === 'comments' && request.method === 'POST' ? 201 : 200);
