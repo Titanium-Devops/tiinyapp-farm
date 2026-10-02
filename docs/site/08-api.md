@@ -136,9 +136,11 @@ straight into `media`. See [Art in the farm's hand](/docs/art/) for what to writ
 
 The scene is 3 to 200 characters on one line; anything else answers 400 without spending a try. You
 need a verified Tiiny profile, and the app ID has to be yours or unclaimed, or the answer is 403.
-Three drawings per app per day, and one at a time per app: a second request while one is running
-answers 409. A drawing takes a minute or two, so give the call a generous timeout. A refusal from
-the drawing service answers 422 and a failure answers 502, and neither costs you a try.
+Three drawings per app per day, twelve per maker, and thirty across the farm. Only one drawing runs
+at a time per app, so a second request while one is running answers 409. A drawing takes a minute or
+two, so give the call a generous timeout. A refusal from the drawing service answers 422 and a
+failure answers 502. Neither reduces the three tries shown for that app, but every accepted request
+counts toward the maker and farm safety caps.
 
 ```
 curl --fail-with-body \
@@ -273,11 +275,11 @@ Three old paths answer 301: `/plant` to `/install/`, `/seeds` to `/submit/`, and
 
 | Thing | Limit |
 | --- | --- |
-| Email codes | 3 per hour per address |
+| Email codes | 3 per hour per address, 10 per client, 100 across the farm |
 | Submissions | 5 per hour per account |
 | Comments | 5 per hour per account |
 | Release checks | 1 per minute per app |
-| App art | 3 per app per day, one drawing at a time |
+| App art | 3 per app, 12 per maker, 30 across the farm per day; one at a time per app |
 | API tokens | 5 live per account |
 | JSON request body | 16 KiB |
 | Image upload | 2 MiB |

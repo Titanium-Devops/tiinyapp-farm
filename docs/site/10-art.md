@@ -63,12 +63,14 @@ What makes a line work:
 
 ## The limits
 
-- Three drawings per app per day. One drawing is the pair, header and icon together.
+- Three drawings per app per day, twelve per maker, and thirty across the farm. One drawing is the
+  pair, header and icon together.
 - One at a time per app. Pressing the button twice does not spend two tries.
 - You have to be signed in and verified as a Tiiny owner, and the app ID has to be yours or unused.
 - The pair takes a minute or two. Leave the tab open.
 - A refusal from the drawing service, which happens when a sentence reads as something it will not
-  draw, does not cost you a try. Neither does a failure.
+  draw, does not reduce the three tries shown for that app. Neither does a failure. Accepted
+  requests still count toward the maker and farm safety caps.
 
 ## Who drew what
 
