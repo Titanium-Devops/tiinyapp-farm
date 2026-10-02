@@ -201,20 +201,29 @@ test('scheduled release poll dispatches the workflow with the App installation t
   assert.ok(call);
   assert.equal(call.method, 'POST');
   assert.equal(call.headers.Authorization, 'Bearer app-installation-token');
-  assert.deepEqual(JSON.parse(call.body), { event_type: 'release-poll' });
+  assert.deepEqual(JSON.parse(call.body), { event_type: 'release-poll', client_payload: {
+    source: 'cloudflare-cron', dispatched_at: new Date(f.now()).toISOString(),
+  } });
 });
 
-test('release poll keeps GitHub cron backup and reports its heartbeat last', async () => {
+test('release poll beats only after a successful Cloudflare trigger and keeps the GitHub backup', async () => {
   const workflow = await readFile(new URL('../.github/workflows/release-poll.yml', import.meta.url), 'utf8');
   const config = await readFile(new URL('../wrangler.toml', import.meta.url), 'utf8');
   assert.match(config, /\[triggers\]\s+crons = \["17 \* \* \* \*"\]/);
   assert.match(workflow, /schedule:\s+.*cron: '17 \* \* \* \*'/s);
   assert.match(workflow, /repository_dispatch:\s+types: \[release-poll\]/);
-  const heartbeat = workflow.indexOf('- name: Report poll heartbeat');
+  const heartbeat = workflow.indexOf('- name: Report successful poll heartbeat');
   assert.ok(heartbeat > workflow.indexOf('- name: Open a bump pull request'));
-  assert.match(workflow.slice(heartbeat), /if: always\(\)/);
+  assert.match(workflow.slice(heartbeat), /if: steps\.poll\.outcome == 'success' && steps\.trigger\.outputs\.source == 'cloudflare-cron'/);
   assert.match(workflow.slice(heartbeat), /WATCHTOWER_BEAT_TOKEN_POLL/);
+  assert.doesNotMatch(workflow, /WATCHTOWER_BEAT_TOKEN_POLL_BACKUP/);
+  assert.match(workflow, /repository_dispatch\) source="cloudflare-cron"/);
+  assert.match(workflow, /schedule\) source="github-schedule-backup"/);
   assert.match(workflow.slice(heartbeat), /\[ "\$status" = "404" \]/);
+  const failed = workflow.indexOf('- name: Report a failed poll result');
+  assert.ok(failed > heartbeat);
+  assert.match(workflow.slice(failed), /steps\.poll\.outcome != 'success'/);
+  assert.match(workflow.slice(failed), /no heartbeat was sent/);
 });
 
 test('health: GET and HEAD report KV, R2 and the deployed version without caching', async () => {
