@@ -31,9 +31,9 @@ tiinyapp.farm is a reviewed catalog of small apps. The farm CLI installs and run
 
 Never include a Tiiny API key, a farm token, an email sign-in code, an archive containing secrets, recipient addresses, or private app data in a support request. The permissions guide explains the archive scanner and the agent guide explains how credentials are handled.
 
-## Contact
+## Contact channels
 
-- Public bug or documentation problem: https://github.com/Titanium-Devops/tiinyapp-farm/issues
-- Account or ownership problem: use https://github.com/Titanium-Devops/tiinyapp-farm/issues, include only the non-secret identifiers named in the agent support procedure, and ask the maintainer for a private channel if private data is required.
+- **Email (preferred):** [support@titaniumcomputing.com](mailto:support@titaniumcomputing.com). Send from the email address on your farm account.
+- **GitHub issues:** https://github.com/Titanium-Devops/tiinyapp-farm/issues for public bugs and documentation problems only.
 
-There are no published support hours or guaranteed response times. Use one issue per thread and keep replies in that thread.
+Support hours: Monday through Friday, 9 AM to 5 PM Central time. Use one issue per thread and keep replies in that thread.

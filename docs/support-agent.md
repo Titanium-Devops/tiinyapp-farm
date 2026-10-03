@@ -66,8 +66,8 @@ Tried first: checked the manifest, reran once, ran farm doctor --json and read t
 
 ## Where the person submits it
 
-For a public bug or documentation problem, the person opens or replies to one issue at `https://github.com/Titanium-Devops/tiinyapp-farm/issues`. Search existing issues first.
+The preferred channel is email. The person sends the draft to `support@titaniumcomputing.com` from the email address on their farm account. The agent drafts the message and the human submits it.
 
-For account, ownership or private-data problems, the person opens a redacted issue that contains no private data and asks the maintainer for a private channel if more detail is required. Do not put private details in a public issue.
+For a public bug or documentation problem only, the person may open or reply to one issue at `https://github.com/Titanium-Devops/tiinyapp-farm/issues`. Search existing issues first. Do not put account information or private details in a public issue.
 
-Replies go to the person, not to the drafting agent. There are no published support hours or guaranteed response times, so do not promise one.
+Replies go to the person's farm-account email address, not to the drafting agent. Support hours are Monday through Friday, 9 AM to 5 PM Central time. Keep one issue per thread and do not promise a response outside those hours.

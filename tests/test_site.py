@@ -298,12 +298,17 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         index = (self.output / 'support/llms.txt').read_text()
         procedure = (self.output / 'support/agent.md').read_text()
         for phrase in ('what the farm is', 'Service status', 'Security and privacy',
-                       'Contact', 'no published support hours'):
+                       'Contact channels', 'support@titaniumcomputing.com',
+                       'Monday through Friday, 9 AM to 5 PM Central time'):
             self.assertIn(phrase.lower(), index.lower())
         for phrase in ('Diagnose before drafting', 'farm doctor --json',
                        'Drafted with <tool> (AI agent)', 'What to leave out',
-                       'The agent drafts and the human submits'):
+                       'The agent drafts and the human submits',
+                       'support@titaniumcomputing.com',
+                       'from the email address on their farm account',
+                       'Monday through Friday, 9 AM to 5 PM Central time'):
             self.assertIn(phrase.lower(), procedure.lower())
+        self.assertNotIn('no published support hours', (index + procedure).lower())
 
     def test_every_internal_link_and_fragment_resolves(self):
         for path in self.output.rglob('*.html'):
