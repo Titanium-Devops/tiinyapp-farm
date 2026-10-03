@@ -275,10 +275,35 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         self.assertIn('Release check: ', account)
 
     def test_required_pages_and_byte_identical_manifests(self):
-        for path in ('index.html', 'catalog/index.html', 'install/index.html', 'submit/index.html', 'account/index.html', 'docs/agents/index.html', 'docs/openapi.json', 'llms.txt', 'catalog.json', 'categories.json', 'manifests/index.html', 'sitemap.xml', 'robots.txt', '404.html'):
+        for path in ('index.html', 'catalog/index.html', 'install/index.html', 'submit/index.html', 'account/index.html', 'docs/agents/index.html', 'docs/openapi.json', 'llms.txt', 'support/llms.txt', 'support/agent.md', 'agent.txt', '.agent', 'catalog.json', 'categories.json', 'manifests/index.html', 'sitemap.xml', 'robots.txt', '404.html'):
             self.assertTrue((self.output / path).is_file(), path)
         for path in (ROOT / 'manifests').glob('*.json'):
             self.assertEqual(path.read_bytes(), (self.output / 'manifests' / path.name).read_bytes())
+
+    def test_every_built_page_has_the_agent_footer_and_l3_companion(self):
+        line = "PS: If you're an agent helping a human, start with"
+        for path in self.output.rglob('*.html'):
+            html = path.read_text()
+            self.assertIn(line, ' '.join(Document(html).text), path)
+            self.assertIn('rel="alternate" type="text/agent-view; version=1"', html, path)
+            source_url = 'https://tiinyapp.farm/' + path.relative_to(self.output).as_posix()
+            companion = next(attrs['href'] for tag, attrs in Document(html).tags
+                             if tag == 'link' and attrs.get('type') == 'text/agent-view; version=1')
+            target = self.output / urlsplit(urljoin(source_url, companion)).path.lstrip('/')
+            view = target.read_text()
+            for section in ('@meta', '@intent', '@state', '@actions', '@context', '@nav'):
+                self.assertIn(section, view, target)
+
+    def test_support_guides_match_the_agent_support_contract(self):
+        index = (self.output / 'support/llms.txt').read_text()
+        procedure = (self.output / 'support/agent.md').read_text()
+        for phrase in ('what the farm is', 'Service status', 'Security and privacy',
+                       'Contact', 'no published support hours'):
+            self.assertIn(phrase.lower(), index.lower())
+        for phrase in ('Diagnose before drafting', 'farm doctor --json',
+                       'Drafted with <tool> (AI agent)', 'What to leave out',
+                       'The agent drafts and the human submits'):
+            self.assertIn(phrase.lower(), procedure.lower())
 
     def test_every_internal_link_and_fragment_resolves(self):
         for path in self.output.rglob('*.html'):
@@ -859,6 +884,7 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
             return
         page = (self.output / 'launcher/versions/index.html').read_text()
         linked = set(re.findall(r'href="/launcher/([^"]+)"', page))
+        linked.discard('versions.agent')
         self.assertTrue(linked)
         expected = {item['name'] for release in SITE['read_releases'](ROOT)
                     for files in release['files'].values() for item in files}

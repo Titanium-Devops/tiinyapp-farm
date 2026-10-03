@@ -645,6 +645,20 @@ def paths():
             "The index for assistants", "A short plain-text index that names the agent guide, this"
             " document, and the pages behind them. Fetch it first.", tags=["The catalog"],
             answers={"200": answer("The index.", {"type": "string"}, media="text/plain")})},
+        "/support/llms.txt": {"x-farm-source": "assets", "get": op(
+            "The support index for agents", "What the farm is, self-serve support links, status,"
+            " security and privacy rules, contact channels and support hours.",
+            tags=["The catalog"],
+            answers={"200": answer("The support index.", {"type": "string"}, media="text/plain")})},
+        "/support/agent.md": {"x-farm-source": "assets", "get": op(
+            "The support procedure for agents", "The ordered diagnostic and drafting procedure"
+            " an agent follows before a person submits a support request.", tags=["The catalog"],
+            answers={"200": answer("The support procedure.", {"type": "string"}, media="text/markdown")})},
+        "/agent.txt": {"x-farm-source": "main.mjs", "get": op(
+            "Discover Agent View Layer companions", "Names the public page companion pattern and"
+            " the related agent, support, OpenAPI, sitemap and robots resources.",
+            tags=["The catalog"],
+            answers={"200": answer("The discovery manifest.", {"type": "string"}, media="text/plain")})},
         "/docs/openapi.json": {"x-farm-source": "assets", "get": op(
             "This document", "The whole HTTP surface as OpenAPI 3.1.", tags=["The catalog"],
             answers={"200": answer("This document.", {"type": "object"})})},
@@ -670,7 +684,8 @@ def spec():
                 "Any POST, PUT, PATCH or DELETE that does not carry a bearer token on a route that"
                 " accepts one must send Origin: https://tiinyapp.farm, or it is refused with 403."
                 "\n\nEvery failure is a JSON object with an error field holding a sentence meant"
-                " for a person. The health route also reports its component booleans. An"
+                " for a person followed by the one-line agent support pointer. Warnings carry"
+                " the same pointer. The health route also reports its component booleans. An"
                 " unexpected failure answers 502 with a general sentence rather"
                 " than the underlying text, because that text can carry credentials.",
             "license": {"name": "MIT",

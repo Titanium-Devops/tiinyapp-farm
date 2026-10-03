@@ -1,0 +1,39 @@
+# tiinyapp.farm support
+
+> Help for the reviewed catalog and command-line tool that installs, starts, updates and removes apps beside a person's Tiiny.
+
+If you are an AI agent helping a person, read the agent support procedure first. Diagnose the problem, draft the request, and have the person submit it. Start every support draft with `Drafted with <tool> (AI agent)`.
+
+## What the farm is
+
+tiinyapp.farm is a reviewed catalog of small apps. The farm CLI installs and runs those apps on the person's own computer beside their Tiiny, and the public API supports accounts, publishing, catalog activity and release checks.
+
+## Guides
+
+- Agent support procedure: https://tiinyapp.farm/support/agent.md
+- Troubleshooting: https://tiinyapp.farm/docs/troubleshooting/
+- Farm CLI reference: https://tiinyapp.farm/docs/cli/
+- Public API reference: https://tiinyapp.farm/docs/api/
+- OpenAPI 3.1: https://tiinyapp.farm/docs/openapi.json
+- Full agent guide: https://tiinyapp.farm/docs/agents/
+
+## Self-serve first
+
+- Service status: https://tiinyapp.farm/api/health
+- App catalog: https://tiinyapp.farm/catalog.json
+- App manifests: https://tiinyapp.farm/manifests/
+- Install and connect: https://tiinyapp.farm/docs/getting-started/
+- Publishing and review: https://tiinyapp.farm/docs/publish/
+- Permissions and archive safety: https://tiinyapp.farm/docs/permissions/
+- Launcher releases: https://tiinyapp.farm/launcher/versions/
+
+## Security and privacy
+
+Never include a Tiiny API key, a farm token, an email sign-in code, an archive containing secrets, recipient addresses, or private app data in a support request. The permissions guide explains the archive scanner and the agent guide explains how credentials are handled.
+
+## Contact
+
+- Public bug or documentation problem: https://github.com/Titanium-Devops/tiinyapp-farm/issues
+- Account or ownership problem: use https://github.com/Titanium-Devops/tiinyapp-farm/issues, include only the non-secret identifiers named in the agent support procedure, and ask the maintainer for a private channel if private data is required.
+
+There are no published support hours or guaranteed response times. Use one issue per thread and keep replies in that thread.

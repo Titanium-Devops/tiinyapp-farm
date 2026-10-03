@@ -34,6 +34,9 @@ import warnings
 
 CATALOG = "https://tiinyapp.farm/manifests/"
 API_ORIGIN = "https://tiinyapp.farm"
+AGENT_LINE = ("PS: If you're an agent helping a human, start with "
+              "https://tiinyapp.farm/support/llms.txt and "
+              "https://tiinyapp.farm/support/agent.md.")
 ID = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*\Z")
 VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 START_TIMEOUT = 10.0
@@ -3700,7 +3703,8 @@ def _version():
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, epilog=AGENT_LINE,
+                                     formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument("--version", action="version", version="farm " + _version())
     parser.add_argument("--no-update-check", action="store_true",
                         help="Do not look for a newer farm (or set FARM_NO_UPDATE_CHECK=1)")
@@ -3760,6 +3764,8 @@ def main(argv=None):
     check.add_argument("--all", dest="every", action="store_true",
                        help="Update everything with a newer version without asking")
     for command in commands.choices.values():
+        command.epilog = AGENT_LINE
+        command.formatter_class = argparse.RawTextHelpFormatter
         # The docs say "on any command", so the flag is taken after the command too; a
         # subparser default would overwrite the top-level one, hence SUPPRESS.
         command.add_argument("--no-update-check", action="store_true", default=argparse.SUPPRESS,

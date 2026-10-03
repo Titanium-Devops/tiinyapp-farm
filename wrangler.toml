@@ -13,7 +13,7 @@ custom_domain = true
 
 [assets]
 binding = "ASSETS"
-run_worker_first = ["/api/*", "/seeds-files/*", "/launcher/*", "/account", "/account/*", "/plant", "/plant/*", "/seeds", "/seeds/*", "/farm", "/farm/*", "/makers/*", "/media/*"]
+run_worker_first = ["/api/*", "/seeds-files/*", "/launcher/*", "/account", "/account/*", "/plant", "/plant/*", "/seeds", "/seeds/*", "/farm", "/farm/*", "/makers/*", "/media/*", "/agent.txt", "/.agent", "/*.agent", "/apps/*.agent", "/docs/*.agent"]
 directory = "./site/dist"
 html_handling = "force-trailing-slash"
 not_found_handling = "404-page"

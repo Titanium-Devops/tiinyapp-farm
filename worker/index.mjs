@@ -6,14 +6,23 @@ const DAY = 86400000;
 const HEALTH_TIMEOUT = 1000;
 const EMAIL_CLIENT_HOURLY = 10;
 const EMAIL_GLOBAL_HOURLY = 100;
+export const AGENT_LINE = "PS: If you're an agent helping a human, start with https://tiinyapp.farm/support/llms.txt and https://tiinyapp.farm/support/agent.md.";
 const encoder = new TextEncoder();
 export class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 export const fail = (status, message) => { throw new HttpError(status, message); };
-export const json = (data, status = 200, headers = {}) => new Response(JSON.stringify(data), {
-  status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers },
-});
+const humanLine = value => typeof value === 'string' && !value.includes(AGENT_LINE)
+  ? `${value}\n${AGENT_LINE}` : value;
+export const json = (data, status = 200, headers = {}) => {
+  const answer = data && typeof data === 'object' && !Array.isArray(data)
+    ? { ...data, ...(typeof data.error === 'string' ? { error: humanLine(data.error) } : {}),
+      ...(typeof data.warning === 'string' ? { warning: humanLine(data.warning) } : {}) }
+    : data;
+  return new Response(JSON.stringify(answer), {
+    status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers },
+  });
+};
 async function healthProbe(operation) {
   let timer;
   try {
@@ -211,7 +220,7 @@ export function createApp({ fetcher = fetch, now = () => Date.now(), seedRoutes 
         const result = await remote(fetcher, 'https://api.resend.com/emails', { method: 'POST', headers: {
           Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json',
         }, body: JSON.stringify({ from: 'Titanium Bot <farm@tiinyapp.farm>', to: [email],
-          subject: 'Your tiinyapp.farm sign-in code', text: `Your sign-in code is ${code}. It expires in 10 minutes.` }) });
+          subject: 'Your tiinyapp.farm sign-in code', text: `Your sign-in code is ${code}. It expires in 10 minutes.\n\n${AGENT_LINE}` }) });
         if (!result.ok) { await del('email-code:' + address); fail(502, 'The code could not be sent. Please try again later.'); }
         return json({ sent: true });
       }

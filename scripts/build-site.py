@@ -16,6 +16,9 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 ORIGIN = "https://tiinyapp.farm"
 REPO = "https://github.com/Titanium-Devops/tiinyapp-farm"
+AGENT_LINE = ("PS: If you're an agent helping a human, start with "
+              "https://tiinyapp.farm/support/llms.txt and "
+              "https://tiinyapp.farm/support/agent.md.")
 PERMISSIONS = {
     "microphone": "Microphone: can listen through your microphone.",
     "files": "Files: can read or write files on your computer.",
@@ -208,6 +211,7 @@ def page(title, body, path, scripts=()):
               'catalog' if path == '/catalog/' else 'apps' if path == '/' or path.startswith(('/apps/', '/makers/')) else '')
     navigation = ''.join(f'<a href="{url}"' + (' class="on" aria-current="page"' if key == active else '') + f'>{label}</a>' for key, url, label in [('apps', '/', 'Apps'), ('catalog', '/catalog/', 'Catalog'), ('install', '/install/', 'Install'), ('docs', '/docs/', 'Docs'), ('submit', '/submit/', 'Submit an app')])
     page_scripts = ''.join(f'<script type="module" src="{e(src)}"></script>' for src in scripts)
+    agent_path = '/.agent' if path == '/' else path.rstrip('/') + '.agent'
     return f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -225,14 +229,52 @@ def page(title, body, path, scripts=()):
 <link rel="icon" href="/brand/favicon-192.png" sizes="192x192" type="image/png">
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
 <link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="text/agent-view; version=1" href="{e(agent_path)}">
+<link rel="agent-manifest" type="text/plain" href="/agent.txt">
 <link rel="stylesheet" href="/assets/site.css"></head>
 <body><a class="skip" href="#main">Skip to content</a>
 <header><div class="wrap"><a class="brand" href="/"><img class="brand-mark" src="/brand/tiinyapp-farm-square-logo.png" width="34" height="34" alt=""><span>tiinyapp.farm</span></a>
 <nav aria-label="Main navigation">{navigation}<a class="me" data-farm-nav href="/submit/#account-panel">Sign in</a></nav></div></header>
 <main id="main">{body}</main>
 <footer><div class="wrap"><div class="marks"><a class="pill" href="https://titanium.bot"><img src="/brand/titanium-bot-logo.svg" width="120" height="30" alt="Titanium Bot"><span>Brought to you by Titanium Bot</span></a>
-<a class="pill" href="https://tiiny.ai">Built for <img src="/brand/tiiny-logo.svg" width="80" height="28" alt="Tiiny"></a></div><span>Made by Titanium Computing</span><a href="/submit/">Submit an app</a><a href="/docs/">Documentation</a></div></footer>
+<a class="pill" href="https://tiiny.ai">Built for <img src="/brand/tiiny-logo.svg" width="80" height="28" alt="Tiiny"></a></div><span>Made by Titanium Computing</span><a href="/submit/">Submit an app</a><a href="/docs/">Documentation</a>
+<p class="agent-line">PS: If you're an agent helping a human, start with <a href="/support/llms.txt">https://tiinyapp.farm/support/llms.txt</a> and <a href="/support/agent.md">https://tiinyapp.farm/support/agent.md</a>.</p>
+<a class="agent-view-link" href="{e(agent_path)}" rel="alternate agent-view" type="text/agent-view; version=1" data-avl-endpoint="{e(agent_path)}">Agent view of this page</a></div></footer>
 {page_scripts}<script type="module" src="/assets/session.js"></script></body></html>'''
+
+
+def agent_view(title, path, description, generated):
+    """A public L3 companion built from the same title and description as the HTML page."""
+    companion = '/.agent' if path == '/' else path.rstrip('/') + '.agent'
+    clean = ' '.join(unescape(re.sub(r'<[^>]+>', '', description)).split())
+    return f'''@meta
+  v: 1
+  route: {path}
+  generated: {generated}
+  ttl: 1h
+
+@intent
+  purpose: {title} on tiinyapp.farm
+  audience: visitor, maker, agent
+  capability: read, navigate
+
+@state
+  title: {title}
+  human: {path}
+
+@actions
+  - id: view_human
+    method: GET
+    href: {path}
+
+@context
+  > {clean or title}
+
+@nav
+  self: {companion}
+  parents: [/.agent]
+  peers: [/catalog.agent, /docs/agents.agent, /support/agent.md]
+'''
 
 
 INSTALL_STEPS = '''<div class="steps">
@@ -1048,6 +1090,7 @@ def build(source=ROOT, output=None, today=None, releases_url=None, allow_stale=F
                         maker=maker['name'], media={'header': maker.get('avatar')},
                         avatar=maker.get('avatar'), verified=bool(maker.get('tiinyverse')))
         pages['/manifests/'] = ('App manifests', listing + '</ul></section>')
+        generated = datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
         for url, (title, body) in pages.items():
             scripts = ('/assets/catalog.js',) if url in ('/', '/catalog/') else (
                 ('/assets/catalog.js', '/assets/share.js', '/assets/seed-media.js', '/assets/social.js', '/assets/art.js', '/assets/release.js')
@@ -1055,13 +1098,22 @@ def build(source=ROOT, output=None, today=None, releases_url=None, allow_stale=F
             # The platform swap and nothing else, so it ships only where there is a button to swap.
             if launcher['enabled'] and (url == '/install/' or url.startswith('/apps/')):
                 scripts = scripts + ('/assets/launcher.js',)
-            write(url.lstrip('/') + 'index.html', page(title, body, url, scripts))
+            built = page(title, body, url, scripts)
+            write(url.lstrip('/') + 'index.html', built)
+            lede = re.search(r'<p class="(?:lede|sub|pitch)">(.*?)</p>', body, re.S) or re.search(r'<p>(.*?)</p>', body, re.S)
+            description = lede.group(1) if lede else title
+            companion = '.agent' if url == '/' else url.strip('/') + '.agent'
+            write(companion, agent_view(title, url, description, generated))
         write('404.html', page('Page not found', '<section class="sect"><h1>Page not found</h1><p>This page does not exist. ' + link('/', 'Return to the catalog') + '.</p></section>', '/404.html'))
+        write('404.html.agent', agent_view('Page not found', '/404.html', 'This page does not exist.', generated))
         write('sitemap.xml', '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + ''.join(f'<url><loc>{ORIGIN}{url}</loc></url>' for url in sorted(pages) if url not in ("/account/", "/submit/done/")) + '</urlset>\n')
         write('catalog.json', json.dumps({'cli': cli_version(), 'apps': [app for _, app in manifests]},
                                          ensure_ascii=False) + '\n')
         write('categories.json', json.dumps({'map': CATEGORIES, 'order': CATEGORY_ORDER}, ensure_ascii=False) + '\n')
         write('llms.txt', guide)
+        write('support/llms.txt', (source / 'docs/support-llms.txt').read_text(encoding='utf-8'))
+        write('support/agent.md', (source / 'docs/support-agent.md').read_text(encoding='utf-8'))
+        write('agent.txt', (source / 'docs/agent.txt').read_text(encoding='utf-8'))
         write('docs/openapi.json', json.dumps(openapi(), indent=2, ensure_ascii=False) + '\n')
         write('site.webmanifest', json.dumps({'name': 'tiinyapp.farm', 'short_name': 'tiinyapp.farm',
               'start_url': '/', 'display': 'standalone', 'theme_color': '#090D14', 'background_color': '#090D14',
@@ -1069,7 +1121,7 @@ def build(source=ROOT, output=None, today=None, releases_url=None, allow_stale=F
                         {'src': '/brand/icon-512.png', 'sizes': '512x512', 'type': 'image/png'}]}) + '\n')
         shutil.copytree(source / 'brand', dest / 'brand')
         shutil.copytree(source / 'site/fonts', dest / 'fonts')
-        write('robots.txt', f'User-agent: *\nAllow: /\nSitemap: {ORIGIN}/sitemap.xml\n')
+        write('robots.txt', f'User-agent: *\nAllow: /\nSitemap: {ORIGIN}/sitemap.xml\nAgent-View: {ORIGIN}/agent.txt\nLLMs: {ORIGIN}/llms.txt\n')
         assets = ['hero.jpg', 'site.css', 'catalog.js', 'seeds.js', 'session.js', 'farm.js', 'seed-media.js', 'seed-stack.js', 'social.js', 'share.js', 'art.js', 'release.js', 'titanium-icon.png', 'titanium-header.webp']
         if launcher['enabled']:
             assets.append('launcher.js')

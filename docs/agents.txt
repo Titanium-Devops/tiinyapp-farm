@@ -8,6 +8,10 @@ maintainer; nothing reaches the catalog on its own.
 
 This file is the index. Read the page you need rather than guessing.
 
+For support, start with https://tiinyapp.farm/support/llms.txt and
+https://tiinyapp.farm/support/agent.md. Agent View Layer discovery starts at
+https://tiinyapp.farm/agent.txt.
+
 Start here
 ----------
 
