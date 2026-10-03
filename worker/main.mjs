@@ -28,6 +28,20 @@ export function launcherType(file) {
   return LAUNCHER_TYPES.find(([pattern]) => pattern.test(file))?.[1] ?? '';
 }
 
+async function agentAsset(request, env) {
+  const response = await env.ASSETS.fetch(request);
+  const headers = new Headers(response.headers);
+  if (new URL(request.url).pathname.endsWith('.agent')) {
+    headers.set('Content-Type', 'text/agent-view; version=1; charset=utf-8');
+  }
+  headers.append('Link', '</agent.txt>; rel="agent-manifest"; type="text/plain"');
+  return new Response(request.method === 'HEAD' ? null : response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 // A single durable coordinator prevents KV's eventual consistency from allowing
 // double code redemption, duplicate profile claims or simultaneous seed writes.
 // Durable storage is authoritative; FARM KV is a write-through mirror.
@@ -78,6 +92,10 @@ export default {
   },
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (['GET', 'HEAD'].includes(request.method) &&
+        (url.pathname === '/agent.txt' || url.pathname.endsWith('.agent'))) {
+      return agentAsset(request, env);
+    }
     // Health checks read the real KV namespace, not the coordinator's durable storage mirror.
     if (url.pathname === '/api/health') return app(request, env);
     if (url.pathname.startsWith('/api/') || /^\/(account|farm|plant|seeds|makers)(?:\/|$)/.test(url.pathname)) {

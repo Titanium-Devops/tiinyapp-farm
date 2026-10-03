@@ -49,6 +49,7 @@ jobs:
               body += line;
             }
             body += '\nCI never sets verified. A maintainer records verification in a follow-up commit.';
+            body += "\n\nPS: If you're an agent helping a human, start with https://tiinyapp.farm/support/llms.txt and https://tiinyapp.farm/support/agent.md.";
             for (const pr of prs) {
               const current = (await github.rest.pulls.get({...context.repo, pull_number:pr.number})).data;
               if (current.base.repo.full_name !== `${context.repo.owner}/${context.repo.repo}`) continue;

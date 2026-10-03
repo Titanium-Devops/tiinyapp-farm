@@ -1,0 +1,26 @@
+# tiinyapp.farm Agent View Layer manifest
+
+version: 1
+content-type: text/agent-view; version=1
+producer: tiinyapp.farm static site builder
+
+discovery:
+  - suffix
+  - html-link
+  - body-link
+  - manifest
+
+routes:
+  - GET /.agent
+  - GET /{path}.agent
+
+related:
+  llms: /llms.txt
+  support: /support/llms.txt
+  agent-support: /support/agent.md
+  openapi: /docs/openapi.json
+  sitemap: /sitemap.xml
+  robots: /robots.txt
+
+spec: https://github.com/frontier-infra/avl/blob/main/specs/avl-agent-view-layer.md
+

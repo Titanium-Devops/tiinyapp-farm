@@ -5,7 +5,7 @@ import { generateKeyPairSync, createPublicKey } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { spawnSync } from 'node:child_process';
-import { createApp, sha256, boundedBody } from '../worker/index.mjs';
+import { AGENT_LINE, createApp, sha256, boundedBody } from '../worker/index.mjs';
 import { proofRoutes } from '../worker/proof.mjs';
 import { MEDIA_HOURLY, MEDIA_BYTES, reconcileMediaAccounts } from '../worker/makers.mjs';
 import { seedRoutes, releaseURL } from '../worker/seeds.mjs';
@@ -242,6 +242,17 @@ test('health: GET and HEAD report KV, R2 and the deployed version without cachin
   assert.equal(refused.headers.get('Allow'), 'GET, HEAD');
 });
 
+test('agent-view assets carry their required type and manifest discovery', async () => {
+  const f = fixture();
+  const view = await worker.fetch(new Request(ORIGIN + '/.agent'), f.env);
+  assert.equal(view.status, 200);
+  assert.equal(view.headers.get('Content-Type'), 'text/agent-view; version=1; charset=utf-8');
+  assert.match(view.headers.get('Link'), /<\/agent\.txt>; rel="agent-manifest"/);
+  const manifest = await worker.fetch(new Request(ORIGIN + '/agent.txt'), f.env);
+  assert.equal(manifest.status, 200);
+  assert.match(manifest.headers.get('Link'), /<\/agent\.txt>; rel="agent-manifest"/);
+});
+
 test('health: a KV failure returns 503 without exposing its error', async () => {
   const f = fixture();
   f.objects.set('launcher/latest.json', { value: '{}', options: {} });
@@ -250,7 +261,7 @@ test('health: a KV failure returns 503 without exposing its error', async () => 
   assert.equal(response.status, 503);
   const body = await response.json();
   assert.deepEqual(body, { ok: false, kv: false, r2: true, version: 'fixture-build',
-    error: 'KV health check failed.' });
+    error: `KV health check failed.\n${AGENT_LINE}` });
   assert.doesNotMatch(JSON.stringify(body), /secret backend detail/);
 });
 
@@ -259,6 +270,7 @@ test('email: six digits, HMAC only, normalization, secure session, single redemp
   assert.match(signed.code, /^\d{6}$/);
   assert.equal(signed.user.email, 'grower@example.org');
   assert.equal(f.mails[0].from, 'Titanium Bot <farm@tiinyapp.farm>');
+  assert.ok(f.mails[0].text.endsWith(AGENT_LINE));
   assert.ok(!JSON.stringify([...f.store.values]).includes(JSON.stringify(signed.code)));
   assert.equal((await (await f.call('/api/me', undefined, signed.cookie)).json()).user.id, signed.user.id);
   assert.equal((await f.call('/api/auth/verify', { email: signed.user.email, code: signed.code })).status, 400);
@@ -465,7 +477,7 @@ test('the launcher feed and its downloads come from R2, typed, cached by name an
   // Before the first release the feed is simply absent, and a launcher asking for it is told so.
   const early = await worker.fetch(new Request(ORIGIN + '/launcher/latest.json'), f.env);
   assert.equal(early.status, 404);
-  assert.equal((await early.json()).error, 'The launcher has not been published yet.');
+  assert.equal((await early.json()).error, `The launcher has not been published yet.\n${AGENT_LINE}`);
   f.objects.set('launcher/latest.json', { value: feed, options: {} });
   f.objects.set('launcher/Tiiny-App-Farm_0.1.0_universal.dmg', { value: 'fixture disk image', options: {} });
   f.objects.set('launcher/Tiiny-App-Farm_0.1.0_x64-setup.exe', { value: 'fixture installer', options: {} });
@@ -505,11 +517,11 @@ test('the launcher feed and its downloads come from R2, typed, cached by name an
   for (const missing of ['Tiiny-App-Farm_9.9.9_universal.dmg', 'notes.txt', 'seeds/little-library/0.1.0/little-library.tar.gz', '.env', '', 'a..b.dmg']) {
     const refused = await worker.fetch(new Request(ORIGIN + '/launcher/' + missing), f.env);
     assert.equal(refused.status, 404, missing);
-    assert.match((await refused.json()).error, /^(That launcher file does not exist\.|The launcher has not been published yet\.)$/, missing);
+    assert.match((await refused.json()).error, /^(That launcher file does not exist\.|The launcher has not been published yet\.)\nPS: /, missing);
   }
   const posted = await worker.fetch(new Request(ORIGIN + '/launcher/latest.json', { method: 'POST' }), f.env);
   assert.equal(posted.status, 405);
-  assert.equal((await posted.json()).error, 'Use GET or HEAD for launcher downloads.');
+  assert.equal((await posted.json()).error, `Use GET or HEAD for launcher downloads.\n${AGENT_LINE}`);
 });
 test('the release history is a feed from R2 and the version history is a page of the site', async () => {
   const f = fixture();
@@ -522,7 +534,7 @@ test('the release history is a feed from R2 and the version history is a page of
   }
   const early = await worker.fetch(new Request(ORIGIN + '/launcher/releases.json'), f.env);
   assert.equal(early.status, 404);
-  assert.equal((await early.json()).error, 'The launcher release history has not been published yet.');
+  assert.equal((await early.json()).error, `The launcher release history has not been published yet.\n${AGENT_LINE}`);
   f.objects.set('launcher/releases.json', { value: history, options: {} });
   f.objects.set('launcher/Tiiny-App-Farm-0.1.0.AppImage', { value: 'fixture linux build', options: {} });
   const served = await worker.fetch(new Request(ORIGIN + '/launcher/releases.json'), f.env);
@@ -541,7 +553,7 @@ test('the release history is a feed from R2 and the version history is a page of
   // The page is the only thing under /launcher/ that is not a file, so nothing else falls through.
   const nested = await worker.fetch(new Request(ORIGIN + '/launcher/versions/0.1.0/'), f.env);
   assert.equal(nested.status, 404);
-  assert.equal((await nested.json()).error, 'That launcher file does not exist.');
+  assert.equal((await nested.json()).error, `That launcher file does not exist.\n${AGENT_LINE}`);
 });
 test('seed gate, archive selection, unsafe URL, invalid schema and size limits stop submission', async () => {
   const f = fixture(); assert.equal((await f.call('/api/seeds', seedForm())).status, 401);
