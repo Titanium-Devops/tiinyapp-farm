@@ -107,7 +107,7 @@ class SiteTests(unittest.TestCase):
                 for url in [u for u in (app.get('homepage'), app.get('repo')) if u]:
                     self.assertIn(url, doc.references)
                 self.assertIn(app['release']['sha256'][:12], visible)
-                self.assertIn(f'{app["release"]["size"] / 1_000_000:.1f} MB', visible)
+                self.assertIn(SITE['release_size'](app['release']['size']), visible)
                 self.assertIn('farm install ' + app['id'], visible)
                 self.assertIn('farm start ' + app['id'], visible)
                 for permission in app['permissions']:
@@ -119,6 +119,10 @@ class SiteTests(unittest.TestCase):
                 self.assertIn('Reviewed' if app['verified'] else 'Not reviewed yet', visible)
                 self.assertIn('Grown by', visible)
                 self.assertIn('class="rail"', (self.output / 'apps' / app['id'] / 'index.html').read_text())
+
+    def test_release_size_uses_kb_below_one_mb(self):
+        self.assertEqual('49 KB', SITE['release_size'](49_934))
+        self.assertEqual('1.0 MB', SITE['release_size'](1_000_000))
 
     def test_sprouting_seed_keeps_story_and_social_without_install_or_release(self):
         app = copy.deepcopy(self.apps[0])
