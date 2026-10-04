@@ -92,6 +92,13 @@ def command(value):
     return f'<pre><code>{e(value)}</code></pre>'
 
 
+def release_size(size):
+    """A release archive size that stays useful for small apps."""
+    if size < 1_000_000:
+        return f"{size // 1_000} KB"
+    return f"{size / 1_000_000:.1f} MB"
+
+
 # The desktop launcher is off until site/launcher.json says otherwise. Everything the launcher
 # adds to this site hangs off that one file, so this script can sit on main for as long as it
 # takes the app to ship and build the pages exactly as it built them before.
@@ -792,7 +799,7 @@ def app_page(app, today, makers=(), launcher=None, counts=None):
         install = '<h2>Install</h2>' + opener + copy_command(commands) + f'<p class="sub install-note">{local}New here? <a href="/install/">Install the farm CLI first.</a></p>'
         if app['entry'] is None:
             install += '<p>This is a library. There is no app to start. Use it from your own application.</p>'
-        size_mb = f'{release["size"] / 1_000_000:.1f} MB'
+        size_mb = release_size(release["size"])
         short_sha = release['sha256'] if release['sha256'] == 'pending' else release['sha256'][:12] + '…'
         release_details = f'<dl><dt>Version</dt><dd>{e(app["version"])}</dd><dt>Size</dt><dd>{e(size_mb)}</dd><dt>SHA-256</dt><dd class="mono" title="{e(release["sha256"])}">{e(short_sha)}</dd><dt>Source</dt><dd>{link(repo or release["url"], "GitHub" if repo else "Release archive")}</dd></dl>'
         if release['sha256'] == 'pending':
