@@ -33,7 +33,7 @@ Never include a Tiiny API key, a farm token, an email sign-in code, an archive c
 
 ## Contact channels
 
-- **Email (preferred):** [support@titaniumcomputing.com](mailto:support@titaniumcomputing.com). Send from the email address on your farm account.
+- **Email (preferred):** [help@myagents.email](mailto:help@myagents.email). Send from the email address on your farm account.
 - **GitHub issues:** https://github.com/Titanium-Devops/tiinyapp-farm/issues for public bugs and documentation problems only.
 
 Support hours: Monday through Friday, 9 AM to 5 PM Central time. Use one issue per thread and keep replies in that thread.

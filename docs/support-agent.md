@@ -66,7 +66,7 @@ Tried first: checked the manifest, reran once, ran farm doctor --json and read t
 
 ## Where the person submits it
 
-The preferred channel is email. The person sends the draft to `support@titaniumcomputing.com` from the email address on their farm account. The agent drafts the message and the human submits it.
+The preferred channel is email. The person sends the draft to `help@myagents.email` from the email address on their farm account. The agent drafts the message and the human submits it.
 
 For a public bug or documentation problem only, the person may open or reply to one issue at `https://github.com/Titanium-Devops/tiinyapp-farm/issues`. Search existing issues first. Do not put account information or private details in a public issue.
 

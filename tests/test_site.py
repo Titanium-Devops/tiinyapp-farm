@@ -302,13 +302,13 @@ const source = fs.readFileSync('site/assets/session.js', 'utf8').replace('export
         index = (self.output / 'support/llms.txt').read_text()
         procedure = (self.output / 'support/agent.md').read_text()
         for phrase in ('what the farm is', 'Service status', 'Security and privacy',
-                       'Contact channels', 'support@titaniumcomputing.com',
+                       'Contact channels', 'help@myagents.email',
                        'Monday through Friday, 9 AM to 5 PM Central time'):
             self.assertIn(phrase.lower(), index.lower())
         for phrase in ('Diagnose before drafting', 'farm doctor --json',
                        'Drafted with <tool> (AI agent)', 'What to leave out',
                        'The agent drafts and the human submits',
-                       'support@titaniumcomputing.com',
+                       'help@myagents.email',
                        'from the email address on their farm account',
                        'Monday through Friday, 9 AM to 5 PM Central time'):
             self.assertIn(phrase.lower(), procedure.lower())
