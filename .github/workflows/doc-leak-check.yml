@@ -1,0 +1,15 @@
+# Rule 41 / decision 191: fail the build if a published doc leaks a real device
+# identifier (serial, private IP, or home path). Scans docs/site/*.md + README.
+name: doc-leak-check
+on:
+  push:
+  pull_request:
+jobs:
+  doc-leak-check:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove the guard patterns
+        run: python3 scripts/check-doc-leaks.py --selftest
+      - name: Scan published docs for real identifiers
+        run: python3 scripts/check-doc-leaks.py
