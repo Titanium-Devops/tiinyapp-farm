@@ -3,7 +3,7 @@
 Worker report against `docs/AGENT-API-1.md`. Everything measured below was measured on Jason's Mac
 (Darwin 25.6.0, Apple silicon, Python 3.14.6, node 22.23.1), against the live site and against the
 USB-attached Tiiny this Mac already had in `~/.tiinyapps/device.json`. Its key is never printed
-here; it went from `/Users/sem/.tiiny_1_api_key` into `farm device --key-stdin` on standard input
+here; it went from `~/.tiiny-key` into `farm device --key-stdin` on standard input
 and nowhere else.
 
 The branch was rebased onto `origin/main` partway through, because the self-update work landed
@@ -88,8 +88,8 @@ Reads, against the live site and the attached Tiiny:
 
 | Example | Result |
 | --- | --- |
-| `curl .../device.json` on port 39218 | 200, serial `TNYM26072400300011Q`, and the box lists its own cable and network addresses |
-| The discovery script in the guide | Found `jason's Tiiny` at `http://172.17.7.177/v1` over the cable in 1.0 s |
+| `curl .../device.json` on port 39218 | 200, serial `TNYM00000000000000X`, and the box lists its own cable and network addresses |
+| The discovery script in the guide | Found `jason's Tiiny` at `http://192.0.2.1/v1` over the cable in 1.0 s |
 | `curl https://tiinyapp.farm/catalog.json` | 200, `{"cli": "0.1.10", "apps": [7 apps]}` |
 | `curl https://tiinyapp.farm/manifests/tiiny-brain.json` | 200 |
 | The catalog reader in Python | Printed all seven apps |
@@ -121,7 +121,7 @@ A fresh virtual environment, `pip install .` from this branch, and a scratch `HO
 $ python3 -m venv $VENV && $VENV/bin/pip install . && $VENV/bin/farm --version
 farm 0.1.10
 
-$ $VENV/bin/farm device --base http://172.17.7.177/v1 --key-stdin < /Users/sem/.tiiny_1_api_key
+$ $VENV/bin/farm device --base http://192.0.2.1/v1 --key-stdin < ~/.tiiny-key
 Device settings saved.
 No app you have installed uses your Tiiny yet. Run: farm list to see what the catalog has.
 
@@ -171,8 +171,8 @@ $ $VENV/bin/farm doctor --json > doctor.json 2> doctor.txt ; echo $?
 
 $ cat doctor.txt
 farm 0.1.10, running apps with $VENV/bin/python3.14 (Python 3.14.6).
-The Tiiny on file is at http://172.17.7.177/v1.
-Your Tiiny at 172.17.7.177 answered this Python in 13 ms.
+The Tiiny on file is at http://192.0.2.1/v1.
+Your Tiiny at 192.0.2.1 answered this Python in 13 ms.
 The key on file is accepted by your Tiiny.
 Other Pythons here: /usr/bin/python3 reaches it, /opt/homebrew/bin/python3.12 does not and /opt/homebrew/bin/python3.13 does not.
 daybreak declares port 8811, and it is free.
@@ -199,16 +199,16 @@ $ cat doctor.json
     {
       "check": "settings",
       "ok": true,
-      "message": "The Tiiny on file is at http://172.17.7.177/v1.",
+      "message": "The Tiiny on file is at http://192.0.2.1/v1.",
       "fix": null,
-      "base": "http://172.17.7.177/v1"
+      "base": "http://192.0.2.1/v1"
     },
     {
       "check": "device",
       "ok": true,
-      "message": "Your Tiiny at 172.17.7.177 answered this Python in 13 ms.",
+      "message": "Your Tiiny at 192.0.2.1 answered this Python in 13 ms.",
       "fix": null,
-      "address": "172.17.7.177",
+      "address": "192.0.2.1",
       "milliseconds": 13
     },
     {

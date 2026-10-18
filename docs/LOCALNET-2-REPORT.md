@@ -13,18 +13,18 @@ Both runs below are the real command, built as a wheel and installed with `pip i
 into a fresh virtual environment, with `HOME` redirected to a scratch directory so nothing in
 `~/tiinyapps` was touched. The device key went in by shell redirection from the file on this Mac and
 was never printed, by the farm or by anything else. Measured on macOS 26.6.2 arm64 on 2026-09-14,
-against Jason's Tiiny at 172.17.7.177. The paths below are abbreviated to SCRATCH; nothing else is
+against Jason's Tiiny at 192.0.2.1. The paths below are abbreviated to SCRATCH; nothing else is
 edited.
 
 ## Everything working
 
 ```
-# Homebrew Python 3.14.6, a scratch HOME, the live Tiiny at 172.17.7.177
+# Homebrew Python 3.14.6, a scratch HOME, the live Tiiny at 192.0.2.1
 
 $ farm doctor
 farm 0.1.7, running apps with SCRATCH/v3-brew/bin/python3.14 (Python 3.14.6).
-The Tiiny on file is at http://172.17.7.177/v1.
-Your Tiiny at 172.17.7.177 answered this Python in 15 ms.
+The Tiiny on file is at http://192.0.2.1/v1.
+Your Tiiny at 192.0.2.1 answered this Python in 15 ms.
 The key on file is accepted by your Tiiny.
 Other Pythons here: /usr/bin/python3 reaches it, /opt/homebrew/bin/python3.12 does not and /opt/homebrew/bin/python3.13 does not.
 onelane is a library, so it has no port and nothing to start.
@@ -42,7 +42,7 @@ and ainode-pocket, which is why the transcript installs titanium-tiiny-bot, whos
 ```
 # miniconda Python 3.13.2, a scratch HOME, the same Tiiny, minutes later
 
-$ farm device --base http://172.17.7.177/v1 --key-stdin < key-file
+$ farm device --base http://192.0.2.1/v1 --key-stdin < key-file
 Device settings saved.
 No app you have installed uses your Tiiny yet. Run: farm list to see what the catalog has.
 This Python cannot reach your Tiiny, so the farm will run apps with /opt/homebrew/bin/python3 instead.
@@ -50,8 +50,8 @@ exit 0
 
 $ farm doctor    (with the choice the farm just saved put aside, the way a new install starts)
 farm 0.1.7, running apps with SCRATCH/v3-conda/bin/python (Python 3.13.2).
-The Tiiny on file is at http://172.17.7.177/v1.
-This Python cannot reach your Tiiny at 172.17.7.177, because macOS is blocking it from your local network.
+The Tiiny on file is at http://192.0.2.1/v1.
+This Python cannot reach your Tiiny at 192.0.2.1, because macOS is blocking it from your local network.
 Other Pythons here: /opt/homebrew/bin/python3 reaches it, /usr/bin/python3 reaches it, /opt/homebrew/bin/python3.12 does not and /opt/homebrew/bin/python3.13 does not.
 Fix: the farm can run apps with /opt/homebrew/bin/python3, which does reach it. Take it with: farm start <id> --python /opt/homebrew/bin/python3
 No apps are installed yet. Run: farm list to see what the catalog has.
@@ -60,8 +60,8 @@ exit 1
 
 $ farm doctor    (with the Python the farm settled on)
 farm 0.1.7, running apps with /opt/homebrew/bin/python3.
-The Tiiny on file is at http://172.17.7.177/v1.
-Your Tiiny at 172.17.7.177 answered this Python in 60 ms.
+The Tiiny on file is at http://192.0.2.1/v1.
+Your Tiiny at 192.0.2.1 answered this Python in 60 ms.
 The key on file is accepted by your Tiiny.
 Other Pythons here: /usr/bin/python3 reaches it, /opt/homebrew/bin/python3.12 does not and /opt/homebrew/bin/python3.13 does not.
 No apps are installed yet. Run: farm list to see what the catalog has.

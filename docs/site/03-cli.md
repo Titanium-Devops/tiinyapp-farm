@@ -31,8 +31,8 @@ prompts for both values without echoing, and refuses to run if the terminal cann
 One Tiiny found is offered as the default, so pressing enter takes it:
 
 ```
-Found jason's Tiiny (TNYM26072400300011Q) at 172.17.7.177, over the cable, base http://172.17.7.177/v1
-Device base URL [http://172.17.7.177/v1] (hidden):
+Found jason's Tiiny (TNYM00000000000000X) at 192.0.2.1, over the cable, base http://192.0.2.1/v1
+Device base URL [http://192.0.2.1/v1] (hidden):
 Device API key (hidden):
 ```
 
@@ -62,7 +62,7 @@ One line per Tiiny: its name and serial number, the address to use, how it was r
 URL `farm device` would save.
 
 ```
-jason's Tiiny (TNYM26072400300011Q) at 172.17.7.177, over the cable, base http://172.17.7.177/v1
+jason's Tiiny (TNYM00000000000000X) at 192.0.2.1, over the cable, base http://192.0.2.1/v1
 Run farm device to save it. It offers this address and asks for the key.
 ```
 
@@ -96,7 +96,7 @@ A refused Python that another Python could get past says which one found it, and
 saved it and will run apps with it from now on.
 
 ```
-jason's Tiiny (TNYM26072400300011Q) at 172.17.7.177, over the cable, base http://172.17.7.177/v1
+jason's Tiiny (TNYM00000000000000X) at 192.0.2.1, over the cable, base http://192.0.2.1/v1
 /opt/homebrew/bin/python3 found it. The Python the farm was using cannot reach your local network, so the farm will run apps with that one from now on, and has saved it.
 ```
 

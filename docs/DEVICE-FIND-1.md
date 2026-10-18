@@ -26,7 +26,7 @@ share one answer.
    With `--json`: {"command": "device", "found": [{"serial":..., "address":..., "via":..., "base":...,
    "interfaces": [...]}]}. Nothing found: a sentence that says what was tried and the manual form, exit 1.
 3. `farm device` with no arguments runs the finder first: one device found means it offers that base as
-   the default at the hidden prompt ("Device base URL [http://172.17.7.177/v1]:"), several means a
+   the default at the hidden prompt ("Device base URL [http://192.0.2.1/v1]:"), several means a
    numbered pick, none means the prompt as today. `--base` skips the finder. The key is still asked
    hidden or read from --key-stdin; never printed.
 4. `farm doctor` gains a finding: when no device is on file, it runs the finder and says what it saw.
@@ -36,7 +36,7 @@ share one answer.
 
 ## Proof
 
-Measured on this Mac against Jason's real Tiiny on the cable at 172.17.7.177 (do not touch Jason's
+Measured on this Mac against Jason's real Tiiny on the cable at 192.0.2.1 (do not touch Jason's
 ~/.tiinyapps; use a scratch HOME): `farm device --find` prints the device with its serial in under 6 s;
 `--json` validates; with the cable's interface down or absent (simulate by monkeypatching the bind step
 in tests, do not unplug anything) the finder says nothing was found and how to enter it by hand. Tests
@@ -54,7 +54,7 @@ device key is never read by this wave at all; the finder needs no key. Every `gh
 ## Addendum, Jason 2026-09-14 14:41: "remember the python may be different we have to solve that"
 
 macOS grants the Local Network permission per binary. Last night his miniconda Python got
-EHOSTUNREACH to 172.17.7.177 while Homebrew's and /usr/bin/python3 reached the same box in
+EHOSTUNREACH to 192.0.2.1 while Homebrew's and /usr/bin/python3 reached the same box in
 milliseconds. farm 0.1.8 already handles that for apps: choose_python, the saved python setting,
 local_network_hint, and the errno 65/113 probe run in a child interpreter.
 

@@ -41,7 +41,7 @@ Tiiny Bot started with no chat model loaded and answered every message with "Can
 
 ## Proof
 
-Against Jason's Tiiny at 172.17.7.177 from a scratch HOME (the key: pipe /Users/sem/.tiiny_1_api_key into
+Against Jason's Tiiny at 192.0.2.1 from a scratch HOME (the key: pipe ~/.tiiny-key into
 `farm device --key-stdin`, never print it, never argv, never a log). Measured: `farm models` lists what is
 loaded with kinds and units; with a chat model stopped, `farm start titanium-tiiny-bot` refuses and names
 it, `farm start --load` loads it and then starts, `farm status` shows the need met, and after stopping the

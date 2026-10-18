@@ -58,10 +58,10 @@ farm device --find --json
 ```json
 {"command": "device", "ok": true, "blocked": false, "python": "/usr/local/bin/python3",
  "moved": null,
- "found": [{"serial": "TNYM26072400300011Q", "name": "jason's Tiiny", "address": "172.17.7.177",
-            "via": "cable", "base": "http://172.17.7.177/v1",
-            "interfaces": [{"interface": "usb0", "address": "172.17.7.177"},
-                           {"interface": "wlan0", "address": "192.168.100.94"}]}]}
+ "found": [{"serial": "TNYM00000000000000X", "name": "jason's Tiiny", "address": "192.0.2.1",
+            "via": "cable", "base": "http://192.0.2.1/v1",
+            "interfaces": [{"interface": "usb0", "address": "192.0.2.1"},
+                           {"interface": "wlan0", "address": "192.0.2.3"}]}]}
 ```
 
 `via` is `cable`, `network` or `TiinyOS client`, `base` is the URL to hand `farm device --base`, and
@@ -85,7 +85,7 @@ also lists every address that box has, on the cable and on the network, so one a
 rest.
 
 ```
-curl -s --max-time 2 http://172.17.7.177:39218/device.json
+curl -s --max-time 2 http://192.0.2.1:39218/device.json
 ```
 
 Look in this order, and stop at the first answer:
@@ -291,7 +291,7 @@ lost track of.
 input, and never echo it back.
 
 ```
-printf '%s' "$TIINY_KEY" | farm device --base http://172.17.7.177/v1 --key-stdin
+printf '%s' "$TIINY_KEY" | farm device --base http://192.0.2.1/v1 --key-stdin
 ```
 
 ```python
@@ -484,8 +484,8 @@ and answers every line it prints as a finding:
 
 ```json
 {"command": "doctor", "ok": true, "farm": "0.1.10", "findings": [
-  {"check": "device", "ok": true, "message": "Your Tiiny at 172.17.7.177 answered this Python in 4 ms.",
-   "fix": null, "address": "172.17.7.177", "milliseconds": 4},
+  {"check": "device", "ok": true, "message": "Your Tiiny at 192.0.2.1 answered this Python in 4 ms.",
+   "fix": null, "address": "192.0.2.1", "milliseconds": 4},
   {"check": "key", "ok": true, "message": "The key on file is accepted by your Tiiny.", "fix": null},
   {"check": "models", "ok": true, "message": "Your Tiiny lists 4 models: ...", "fix": null,
    "models": ["Qwen/Qwen3-8B", "Qwen/Qwen3-Embedding-0.6B"]}]}

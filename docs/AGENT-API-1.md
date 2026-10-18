@@ -46,7 +46,7 @@ machine-readable CLI output and no single document that describes every route.
   code blocks scrolling inside themselves, every example runnable as written against the live
   site where it reads and against a local server where it writes.
 - A real transcript: `farm doctor --json` and `farm check --json` from a fresh venv on this
-  Mac (the device key is at /Users/sem/.tiiny_1_api_key, pipe it into `farm device
+  Mac (the device key is at ~/.tiiny-key, pipe it into `farm device
   --key-stdin` in a scratch HOME, never print it), pasted in docs/AGENT-API-1-REPORT.md.
 
 ## Rules

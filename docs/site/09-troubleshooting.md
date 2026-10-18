@@ -125,7 +125,7 @@ beginning `Fix:`. It exits 0 when everything passes and 1 when something does no
 thing is plain text, so it pastes into a message to somebody who can help.
 
 The app starts, the page opens, and nothing on it can reach the device. Its log says something like
-`nothing answered http://172.17.7.177:39218/device.json`, and `farm device` saved the right address.
+`nothing answered http://192.0.2.1:39218/device.json`, and `farm device` saved the right address.
 
 On macOS this is almost always Local Network privacy rather than your network. macOS gates the local
 network per binary, and a Python you installed yourself, from conda, pyenv or an installer, is its
@@ -149,7 +149,7 @@ head -1 "$(command -v farm)"
 To see the refusal for yourself, ask that interpreter to fetch the device page:
 
 ```
-/path/to/python -c "import urllib.request; print(urllib.request.urlopen('http://172.17.7.177:39218/device.json', timeout=2).read()[:60])"
+/path/to/python -c "import urllib.request; print(urllib.request.urlopen('http://192.0.2.1:39218/device.json', timeout=2).read()[:60])"
 ```
 
 `URLError [Errno 65] No route to host` is the block. A line of JSON means the network is fine and the

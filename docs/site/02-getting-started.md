@@ -47,7 +47,7 @@ farm device --find
 ```
 
 ```
-jason's Tiiny (TNYM26072400300011Q) at 172.17.7.177, over the cable, base http://172.17.7.177/v1
+jason's Tiiny (TNYM00000000000000X) at 192.0.2.1, over the cable, base http://192.0.2.1/v1
 Run farm device to save it. It offers this address and asks for the key.
 ```
 
@@ -74,8 +74,8 @@ It looks for your Tiiny first and offers what it found, so pressing enter at the
 takes it:
 
 ```
-Found jason's Tiiny (TNYM26072400300011Q) at 172.17.7.177, over the cable, base http://172.17.7.177/v1
-Device base URL [http://172.17.7.177/v1] (hidden):
+Found jason's Tiiny (TNYM00000000000000X) at 192.0.2.1, over the cable, base http://192.0.2.1/v1
+Device base URL [http://192.0.2.1/v1] (hidden):
 Device API key (hidden):
 ```
 

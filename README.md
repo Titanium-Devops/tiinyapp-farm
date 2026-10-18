@@ -80,7 +80,7 @@ address to use, how it was reached and the base URL to save, and exits 1 when no
 
 ```sh
 farm device --find
-jason's Tiiny (TNYM26072400300011Q) at 172.17.7.177, over the cable, base http://172.17.7.177/v1
+jason's Tiiny (TNYM00000000000000X) at 192.0.2.1, over the cable, base http://192.0.2.1/v1
 ```
 
 It looks under the Python the farm runs apps with, because macOS grants the local network per
